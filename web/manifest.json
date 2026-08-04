@@ -1,11 +1,11 @@
 {
-    "name": "fosscanner",
-    "short_name": "fosscanner",
+    "name": "FOSScanner",
+    "short_name": "FOSScanner",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#673AB7",
+    "theme_color": "#673AB7",
+    "description": "A privacy-first, FOSS document scanner.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
