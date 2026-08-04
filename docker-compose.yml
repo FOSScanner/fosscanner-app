@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # Service for running the web preview of the app
+  flutter-web:
+    build: .
+    container_name: fosscanner_web
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+    # Ensure the flutter project structure exists, get dependencies, and run the web server
+    # Uses a real release build (minified, tree-shaken) rather than
+    # `flutter run -d web-server`: the debug dev-server ships an unoptimized,
+    # multi-megabyte JS bundle intended for desktop hot-reload, which can be
+    # slow or fail to render at all on a phone's browser.
+    command: >
+      bash -c "flutter create . --project-name fosscanner &&
+               flutter pub get &&
+               flutter build web &&
+               cd build/web &&
+               python3 -m http.server 8080 --bind 0.0.0.0"
+
+  # Service for building the Android APK
+  build-apk:
+    build: .
+    container_name: fosscanner_apk_builder
+    volumes:
+      - .:/app
+    command: >
+      bash -c "flutter create . --project-name fosscanner &&
+               flutter pub get &&
+               flutter build apk"
