@@ -149,12 +149,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
   }
 
+  bool get _isEditingExistingPage => widget.initialCorners != null;
+
   @override
   Widget build(BuildContext context) {
     final imageSize = _imageSize;
     final corners = _corners;
     return Scaffold(
-      appBar: AppBar(title: const Text('Adjust corners')),
+      appBar: AppBar(title: Text(_isEditingExistingPage ? 'Edit page' : 'Adjust corners')),
       body: imageSize == null || corners == null
           ? Center(
               child: _error != null
@@ -202,7 +204,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: _isProcessing ? null : () => Navigator.of(context).pop(),
-                            child: const Text('Retake'),
+                            child: Text(_isEditingExistingPage ? 'Cancel' : 'Retake'),
                           ),
                         ),
                         const SizedBox(width: 16),
