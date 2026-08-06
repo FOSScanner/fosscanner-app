@@ -33,9 +33,8 @@ List<Offset>? detectCorners(Uint8List imageBytes) {
     final gray = track(cv.cvtColor(small, cv.COLOR_BGR2GRAY));
     final blurred = track(cv.gaussianBlur(gray, (5, 5), 0));
     final edges = track(cv.canny(blurred, 50, 150));
-    final dilated = track(
-      cv.dilate(edges, cv.getStructuringElement(cv.MORPH_RECT, (3, 3))),
-    );
+    final kernel = track(cv.getStructuringElement(cv.MORPH_RECT, (3, 3)));
+    final dilated = track(cv.dilate(edges, kernel));
 
     final (contours, _) = cv.findContours(dilated, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
     try {
@@ -46,9 +45,12 @@ List<Offset>? detectCorners(Uint8List imageBytes) {
       final scaledCorners = quad.map((p) => Offset(p.x * invScale, p.y * invScale)).toList();
       return orderCorners(scaledCorners);
     } finally {
-      for (final c in contours) {
-        c.dispose();
-      }
+      // IMPORTANT: dispose the VecVecPoint container itself, not its
+      // individual contour elements — disposing elements one-by-one causes
+      // a native double-free (confirmed via a standalone `dart run`
+      // repro: crashes with SEGV_MAPERR in __libc_free during later
+      // cleanup, only on non-trivial images). See CLAUDE.md.
+      contours.dispose();
     }
   } finally {
     for (final m in mats) {
@@ -74,7 +76,11 @@ List<cv.Point>? _findDocumentQuad(cv.VecVecPoint contours, int imageArea) {
     final peri = cv.arcLength(c, true);
     for (final frac in [0.01, 0.02, 0.03, 0.04, 0.05, 0.07, 0.1]) {
       final approx = cv.approxPolyDP(c, frac * peri, true);
-      if (approx.length == 4) return approx.toList();
+      // approx (unlike elements of `contours`) is its own real allocation,
+      // not a view — safe and necessary to dispose directly.
+      final points = approx.toList();
+      approx.dispose();
+      if (points.length == 4) return points;
     }
   }
   return null;
@@ -127,17 +133,65 @@ Uint8List warpDocument(Uint8List imageBytes, List<Offset> corners) {
   }
 }
 
-/// Applies [filter] to an already-warped image. `original` is a no-op;
-/// the other modes are wired up in a later phase.
+/// Applies [filter] to an already-warped image. `original` is a no-op.
 Uint8List applyFilter(Uint8List warpedBytes, PageFilter filter) {
-  switch (filter) {
-    case PageFilter.original:
-      return warpedBytes;
-    case PageFilter.autoEnhance:
-    case PageFilter.grayscale:
-    case PageFilter.blackAndWhite:
-      // TODO(phase-2): CLAHE auto-enhance, grayscale cvtColor, and
-      // grayscale+adaptiveThreshold black-and-white.
-      return warpedBytes;
+  if (filter == PageFilter.original) return warpedBytes;
+
+  final mats = <cv.Mat>[];
+  cv.Mat track(cv.Mat m) {
+    mats.add(m);
+    return m;
   }
+
+  try {
+    final src = track(cv.imdecode(warpedBytes, cv.IMREAD_COLOR));
+    final result = switch (filter) {
+      PageFilter.original => src,
+      PageFilter.grayscale => track(cv.cvtColor(src, cv.COLOR_BGR2GRAY)),
+      PageFilter.blackAndWhite => track(_blackAndWhite(src, track)),
+      PageFilter.autoEnhance => track(_autoEnhance(src, track)),
+    };
+
+    final (success, encoded) = cv.imencode('.jpg', result);
+    if (!success) {
+      throw StateError('Failed to encode filtered document image');
+    }
+    return encoded;
+  } finally {
+    for (final m in mats) {
+      m.dispose();
+    }
+  }
+}
+
+/// Classic "scanned page" look: grayscale + adaptive threshold, so text
+/// comes out crisp black-on-white regardless of uneven lighting in the
+/// original photo. Block size scales with image size (must stay odd).
+cv.Mat _blackAndWhite(cv.Mat src, cv.Mat Function(cv.Mat) track) {
+  final gray = track(cv.cvtColor(src, cv.COLOR_BGR2GRAY));
+  final blockSize = ((src.cols / 20).round() | 1).clamp(3, 9999);
+  return cv.adaptiveThreshold(
+    gray,
+    255,
+    cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+    cv.THRESH_BINARY,
+    blockSize,
+    10,
+  );
+}
+
+/// "Magic color"-style enhance: CLAHE (local contrast boost) on the L
+/// channel of Lab color space, leaving color (a/b channels) untouched so
+/// this doesn't shift color balance, just makes text/background pop more.
+cv.Mat _autoEnhance(cv.Mat src, cv.Mat Function(cv.Mat) track) {
+  final lab = track(cv.cvtColor(src, cv.COLOR_BGR2Lab));
+  final channels = cv.split(lab);
+  for (final c in channels) {
+    track(c);
+  }
+  final clahe = cv.createCLAHE(clipLimit: 2.0, tileGridSize: (8, 8));
+  final enhancedL = track(clahe.apply(channels[0]));
+  clahe.dispose();
+  final merged = track(cv.merge(cv.VecMat.fromList([enhancedL, channels[1], channels[2]])));
+  return cv.cvtColor(merged, cv.COLOR_Lab2BGR);
 }

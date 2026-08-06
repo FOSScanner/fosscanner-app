@@ -15,12 +15,18 @@ class CornerOverlay extends StatefulWidget {
     required this.imageSize,
     required this.corners,
     required this.onChanged,
+    this.onChangeEnd,
   });
 
   final Uint8List imageBytes;
   final Size imageSize;
   final List<Offset> corners;
   final ValueChanged<List<Offset>> onChanged;
+
+  /// Fired once when a drag ends, unlike [onChanged] which fires on every
+  /// pointer move. Use this for anything too expensive to redo every
+  /// frame (e.g. regenerating filter previews).
+  final ValueChanged<List<Offset>>? onChangeEnd;
 
   @override
   State<CornerOverlay> createState() => _CornerOverlayState();
@@ -87,7 +93,10 @@ class _CornerOverlayState extends State<CornerOverlay> {
           updated[index] = _clampToImage(updated[index] + imageDelta);
           widget.onChanged(updated);
         },
-        onPanEnd: (_) => setState(() => _draggingIndex = null),
+        onPanEnd: (_) {
+          setState(() => _draggingIndex = null);
+          widget.onChangeEnd?.call(widget.corners);
+        },
         child: DecoratedBox(
           decoration: BoxDecoration(
             shape: BoxShape.circle,

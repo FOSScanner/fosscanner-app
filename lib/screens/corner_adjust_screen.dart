@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -7,11 +8,19 @@ import '../models/scanned_page.dart';
 import '../services/document_processor.dart';
 import '../widgets/corner_overlay.dart';
 
+const _filterLabels = {
+  PageFilter.original: 'Original',
+  PageFilter.autoEnhance: 'Enhance',
+  PageFilter.grayscale: 'Gray',
+  PageFilter.blackAndWhite: 'B&W',
+};
+
 /// Post-capture review: shows the photo with a draggable corner overlay
-/// (pre-filled from auto-detection when possible), and turns it into a
-/// [ScannedPage] on confirm. Also used for Phase 3 re-editing, in which
-/// case [initialCorners] is the page's previously saved corners rather
-/// than a fresh detection.
+/// (pre-filled from auto-detection when possible), lets the user pick a
+/// filter with live thumbnail previews, and turns it into a [ScannedPage]
+/// on confirm. Also used for Phase 3 re-editing, in which case
+/// [initialCorners] is the page's previously saved corners rather than a
+/// fresh detection.
 class CornerAdjustScreen extends StatefulWidget {
   const CornerAdjustScreen({
     super.key,
@@ -33,6 +42,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   List<Offset>? _corners;
   bool _isProcessing = false;
   String? _error;
+
+  late PageFilter _selectedFilter = widget.initialFilter;
+  // Cache of the current corners' warp + per-filter previews, so dragging
+  // doesn't redo expensive OpenCV work every frame (only on drag-end), and
+  // so Confirm can reuse this instead of recomputing from scratch.
+  Uint8List? _warpedForPreview;
+  Map<PageFilter, Uint8List>? _filterPreviews;
+  bool _isGeneratingPreviews = false;
 
   @override
   void initState() {
@@ -57,6 +74,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _imageSize = size;
         _corners = corners;
       });
+      unawaited(_updatePreviews());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -77,6 +95,29 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     ];
   }
 
+  Future<void> _updatePreviews() async {
+    final corners = _corners;
+    if (corners == null) return;
+    setState(() => _isGeneratingPreviews = true);
+    try {
+      final warped = warpDocument(widget.originalBytes, corners);
+      final previews = <PageFilter, Uint8List>{
+        for (final f in PageFilter.values) f: applyFilter(warped, f),
+      };
+      if (!mounted) return;
+      setState(() {
+        _warpedForPreview = warped;
+        _filterPreviews = previews;
+        _isGeneratingPreviews = false;
+      });
+    } catch (_) {
+      // Previews are a nice-to-have; if generation fails, Confirm still
+      // falls back to computing fresh from the current corners.
+      if (!mounted) return;
+      setState(() => _isGeneratingPreviews = false);
+    }
+  }
+
   Future<void> _confirm() async {
     final corners = _corners;
     if (corners == null || _isProcessing) return;
@@ -85,14 +126,17 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _error = null;
     });
     try {
-      final warped = warpDocument(widget.originalBytes, corners);
-      final processed = applyFilter(warped, widget.initialFilter);
+      Uint8List? processed = _filterPreviews?[_selectedFilter];
+      if (processed == null) {
+        final warped = _warpedForPreview ?? warpDocument(widget.originalBytes, corners);
+        processed = applyFilter(warped, _selectedFilter);
+      }
       if (!mounted) return;
       Navigator.of(context).pop(
         ScannedPage(
           originalBytes: widget.originalBytes,
           corners: corners,
-          filter: widget.initialFilter,
+          filter: _selectedFilter,
           processedBytes: processed,
         ),
       );
@@ -135,7 +179,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                       imageSize: imageSize,
                       corners: corners,
                       onChanged: (c) => setState(() => _corners = c),
+                      onChangeEnd: (_) => _updatePreviews(),
                     ),
+                  ),
+                ),
+                SizedBox(
+                  height: 92,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: [
+                      for (final filter in PageFilter.values) _filterChip(context, filter),
+                    ],
                   ),
                 ),
                 SafeArea(
@@ -169,6 +224,54 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _filterChip(BuildContext context, PageFilter filter) {
+    final selected = _selectedFilter == filter;
+    final previewBytes = _filterPreviews?[filter];
+    final primary = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: GestureDetector(
+        onTap: () => setState(() => _selectedFilter = filter),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: selected ? primary : Colors.transparent, width: 2),
+              ),
+              child: previewBytes != null
+                  ? Image.memory(previewBytes, fit: BoxFit.cover)
+                  : ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      child: _isGeneratingPreviews
+                          ? const Center(
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          : null,
+                    ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _filterLabels[filter]!,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: selected ? primary : null,
+                    fontWeight: selected ? FontWeight.bold : null,
+                  ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
