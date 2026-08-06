@@ -15,12 +15,18 @@ const _filterLabels = {
   PageFilter.blackAndWhite: 'B&W',
 };
 
-/// Post-capture review: shows the photo with a draggable corner overlay
-/// (pre-filled from auto-detection when possible), lets the user pick a
-/// filter with live thumbnail previews, and turns it into a [ScannedPage]
-/// on confirm. Also used for Phase 3 re-editing, in which case
-/// [initialCorners] is the page's previously saved corners rather than a
-/// fresh detection.
+enum _Step { corners, filter }
+
+/// Post-capture review, in two steps:
+///
+/// 1. Adjust corners on the raw photo (pre-filled from auto-detection when
+///    possible).
+/// 2. A full-size preview of the perspective-corrected page with the
+///    selected filter actually applied — not just a small chip thumbnail —
+///    so the user sees what they're about to save before confirming.
+///
+/// Also used for Phase 3 re-editing, in which case [initialCorners] is the
+/// page's previously saved corners rather than a fresh detection.
 class CornerAdjustScreen extends StatefulWidget {
   const CornerAdjustScreen({
     super.key,
@@ -43,10 +49,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   bool _isProcessing = false;
   String? _error;
 
+  _Step _step = _Step.corners;
   late PageFilter _selectedFilter = widget.initialFilter;
   // Cache of the current corners' warp + per-filter previews, so dragging
   // doesn't redo expensive OpenCV work every frame (only on drag-end), and
-  // so Confirm can reuse this instead of recomputing from scratch.
+  // so the filter step / Confirm can reuse this instead of recomputing.
   Uint8List? _warpedForPreview;
   Map<PageFilter, Uint8List>? _filterPreviews;
   bool _isGeneratingPreviews = false;
@@ -118,6 +125,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
   }
 
+  Future<void> _goToFilterStep() async {
+    if (_filterPreviews == null) {
+      await _updatePreviews();
+      if (!mounted) return;
+    }
+    setState(() => _step = _Step.filter);
+  }
+
   Future<void> _confirm() async {
     final corners = _corners;
     if (corners == null || _isProcessing) return;
@@ -155,79 +170,145 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Widget build(BuildContext context) {
     final imageSize = _imageSize;
     final corners = _corners;
+    final ready = imageSize != null && corners != null;
+
     return Scaffold(
-      appBar: AppBar(title: Text(_isEditingExistingPage ? 'Edit page' : 'Adjust corners')),
-      body: imageSize == null || corners == null
+      appBar: AppBar(title: Text(_appBarTitle)),
+      body: !ready
           ? Center(
               child: _error != null
                   ? _InitErrorView(message: _error!)
                   : const CircularProgressIndicator(),
             )
-          : Column(
+          : _step == _Step.corners
+              ? _buildCornersStep(context, imageSize, corners)
+              : _buildFilterStep(context),
+    );
+  }
+
+  String get _appBarTitle {
+    if (_step == _Step.filter) return 'Preview';
+    return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
+  }
+
+  Widget _buildCornersStep(BuildContext context, Size imageSize, List<Offset> corners) {
+    return Column(
+      children: [
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: CornerOverlay(
+              imageBytes: widget.originalBytes,
+              imageSize: imageSize,
+              corners: corners,
+              onChanged: (c) {
+                setState(() => _corners = c);
+                _updatePreviews();
+              },
+            ),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
               children: [
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(color: Theme.of(context).colorScheme.error),
-                    ),
-                  ),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: CornerOverlay(
-                      imageBytes: widget.originalBytes,
-                      imageSize: imageSize,
-                      corners: corners,
-                      onChanged: (c) {
-                        setState(() => _corners = c);
-                        _updatePreviews();
-                      },
-                    ),
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(_isEditingExistingPage ? 'Cancel' : 'Retake'),
                   ),
                 ),
-                SizedBox(
-                  height: 92,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: [
-                      for (final filter in PageFilter.values) _filterChip(context, filter),
-                    ],
-                  ),
-                ),
-                SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _isProcessing ? null : () => Navigator.of(context).pop(),
-                            child: Text(_isEditingExistingPage ? 'Cancel' : 'Retake'),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: _isProcessing ? null : _confirm,
-                            child: _isProcessing
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Text('Confirm'),
-                          ),
-                        ),
-                      ],
-                    ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _isGeneratingPreviews ? null : _goToFilterStep,
+                    child: _isGeneratingPreviews
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Next'),
                   ),
                 ),
               ],
             ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFilterStep(BuildContext context) {
+    final previewBytes = _filterPreviews?[_selectedFilter];
+    return Column(
+      children: [
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: previewBytes != null
+                ? Image.memory(previewBytes, fit: BoxFit.contain)
+                : const Center(child: CircularProgressIndicator()),
+          ),
+        ),
+        SizedBox(
+          height: 92,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            children: [
+              for (final filter in PageFilter.values) _filterChip(context, filter),
+            ],
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _isProcessing ? null : () => setState(() => _step = _Step.corners),
+                    child: const Text('Back'),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _isProcessing ? null : _confirm,
+                    child: _isProcessing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Confirm'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
