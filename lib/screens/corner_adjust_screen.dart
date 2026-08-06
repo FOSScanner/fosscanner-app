@@ -180,8 +180,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                       imageBytes: widget.originalBytes,
                       imageSize: imageSize,
                       corners: corners,
-                      onChanged: (c) => setState(() => _corners = c),
-                      onChangeEnd: (_) => _updatePreviews(),
+                      onChanged: (c) {
+                        setState(() => _corners = c);
+                        _updatePreviews();
+                      },
                     ),
                   ),
                 ),
