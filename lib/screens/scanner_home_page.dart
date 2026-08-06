@@ -17,6 +17,12 @@ class ScannerHomePage extends StatefulWidget {
   State<ScannerHomePage> createState() => _ScannerHomePageState();
 }
 
+// Assumed resolution (dots per inch) of a warped page's pixel dimensions,
+// used only to turn pixels into a printable-sized PDF page. It doesn't
+// need to be exact — it just keeps pages roughly letter/A4-scale instead
+// of pixel-count-as-points producing an absurdly large physical page.
+const _scanDpi = 150.0;
+
 class _ScannerHomePageState extends State<ScannerHomePage> {
   final List<ScannedPage> _pages = [];
   final ImagePicker _picker = ImagePicker();
@@ -101,14 +107,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
       for (final page in _pages) {
         final image = pw.MemoryImage(page.processedBytes);
+        // Size the page to the image's own aspect ratio (at an assumed
+        // scan resolution, so the physical page size stays reasonable)
+        // instead of a fixed PdfPageFormat.a4 — that letterboxed the
+        // image inside A4's fixed proportions (plus a built-in ~2cm
+        // margin on top), which is exactly the "extra white border
+        // around the selected document" users were seeing.
+        final pageFormat = PdfPageFormat(
+          image.width! / _scanDpi * PdfPageFormat.inch,
+          image.height! / _scanDpi * PdfPageFormat.inch,
+        );
         pdf.addPage(
           pw.Page(
-            pageFormat: PdfPageFormat.a4,
-            build: (pw.Context context) {
-              return pw.Center(
-                child: pw.Image(image, fit: pw.BoxFit.contain),
-              );
-            },
+            pageFormat: pageFormat,
+            margin: pw.EdgeInsets.zero,
+            build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
           ),
         );
       }
