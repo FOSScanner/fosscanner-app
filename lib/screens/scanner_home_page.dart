@@ -62,6 +62,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  Future<void> _editPage(int index) async {
+    // No detect/adjust flow on web (see _captureImage) — nothing to edit.
+    if (kIsWeb) return;
+
+    final page = _pages[index];
+    final result = await Navigator.of(context).push<ScannedPage>(
+      MaterialPageRoute(
+        builder: (_) => CornerAdjustScreen(
+          originalBytes: page.originalBytes,
+          initialCorners: page.corners,
+          initialFilter: page.filter,
+        ),
+      ),
+    );
+    if (result != null) {
+      setState(() => _pages[index] = result);
+    }
+  }
+
   void _removePage(int index) {
     setState(() => _pages.removeAt(index));
   }
@@ -174,40 +193,43 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 final page = _pages[index];
                 return Card(
                   clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.memory(
-                        page.processedBytes,
-                        fit: BoxFit.cover,
-                      ),
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          child: Text(
-                            '${index + 1}',
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                  child: InkWell(
+                    onTap: () => _editPage(index),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(
+                          page.processedBytes,
+                          fit: BoxFit.cover,
+                        ),
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          child: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            child: Text(
+                              '${index + 1}',
+                              style: const TextStyle(fontSize: 12, color: Colors.white),
+                            ),
                           ),
                         ),
-                      ),
-                      Positioned(
-                        bottom: 8,
-                        right: 8,
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            color: Colors.black54,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.white),
-                            onPressed: () => _removePage(index),
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.white),
+                              onPressed: () => _removePage(index),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 );
               },
