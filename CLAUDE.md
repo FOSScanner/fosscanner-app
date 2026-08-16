@@ -78,9 +78,19 @@ Release builds are signed with a real upload key, not the debug keystore: `andro
 
 **Losing `upload-keystore.jks` (or its password) means no future release can ever be recognized as an update to this app again** — back it up outside the repo (password manager, not version control) the moment it's generated.
 
+**The org's default `GITHUB_TOKEN` is read-only for this repo**, with no repo-level override available (Settings → Actions → General → Workflow permissions is locked to "Read repository contents and packages permissions" at the org level — the "Read and write" radio is disabled, not just unchecked). A job-level `permissions: contents: write` isn't sufficient by itself for that reason. Both `release.yml` and `release-please.yml` instead use a `RELEASE_TOKEN` secret — a fine-grained PAT scoped to just this repo with Contents: Read and write — passed explicitly as the token those actions use. If this PAT expires or gets rotated, both workflows break with a 403 on the release-creation step, not the build step; that's the tell if release builds start failing right at the last step again.
+
+### Automated versioning (Release Please)
+
+`release-please.yml` runs on every push to `main` and keeps an up-to-date "chore: release X.Y.Z" PR open, computing the next version and `CHANGELOG.md` entry from [Conventional Commits](https://www.conventionalcommits.org/) messages since the last release (see `CONTRIBUTING.md`). Nothing ships automatically from a normal merge — merging *that specific PR* is what creates the `vX.Y.Z` tag and GitHub Release (with changelog-based notes). The tag push then triggers `release.yml` as before, which builds the signed split-APKs and attaches them to the release release-please already created — `release.yml` deliberately doesn't set `generate_release_notes` anymore, to avoid clobbering release-please's notes with GitHub's raw auto-generated ones.
+
+Configured via `release-please-config.json` (`release-type: dart`, so it understands and bumps `pubspec.yaml`'s `version:` field) and `.release-please-manifest.json` (tracks the current version, seeded at `1.1.0`). Not yet verified: whether release-please's version bump preserves the `+buildNumber` suffix Flutter uses for `versionCode` the way `pubspec.yaml` needs — check that a bare `flutter build apk` still resolves a sane `versionCode` after the first automated bump, and fix the `packages` config if not.
+
 ### F-Droid readiness
 
 The app is GPL-3.0 (F-Droid requires an OSI-approved license) and makes no network calls (see "Privacy behavior" above), which fits F-Droid's inclusion criteria well. The real blocker: F-Droid's reproducible-build servers build from source with network access disabled, and `dartcv4` (the native backend behind `opencv_dart`) fetches OpenCV's source into `_deps/opencv-src` via CMake `FetchContent` **during** the build — confirmed directly in a build log (`cmake ... -S .../dartcv4-2.2.2/src ...` followed by compiler invocations under `.../build/*/​_deps/opencv-src/modules/imgproc/src/...`). An F-Droid submission would need this solved first — e.g. vendoring/pre-fetching the OpenCV source as an F-Droid "srclib" — before writing the actual `fdroiddata` metadata recipe (which lives in F-Droid's own repo, not this one, and isn't written yet).
+
+Non-technical prep is done, independent of that blocker: `fastlane/metadata/android/en-US/` has the store listing (title, short/full description, 512×512 icon) in the standard fastlane layout F-Droid (and Play Store tooling) both read. This doesn't unblock a submission — it just means the listing content is ready whenever the network-fetch problem above gets solved.
 
 ### Testing gotcha: `ui.instantiateImageCodec` hangs under `flutter test`
 
