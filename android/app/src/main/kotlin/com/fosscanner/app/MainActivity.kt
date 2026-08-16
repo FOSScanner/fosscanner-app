@@ -1,4 +1,4 @@
-package com.example.fosscanner
+package com.fosscanner.app
 
 import io.flutter.embedding.android.FlutterActivity
 
