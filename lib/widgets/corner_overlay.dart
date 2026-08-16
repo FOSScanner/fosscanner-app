@@ -8,6 +8,12 @@ import 'package:flutter/material.dart';
 /// handles the display-space <-> image-space mapping internally, so the
 /// caller never has to think about how the image happens to be scaled on
 /// screen.
+///
+/// Live visual feedback while dragging is handled entirely inside this
+/// widget via local state — [onChanged] fires once, when a drag ends, not
+/// on every pointer move. Firing it every frame used to make the caller
+/// (a full screen, including the image and filter previews) rebuild 60+
+/// times per second during a drag, which is what caused visible stutter.
 class CornerOverlay extends StatefulWidget {
   const CornerOverlay({
     super.key,
@@ -27,7 +33,20 @@ class CornerOverlay extends StatefulWidget {
 }
 
 class _CornerOverlayState extends State<CornerOverlay> {
+  late List<Offset> _liveCorners = widget.corners;
   int? _draggingIndex;
+
+  @override
+  void didUpdateWidget(CornerOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only resync from the parent when it hands us a genuinely different
+    // list (e.g. detection just finished) — not after our own onChanged
+    // round-trips the same list back to us, which would be a no-op but is
+    // worth avoiding for clarity.
+    if (!identical(widget.corners, oldWidget.corners)) {
+      _liveCorners = widget.corners;
+    }
+  }
 
   Offset _clampToImage(Offset p) {
     return Offset(
@@ -38,7 +57,7 @@ class _CornerOverlayState extends State<CornerOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    assert(widget.corners.length == 4);
+    assert(_liveCorners.length == 4);
     return LayoutBuilder(
       builder: (context, constraints) {
         final fitted = applyBoxFit(BoxFit.contain, widget.imageSize, constraints.biggest);
@@ -49,7 +68,7 @@ class _CornerOverlayState extends State<CornerOverlay> {
 
         Offset toDisplay(Offset p) => Offset(p.dx * scale + offsetX, p.dy * scale + offsetY);
 
-        final displayCorners = widget.corners.map(toDisplay).toList();
+        final displayCorners = _liveCorners.map(toDisplay).toList();
 
         return Stack(
           children: [
@@ -58,7 +77,11 @@ class _CornerOverlayState extends State<CornerOverlay> {
               top: offsetY,
               width: displaySize.width,
               height: displaySize.height,
-              child: Image.memory(widget.imageBytes, fit: BoxFit.fill),
+              // Isolates the (potentially large) photo's paint layer from
+              // the quad/handles repainting every drag frame.
+              child: RepaintBoundary(
+                child: Image.memory(widget.imageBytes, fit: BoxFit.fill),
+              ),
             ),
             Positioned.fill(
               child: CustomPaint(painter: _QuadPainter(displayCorners, context)),
@@ -83,11 +106,15 @@ class _CornerOverlayState extends State<CornerOverlay> {
         onPanStart: (_) => setState(() => _draggingIndex = index),
         onPanUpdate: (details) {
           final imageDelta = Offset(details.delta.dx / scale, details.delta.dy / scale);
-          final updated = [...widget.corners];
-          updated[index] = _clampToImage(updated[index] + imageDelta);
-          widget.onChanged(updated);
+          setState(() {
+            _liveCorners = [..._liveCorners];
+            _liveCorners[index] = _clampToImage(_liveCorners[index] + imageDelta);
+          });
         },
-        onPanEnd: (_) => setState(() => _draggingIndex = null),
+        onPanEnd: (_) {
+          setState(() => _draggingIndex = null);
+          widget.onChanged(_liveCorners);
+        },
         child: DecoratedBox(
           decoration: BoxDecoration(
             shape: BoxShape.circle,

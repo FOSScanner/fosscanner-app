@@ -17,6 +17,12 @@ class ScannerHomePage extends StatefulWidget {
   State<ScannerHomePage> createState() => _ScannerHomePageState();
 }
 
+// Assumed resolution (dots per inch) of a warped page's pixel dimensions,
+// used only to turn pixels into a printable-sized PDF page. It doesn't
+// need to be exact — it just keeps pages roughly letter/A4-scale instead
+// of pixel-count-as-points producing an absurdly large physical page.
+const _scanDpi = 150.0;
+
 class _ScannerHomePageState extends State<ScannerHomePage> {
   final List<ScannedPage> _pages = [];
   final ImagePicker _picker = ImagePicker();
@@ -62,6 +68,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  Future<void> _editPage(int index) async {
+    // No detect/adjust flow on web (see _captureImage) — nothing to edit.
+    if (kIsWeb) return;
+
+    final page = _pages[index];
+    final result = await Navigator.of(context).push<ScannedPage>(
+      MaterialPageRoute(
+        builder: (_) => CornerAdjustScreen(
+          originalBytes: page.originalBytes,
+          initialCorners: page.corners,
+          initialFilter: page.filter,
+        ),
+      ),
+    );
+    if (result != null) {
+      setState(() => _pages[index] = result);
+    }
+  }
+
   void _removePage(int index) {
     setState(() => _pages.removeAt(index));
   }
@@ -82,14 +107,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
       for (final page in _pages) {
         final image = pw.MemoryImage(page.processedBytes);
+        // Size the page to the image's own aspect ratio (at an assumed
+        // scan resolution, so the physical page size stays reasonable)
+        // instead of a fixed PdfPageFormat.a4 — that letterboxed the
+        // image inside A4's fixed proportions (plus a built-in ~2cm
+        // margin on top), which is exactly the "extra white border
+        // around the selected document" users were seeing.
+        final pageFormat = PdfPageFormat(
+          image.width! / _scanDpi * PdfPageFormat.inch,
+          image.height! / _scanDpi * PdfPageFormat.inch,
+        );
         pdf.addPage(
           pw.Page(
-            pageFormat: PdfPageFormat.a4,
-            build: (pw.Context context) {
-              return pw.Center(
-                child: pw.Image(image, fit: pw.BoxFit.contain),
-              );
-            },
+            pageFormat: pageFormat,
+            margin: pw.EdgeInsets.zero,
+            build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
           ),
         );
       }
@@ -174,40 +206,43 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 final page = _pages[index];
                 return Card(
                   clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.memory(
-                        page.processedBytes,
-                        fit: BoxFit.cover,
-                      ),
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          child: Text(
-                            '${index + 1}',
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                  child: InkWell(
+                    onTap: () => _editPage(index),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(
+                          page.processedBytes,
+                          fit: BoxFit.cover,
+                        ),
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          child: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            child: Text(
+                              '${index + 1}',
+                              style: const TextStyle(fontSize: 12, color: Colors.white),
+                            ),
                           ),
                         ),
-                      ),
-                      Positioned(
-                        bottom: 8,
-                        right: 8,
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            color: Colors.black54,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.white),
-                            onPressed: () => _removePage(index),
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.white),
+                              onPressed: () => _removePage(index),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 );
               },
