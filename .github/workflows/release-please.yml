@@ -17,7 +17,7 @@ jobs:
       # Default GITHUB_TOKEN is read-only for this repo/org with no
       # repo-level override (see release.yml) and release-please needs to
       # open PRs and push tags, so it needs the same RELEASE_TOKEN PAT.
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
           config-file: release-please-config.json
