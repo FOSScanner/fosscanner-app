@@ -38,7 +38,11 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/flutter-apk/app-*-release.apk
-          generate_release_notes: true
+          # No generate_release_notes here: release-please (release-please.yml)
+          # already created this release with changelog-based notes when it
+          # tagged; this step just attaches the built APKs to it. Setting
+          # generate_release_notes would overwrite those curated notes with
+          # GitHub's raw auto-generated ones.
         env:
           # The org enforces read-only default GITHUB_TOKEN permissions
           # (Settings > Actions > General > Workflow permissions is locked
