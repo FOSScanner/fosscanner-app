@@ -27,6 +27,8 @@ This is a standard Flutter app (Dart SDK `>=3.0.0 <4.0.0`). Run these from the r
 
 Both mount the repo into `/app` and re-run `flutter create .` on startup to regenerate platform scaffolding before building.
 
+**Quirk:** since `applicationId` (`com.fosscanner.app`) and the `--project-name`/org combo `flutter create .` infers from it don't share a last path segment, this regen step also drops a stray, unused `android/app/src/main/kotlin/com/fosscanner/fosscanner/MainActivity.kt` (package `com.fosscanner.fosscanner`) alongside the real one every time the container runs. Harmless — `AndroidManifest.xml`'s `.MainActivity` resolves against `namespace`, so the real `com.fosscanner.app.MainActivity` is what actually gets used — but it's untracked clutter, root-owned (needs `docker compose run --rm --entrypoint bash build-apk -c "rm -rf ..."` to remove, not a plain host `rm`), and safe to delete or ignore.
+
 **Gotcha:** each `docker compose run` starts a fresh container with an empty `/root/.pub-cache` (only `/app` is bind-mounted) — always chain `flutter pub get &&` in front of any one-off command run this way, or every package import will fail with "No such file or directory".
 
 ## Architecture
@@ -62,7 +64,23 @@ Captured photos and the generated PDF are never persisted by the app: the `image
 
 ### Known tradeoff: APK size
 
-Adding `opencv_dart` grew the release APK from ~49.5MB to ~83.2MB (bundled native OpenCV libs across ABIs). Known mitigations not yet applied: `flutter build apk --split-per-abi`, trimming to only the OpenCV modules actually used (currently `imgcodecs`+`imgproc`).
+Adding `opencv_dart` grew the release APK from ~49.5MB to ~83.2MB (bundled native OpenCV libs across ABIs). Two mitigations: OpenCV is already trimmed to only the modules actually used (`imgcodecs`+`imgproc`; all others compiled `OFF`, verified via the `dartcv4` CMake config in the build log). The `build-apk` Docker service also passes `--split-per-abi`, which produces one APK per ABI instead of a universal one — `app-arm64-v8a-release.apk` (the one real phones need) comes out at ~27.6MB, `armeabi-v7a` ~21.2MB, `x86_64` ~32.2MB, vs. 83.2MB universal. A plain `flutter build apk` (no flag) still produces the old universal APK; use the Docker `build-apk` service, or add `--split-per-abi` manually, to get the smaller per-ABI ones.
+
+### Release signing & distribution
+
+`applicationId`/`namespace` is `com.fosscanner.app` (`android/app/build.gradle.kts`); the Kotlin source lives at `android/app/src/main/kotlin/com/fosscanner/app/MainActivity.kt` to match. `ios/`, `macos/`, and `linux/` still carry the old `com.example.fosscanner` placeholder — left alone deliberately, since none of them are built by this project's CI or Docker setup (Android + web are the only real targets; see above).
+
+Release builds are signed with a real upload key, not the debug keystore: `android/app/build.gradle.kts` reads `android/key.properties` (gitignored; copy `android/key.properties.example` and fill it in) if present, and only falls back to debug signing when that file is absent — so `flutter run --release` and the `ci.yml` analyze/test job still work with no secrets available. The GitHub Actions `release.yml` workflow reconstitutes the keystore at build time from repo secrets rather than committing it:
+
+- `ANDROID_KEYSTORE_BASE64` — the `.jks` file, base64-encoded (`base64 -w0 android/app/upload-keystore.jks`)
+- `ANDROID_KEYSTORE_PASSWORD` — used for both `storePassword` and `keyPassword`, since PKCS12 keystores (keytool's default since JDK 8u...) don't support separate ones — `keytool` silently ignores a distinct `-keypass` and warns about it
+- Key alias is hardcoded as `upload` in both `key.properties` and the workflow (not a secret, just a fixed convention)
+
+**Losing `upload-keystore.jks` (or its password) means no future release can ever be recognized as an update to this app again** — back it up outside the repo (password manager, not version control) the moment it's generated.
+
+### F-Droid readiness
+
+The app is GPL-3.0 (F-Droid requires an OSI-approved license) and makes no network calls (see "Privacy behavior" above), which fits F-Droid's inclusion criteria well. The real blocker: F-Droid's reproducible-build servers build from source with network access disabled, and `dartcv4` (the native backend behind `opencv_dart`) fetches OpenCV's source into `_deps/opencv-src` via CMake `FetchContent` **during** the build — confirmed directly in a build log (`cmake ... -S .../dartcv4-2.2.2/src ...` followed by compiler invocations under `.../build/*/​_deps/opencv-src/modules/imgproc/src/...`). An F-Droid submission would need this solved first — e.g. vendoring/pre-fetching the OpenCV source as an F-Droid "srclib" — before writing the actual `fdroiddata` metadata recipe (which lives in F-Droid's own repo, not this one, and isn't written yet).
 
 ### Testing gotcha: `ui.instantiateImageCodec` hangs under `flutter test`
 

@@ -30,4 +30,4 @@ services:
     command: >
       bash -c "flutter create . --project-name fosscanner &&
                flutter pub get &&
-               flutter build apk"
+               flutter build apk --split-per-abi"
