@@ -1,0 +1,46 @@
+name: Bug report
+description: Something isn't working right
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: >-
+        Scanning (edge detection/filters) is native-only — web falls back
+        to the raw photo. This matters a lot for triage.
+      options:
+        - Android
+        - Web
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: input
+    id: flutter-version
+    attributes:
+      label: Flutter version
+      description: Output of `flutter --version`
+      placeholder: "e.g. Flutter 3.x.x"
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: >-
+        If the app crashed, `flutter logs` or `adb logcat` output is very
+        helpful — especially anything ending in a native SEGV, which is a
+        known class of bug in the OpenCV pipeline (see the architecture notes).
+      render: shell
+    validations:
+      required: false
