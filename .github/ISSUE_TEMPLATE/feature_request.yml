@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an idea for FOSScanner
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What are you trying to do that the app doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      description: >-
+        FOSScanner makes no network calls of its own and never persists
+        scans/PDFs beyond the current session (see the README). Please
+        confirm your suggestion doesn't require breaking that.
+      options:
+        - label: This doesn't require adding network calls or persistent storage of scanned content
+          required: true

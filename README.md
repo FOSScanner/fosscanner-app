@@ -93,9 +93,11 @@ docker compose run --rm build-apk
 
 ## Contributing
 
-Issues and pull requests are welcome. `the architecture notes` documents the codebase's
-architecture, known gotchas, and the reasoning behind a few non-obvious
-decisions — worth a skim before diving into the code.
+Issues and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow and commit message
+conventions. `the architecture notes` documents the codebase's architecture, known
+gotchas, and the reasoning behind a few non-obvious decisions — worth a
+skim before diving into the code.
 
 ## License
 
