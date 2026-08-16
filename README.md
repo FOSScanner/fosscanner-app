@@ -19,6 +19,15 @@ Grab `app-arm64-v8a-release.apk` from the release's assets — that's the
 right build for virtually every phone from the last ~7 years. Prefer a
 32-bit or x86 device? Use `armeabi-v7a` or `x86_64` instead.
 
+<br>
+
+<img src="docs/screenshots/home-empty.png" width="45%" alt="Empty home screen, ready to scan"> <img src="docs/screenshots/home-pages.png" width="45%" alt="Home screen with three captured pages, ready to export as PDF">
+
+*Captured from the web build, which skips straight to the raw photo (web
+has no OpenCV support, see below) — native builds additionally show the
+edge-detection/corner-adjustment and filter screens in between capture
+and this page list.*
+
 </div>
 
 ## Features
