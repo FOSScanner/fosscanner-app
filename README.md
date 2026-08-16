@@ -1,12 +1,25 @@
+<div align="center">
+
 # FOSScanner
 
-A privacy-first, free and open-source document scanner built with Flutter.
+**A privacy-first, free and open-source document scanner.**
 
-FOSScanner captures document pages with your camera and compiles them into a
-shareable PDF, entirely on-device. It has no analytics, no backend, and no
-network calls of its own — nothing you scan is uploaded anywhere, and the
-app doesn't keep a persistent copy of your photos or generated PDFs after
-you're done with them.
+Scan documents with your camera, auto-crop and dewarp them, and export a
+PDF — all on-device. No accounts, no cloud, no tracking.
+
+[![License: GPL v3](https://img.shields.io/github/license/FOSScanner/fosscanner-app?color=blue)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/FOSScanner/fosscanner-app/ci.yml?branch=main&label=CI)](https://github.com/FOSScanner/fosscanner-app/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/FOSScanner/fosscanner-app?label=release)](https://github.com/FOSScanner/fosscanner-app/releases/latest)
+
+<a href="https://github.com/FOSScanner/fosscanner-app/releases/latest">
+  <img alt="Download APK" src="https://img.shields.io/badge/Download-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white">
+</a>
+
+Grab `app-arm64-v8a-release.apk` from the release's assets — that's the
+right build for virtually every phone from the last ~7 years. Prefer a
+32-bit or x86 device? Use `armeabi-v7a` or `x86_64` instead.
+
+</div>
 
 ## Features
 
@@ -27,6 +40,16 @@ Edge detection, perspective correction, and filters run on real OpenCV
 (OpenCV bindings are native/FFI-only) — web is a quick preview/testing
 target, not the primary one; the raw captured photo is used as-is there.
 
+## Privacy
+
+- All image processing and PDF generation happens on-device.
+- Captured photos and the generated PDF are only ever held in memory or
+  short-lived temp storage, and are cleaned up as soon as they're no longer
+  needed (page removed, "clear all", app closed, or right after sharing).
+- The app makes no network requests of its own. (The web build's rendering
+  engine, CanvasKit, is fetched from Google's CDN by the Flutter web
+  framework itself — this doesn't apply to the native Android/iOS builds.)
+
 ## Getting started
 
 Requires the Flutter SDK (Dart `>=3.0.0 <4.0.0`).
@@ -42,7 +65,7 @@ flutter run
 |---|---|
 | `flutter analyze` | Static analysis / lint |
 | `flutter test` | Run the test suite |
-| `flutter build apk` | Build a release Android APK |
+| `flutter build apk --split-per-abi` | Build signed, per-ABI release APKs |
 | `flutter build web` | Build a release web bundle |
 
 ### Running with Docker
@@ -55,19 +78,15 @@ SDKs installed locally:
 # Web preview, served on http://localhost:8080
 docker compose up flutter-web
 
-# Release Android APK, output to build/app/outputs/flutter-apk/
+# Release Android APKs (one per ABI), output to build/app/outputs/flutter-apk/
 docker compose run --rm build-apk
 ```
 
-## Privacy
+## Contributing
 
-- All image processing and PDF generation happens on-device.
-- Captured photos and the generated PDF are only ever held in memory or
-  short-lived temp storage, and are cleaned up as soon as they're no longer
-  needed (page removed, "clear all", app closed, or right after sharing).
-- The app makes no network requests of its own. (The web build's rendering
-  engine, CanvasKit, is fetched from Google's CDN by the Flutter web
-  framework itself — this doesn't apply to the native Android/iOS builds.)
+Issues and pull requests are welcome. `the architecture notes` documents the codebase's
+architecture, known gotchas, and the reasoning behind a few non-obvious
+decisions — worth a skim before diving into the code.
 
 ## License
 

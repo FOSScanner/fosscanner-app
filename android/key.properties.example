@@ -1,0 +1,10 @@
+# Copy this file to android/key.properties (gitignored, never commit the real one)
+# and fill in the values for your local release-signing keystore.
+#
+# See the architecture notes's "Release signing" section for how to generate a keystore
+# and how the equivalent secrets are wired into the release GitHub Actions
+# workflow.
+storePassword=REPLACE_ME
+keyPassword=REPLACE_ME
+keyAlias=upload
+storeFile=upload-keystore.jks
