@@ -1,0 +1,24 @@
+FOSScanner is a privacy-first, free and open-source document scanner.
+
+Scan documents with your camera, and FOSScanner automatically detects the
+page's edges, lets you fine-tune the corners with a draggable overlay, and
+corrects the perspective (dewarping) into a flat, upright page — all
+on-device, using real OpenCV image processing.
+
+Features:
+
+* Automatic edge detection with manual corner adjustment
+* Scan filters: Original, Auto-Enhance, Grayscale, and Black &amp; White,
+  with live previews before you confirm
+* Re-edit a page's corners or filter after the fact without re-scanning
+* Capture multiple pages and combine them into a single PDF
+* Share the PDF via the OS share sheet
+* Material 3 UI that follows your system's light/dark theme
+* No accounts, no cloud storage, no tracking
+
+Privacy:
+
+* All image processing and PDF generation happens on-device
+* Captured photos and the generated PDF are only ever held in memory or
+  short-lived temp storage, cleaned up as soon as they're no longer needed
+* The app makes no network requests of its own
