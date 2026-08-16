@@ -10,11 +10,22 @@ you're done with them.
 
 ## Features
 
+- Real document scanning, not just a photo: automatic edge detection with
+  a draggable corner overlay to fine-tune it, then perspective correction
+  (dewarping) into a flat, upright page
+- Scan filters — Original, Auto-Enhance, Grayscale, and Black & White —
+  with live thumbnail previews before you confirm
+- Re-edit any page after the fact (corners, filter) without re-scanning
 - Capture multiple pages in sequence, reorder-free scanning workflow
 - Combine captured pages into a single PDF
 - Share the PDF via the OS share sheet (or download it directly on web)
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
+
+Edge detection, perspective correction, and filters run on real OpenCV
+(`opencv_dart`) on Android/iOS/desktop. The web build doesn't support this
+(OpenCV bindings are native/FFI-only) — web is a quick preview/testing
+target, not the primary one; the raw captured photo is used as-is there.
 
 ## Getting started
 
