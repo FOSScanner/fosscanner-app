@@ -39,3 +39,13 @@ jobs:
         with:
           files: build/app/outputs/flutter-apk/app-*-release.apk
           generate_release_notes: true
+        env:
+          # The org enforces read-only default GITHUB_TOKEN permissions
+          # (Settings > Actions > General > Workflow permissions is locked
+          # to "Read repository contents and packages permissions" and
+          # can't be changed at the repo level), so job-level
+          # `permissions: contents: write` above isn't enough on its own —
+          # a PAT scoped to this repo is required to actually create the
+          # release. RELEASE_TOKEN: fine-grained PAT, Contents: Read and
+          # write, scoped to this repo only.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
