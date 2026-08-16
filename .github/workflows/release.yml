@@ -21,9 +21,9 @@ jobs:
           channel: stable
 
       - run: flutter pub get
-      - run: flutter build apk --release
+      - run: flutter build apk --release --split-per-abi
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-*-release.apk
           generate_release_notes: true

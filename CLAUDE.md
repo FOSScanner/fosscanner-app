@@ -62,7 +62,7 @@ Captured photos and the generated PDF are never persisted by the app: the `image
 
 ### Known tradeoff: APK size
 
-Adding `opencv_dart` grew the release APK from ~49.5MB to ~83.2MB (bundled native OpenCV libs across ABIs). Known mitigations not yet applied: `flutter build apk --split-per-abi`, trimming to only the OpenCV modules actually used (currently `imgcodecs`+`imgproc`).
+Adding `opencv_dart` grew the release APK from ~49.5MB to ~83.2MB (bundled native OpenCV libs across ABIs). Two mitigations: OpenCV is already trimmed to only the modules actually used (`imgcodecs`+`imgproc`; all others compiled `OFF`, verified via the `dartcv4` CMake config in the build log). The `build-apk` Docker service also passes `--split-per-abi`, which produces one APK per ABI instead of a universal one — `app-arm64-v8a-release.apk` (the one real phones need) comes out at ~27.6MB, `armeabi-v7a` ~21.2MB, `x86_64` ~32.2MB, vs. 83.2MB universal. A plain `flutter build apk` (no flag) still produces the old universal APK; use the Docker `build-apk` service, or add `--split-per-abi` manually, to get the smaller per-ABI ones.
 
 ### Testing gotcha: `ui.instantiateImageCodec` hangs under `flutter test`
 

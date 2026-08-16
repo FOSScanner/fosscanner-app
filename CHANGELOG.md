@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Added
 
 - Real document scanning: automatic edge detection (OpenCV via
@@ -15,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Scan filters — Original, Auto-Enhance, Grayscale, Black & White — with
   live thumbnail previews before confirming.
 - Re-edit a page's corners/filter after the fact without re-scanning it.
+
+### Changed
+
+- Release APKs are now split per-ABI (`arm64-v8a`, `armeabi-v7a`,
+  `x86_64`) instead of shipping one universal APK, cutting the download
+  most phones need from ~83MB to ~28MB.
 
 ### Fixed
 
@@ -28,8 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Edge detection, perspective correction, and filters are native-only
   (`opencv_dart` has no web support); the web build falls back to using
   the raw captured photo as-is.
-- The release APK grew from ~49.5MB to ~83.7MB from the bundled OpenCV
-  native libraries.
 
 ## [1.0.0] - 2026-08-04
 
