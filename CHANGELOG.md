@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A native double-free in the edge-detection pipeline (disposing
   individual `findContours` result elements instead of the container they
   came from) that could crash the app on capture, most reliably on
-  realistic (multi-megapixel) photos. See `the architecture notes` for details.
+  realistic (multi-megapixel) photos.
 
 ### Known limitations
 

@@ -5,10 +5,9 @@ project — issues and PRs of any size are welcome.
 
 ## Development setup
 
-See the README's "Getting started" section for running the app, and
-`the architecture notes` for the codebase's architecture, known gotchas, and the
-reasoning behind a few non-obvious decisions. Worth a skim before making
-non-trivial changes.
+See the README's "Getting started" section for running the app. Skim the
+code comments for the reasoning behind a few non-obvious decisions before
+making non-trivial changes.
 
 ```bash
 flutter pub get
@@ -46,9 +45,9 @@ add `Co-Authored-By` trailers for AI coding assistants.
   keeps `git bisect` useful.
 - CI (`flutter analyze` + `flutter test`) must pass before merge.
 - For anything touching `document_processor_native.dart` or the OpenCV
-  bindings, please test on a real device or emulator — `flutter_test`
-  can't exercise the native image pipeline (see `the architecture notes`'s testing
-  gotcha section).
+  bindings, please test on a real device or emulator — `flutter_test`'s
+  fake-time test binding doesn't reliably exercise the native image
+  pipeline.
 
 ## Reporting bugs / requesting features
 

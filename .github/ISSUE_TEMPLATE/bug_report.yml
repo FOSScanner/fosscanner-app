@@ -40,7 +40,7 @@ body:
       description: >-
         If the app crashed, `flutter logs` or `adb logcat` output is very
         helpful — especially anything ending in a native SEGV, which is a
-        known class of bug in the OpenCV pipeline (see the architecture notes).
+        known class of bug in the OpenCV pipeline.
       render: shell
     validations:
       required: false

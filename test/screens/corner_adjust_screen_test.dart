@@ -11,9 +11,8 @@ void main() {
     // resolving successfully. Real image decoding via
     // ui.instantiateImageCodec is known to hang forever under
     // flutter_test's fake-time test binding even though it works fine in
-    // the real app (verified separately, see the architecture notes) — full pipeline
-    // correctness is covered by the Phase 0 spike script and on-device
-    // testing instead.
+    // the real app (verified separately) — full pipeline correctness is
+    // covered by the Phase 0 spike script and on-device testing instead.
     final bytes = Uint8List.fromList(const [0, 1, 2, 3]);
 
     await tester.pumpWidget(

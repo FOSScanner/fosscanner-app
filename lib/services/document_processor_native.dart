@@ -49,7 +49,7 @@ List<Offset>? detectCorners(Uint8List imageBytes) {
       // individual contour elements — disposing elements one-by-one causes
       // a native double-free (confirmed via a standalone `dart run`
       // repro: crashes with SEGV_MAPERR in __libc_free during later
-      // cleanup, only on non-trivial images). See the architecture notes.
+      // cleanup, only on non-trivial images).
       contours.dispose();
     }
   } finally {

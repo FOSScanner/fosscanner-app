@@ -6,8 +6,8 @@
 
 <!--
 How did you verify this? For anything touching the native scan pipeline
-(corner detection, filters, PDF export), flutter_test can't exercise it
-(see the architecture notes) — describe manual/on-device testing instead.
+(corner detection, filters, PDF export), flutter_test can't exercise it —
+describe manual/on-device testing instead.
 -->
 
 ## Checklist
