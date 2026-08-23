@@ -22,3 +22,9 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Without this, release-please-action defaults to the repo's
+          # GitHub-configured default branch — which is `dev` (the PR
+          # target for day-to-day work), not `main` (the only branch
+          # this workflow actually triggers on and releases from). Pin
+          # it explicitly so the two can't silently diverge again.
+          target-branch: main
