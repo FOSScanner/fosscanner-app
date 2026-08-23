@@ -180,6 +180,73 @@ cv.Mat _blackAndWhite(cv.Mat src, cv.Mat Function(cv.Mat) track) {
   );
 }
 
+/// Rotates [imageBytes] clockwise in 90-degree steps. [quarterTurns] is
+/// normalized mod 4, so any integer (including negative, for counter-
+/// clockwise) works; 0 is a no-op that returns [imageBytes] unchanged.
+Uint8List rotateImage(Uint8List imageBytes, int quarterTurns) {
+  final turns = quarterTurns % 4;
+  final normalized = turns < 0 ? turns + 4 : turns;
+  if (normalized == 0) return imageBytes;
+
+  final rotateCode = switch (normalized) {
+    1 => cv.ROTATE_90_CLOCKWISE,
+    2 => cv.ROTATE_180,
+    _ => cv.ROTATE_90_COUNTERCLOCKWISE,
+  };
+
+  final mats = <cv.Mat>[];
+  cv.Mat track(cv.Mat m) {
+    mats.add(m);
+    return m;
+  }
+
+  try {
+    final src = track(cv.imdecode(imageBytes, cv.IMREAD_COLOR));
+    final rotated = track(cv.rotate(src, rotateCode));
+    final (success, encoded) = cv.imencode('.jpg', rotated);
+    if (!success) {
+      throw StateError('Failed to encode rotated document image');
+    }
+    return encoded;
+  } finally {
+    for (final m in mats) {
+      m.dispose();
+    }
+  }
+}
+
+/// Adjusts brightness/contrast on top of an already-warped/filtered image:
+/// `output = input * contrast + brightness` per pixel, saturated to the
+/// valid 0-255 range. `contrast == 1.0 && brightness == 0.0` is a no-op
+/// that returns [imageBytes] unchanged.
+Uint8List adjustBrightnessContrast(
+  Uint8List imageBytes, {
+  required double brightness,
+  required double contrast,
+}) {
+  if (brightness == 0.0 && contrast == 1.0) return imageBytes;
+
+  final mats = <cv.Mat>[];
+  cv.Mat track(cv.Mat m) {
+    mats.add(m);
+    return m;
+  }
+
+  try {
+    final src = track(cv.imdecode(imageBytes, cv.IMREAD_COLOR));
+    final adjusted = track(src.convertTo(src.type, alpha: contrast, beta: brightness));
+    final (success, encoded) = cv.imencode('.jpg', adjusted);
+    if (!success) {
+      throw StateError('Failed to encode brightness/contrast-adjusted image');
+    }
+    return encoded;
+  } finally {
+    for (final m in mats) {
+      m.dispose();
+    }
+  }
+}
+
 /// "Magic color"-style enhance: CLAHE (local contrast boost) on the L
 /// channel of Lab color space, leaving color (a/b channels) untouched so
 /// this doesn't shift color balance, just makes text/background pop more.

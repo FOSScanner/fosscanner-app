@@ -26,6 +26,9 @@ class ScannedPage {
     required this.corners,
     required this.processedBytes,
     this.filter = PageFilter.original,
+    this.rotationQuarterTurns = 0,
+    this.brightness = 0.0,
+    this.contrast = 1.0,
   });
 
   /// The untouched captured photo. Kept so corners/filter can be redone
@@ -39,6 +42,17 @@ class ScannedPage {
   /// The chosen filter, already baked into [processedBytes].
   final PageFilter filter;
 
+  /// Clockwise quarter-turns applied on top of the filter, already baked
+  /// into [processedBytes]. Kept (rather than only baking it in) so
+  /// re-editing this page can restore it instead of silently losing it.
+  final int rotationQuarterTurns;
+
+  /// Brightness/contrast adjustment applied on top of the filter, already
+  /// baked into [processedBytes]. Same reason as [rotationQuarterTurns]:
+  /// kept so re-edit can restore it.
+  final double brightness;
+  final double contrast;
+
   /// Perspective-corrected + filtered image, ready for the thumbnail grid
   /// and PDF export.
   final Uint8List processedBytes;
@@ -46,12 +60,18 @@ class ScannedPage {
   ScannedPage copyWith({
     List<Offset>? corners,
     PageFilter? filter,
+    int? rotationQuarterTurns,
+    double? brightness,
+    double? contrast,
     Uint8List? processedBytes,
   }) {
     return ScannedPage(
       originalBytes: originalBytes,
       corners: corners ?? this.corners,
       filter: filter ?? this.filter,
+      rotationQuarterTurns: rotationQuarterTurns ?? this.rotationQuarterTurns,
+      brightness: brightness ?? this.brightness,
+      contrast: contrast ?? this.contrast,
       processedBytes: processedBytes ?? this.processedBytes,
     );
   }

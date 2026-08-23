@@ -33,11 +33,17 @@ class CornerAdjustScreen extends StatefulWidget {
     required this.originalBytes,
     this.initialCorners,
     this.initialFilter = PageFilter.original,
+    this.initialRotationQuarterTurns = 0,
+    this.initialBrightness = 0.0,
+    this.initialContrast = 1.0,
   });
 
   final Uint8List originalBytes;
   final List<Offset>? initialCorners;
   final PageFilter initialFilter;
+  final int initialRotationQuarterTurns;
+  final double initialBrightness;
+  final double initialContrast;
 
   @override
   State<CornerAdjustScreen> createState() => _CornerAdjustScreenState();
@@ -51,12 +57,20 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   _Step _step = _Step.corners;
   late PageFilter _selectedFilter = widget.initialFilter;
+  late int _rotationQuarterTurns = widget.initialRotationQuarterTurns;
+  late double _brightness = widget.initialBrightness;
+  late double _contrast = widget.initialContrast;
   // Cache of the current corners' warp + per-filter previews, so dragging
   // doesn't redo expensive OpenCV work every frame (only on drag-end), and
   // so the filter step / Confirm can reuse this instead of recomputing.
   Uint8List? _warpedForPreview;
   Map<PageFilter, Uint8List>? _filterPreviews;
   bool _isGeneratingPreviews = false;
+  // Rotation + brightness/contrast applied on top of _filterPreviews[
+  // _selectedFilter], recomputed on rotate/slider-release/filter-change
+  // rather than baked into _filterPreviews (which only need to answer
+  // "what does each filter choice look like", not track these extras).
+  Uint8List? _finalPreviewBytes;
 
   @override
   void initState() {
@@ -117,11 +131,35 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _filterPreviews = previews;
         _isGeneratingPreviews = false;
       });
+      _updateFinalPreview();
     } catch (_) {
       // Previews are a nice-to-have; if generation fails, Confirm still
       // falls back to computing fresh from the current corners.
       if (!mounted) return;
       setState(() => _isGeneratingPreviews = false);
+    }
+  }
+
+  /// Applies the current rotation + brightness/contrast on top of the
+  /// selected filter's cached preview. Cheap enough (a single decode +
+  /// OpenCV op + encode, no contour search) to redo on every rotate tap
+  /// or slider release, unlike the full warp+filter set in
+  /// [_updatePreviews].
+  void _updateFinalPreview() {
+    final base = _filterPreviews?[_selectedFilter];
+    if (base == null) return;
+    try {
+      final rotated = rotateImage(base, _rotationQuarterTurns);
+      final adjusted = adjustBrightnessContrast(
+        rotated,
+        brightness: _brightness,
+        contrast: _contrast,
+      );
+      if (!mounted) return;
+      setState(() => _finalPreviewBytes = adjusted);
+    } catch (_) {
+      // Same reasoning as _updatePreviews: this is preview-only, Confirm
+      // recomputes from scratch if something's off.
     }
   }
 
@@ -141,17 +179,23 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _error = null;
     });
     try {
-      Uint8List? processed = _filterPreviews?[_selectedFilter];
-      if (processed == null) {
-        final warped = _warpedForPreview ?? warpDocument(widget.originalBytes, corners);
-        processed = applyFilter(warped, _selectedFilter);
-      }
+      final Uint8List filtered = _filterPreviews?[_selectedFilter] ??
+          applyFilter(_warpedForPreview ?? warpDocument(widget.originalBytes, corners), _selectedFilter);
+      final Uint8List processed = _finalPreviewBytes ??
+          adjustBrightnessContrast(
+            rotateImage(filtered, _rotationQuarterTurns),
+            brightness: _brightness,
+            contrast: _contrast,
+          );
       if (!mounted) return;
       Navigator.of(context).pop(
         ScannedPage(
           originalBytes: widget.originalBytes,
           corners: corners,
           filter: _selectedFilter,
+          rotationQuarterTurns: _rotationQuarterTurns,
+          brightness: _brightness,
+          contrast: _contrast,
           processedBytes: processed,
         ),
       );
@@ -164,6 +208,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
   }
 
+  void _rotate() {
+    setState(() => _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4);
+    _updateFinalPreview();
+  }
+
   bool get _isEditingExistingPage => widget.initialCorners != null;
 
   @override
@@ -173,7 +222,17 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final ready = imageSize != null && corners != null;
 
     return Scaffold(
-      appBar: AppBar(title: Text(_appBarTitle)),
+      appBar: AppBar(
+        title: Text(_appBarTitle),
+        actions: [
+          if (_step == _Step.filter)
+            IconButton(
+              icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
+              tooltip: 'Rotate',
+              onPressed: _isProcessing ? null : _rotate,
+            ),
+        ],
+      ),
       body: !ready
           ? Center(
               child: _error != null
@@ -250,7 +309,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   Widget _buildFilterStep(BuildContext context) {
-    final previewBytes = _filterPreviews?[_selectedFilter];
+    final previewBytes = _finalPreviewBytes ?? _filterPreviews?[_selectedFilter];
     return Column(
       children: [
         if (_error != null)
@@ -267,6 +326,40 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             child: previewBytes != null
                 ? Image.memory(previewBytes, fit: BoxFit.contain)
                 : const Center(child: CircularProgressIndicator()),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const SizedBox(width: 72, child: Text('Brightness')),
+              Expanded(
+                child: Slider(
+                  value: _brightness,
+                  min: -100,
+                  max: 100,
+                  onChanged: (v) => setState(() => _brightness = v),
+                  onChangeEnd: (_) => _updateFinalPreview(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const SizedBox(width: 72, child: Text('Contrast')),
+              Expanded(
+                child: Slider(
+                  value: _contrast,
+                  min: 0.5,
+                  max: 2.0,
+                  onChanged: (v) => setState(() => _contrast = v),
+                  onChangeEnd: (_) => _updateFinalPreview(),
+                ),
+              ),
+            ],
           ),
         ),
         SizedBox(
@@ -319,7 +412,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return Padding(
       padding: const EdgeInsets.only(right: 12),
       child: GestureDetector(
-        onTap: () => setState(() => _selectedFilter = filter),
+        onTap: () {
+          setState(() => _selectedFilter = filter);
+          _updateFinalPreview();
+        },
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

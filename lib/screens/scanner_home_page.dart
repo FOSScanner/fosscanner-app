@@ -46,9 +46,28 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _captureImage() async {
     final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
     if (photo == null) return;
+    // Camera capture writes a fresh file that's genuinely ours to delete.
+    await _addCapturedPhoto(photo, deleteAfterRead: true);
+  }
 
+  Future<void> _importFromGallery() async {
+    final List<XFile> photos = await _picker.pickMultiImage();
+    for (final photo in photos) {
+      // Unlike camera capture, a gallery pick's path isn't reliably an
+      // app-owned temp copy across platforms — don't risk deleting a file
+      // that might actually be the user's original photo.
+      await _addCapturedPhoto(photo, deleteAfterRead: false);
+    }
+  }
+
+  /// Shared by camera capture and gallery import: read the file's bytes,
+  /// optionally delete the source file, then (native only) run the photo
+  /// through the detect/adjust flow before adding it as a page.
+  Future<void> _addCapturedPhoto(XFile photo, {required bool deleteAfterRead}) async {
     final bytes = await photo.readAsBytes();
-    _deleteFileQuietly(photo.path);
+    if (deleteAfterRead) {
+      _deleteFileQuietly(photo.path);
+    }
 
     if (kIsWeb) {
       // opencv_dart doesn't support web; use the photo as-is rather than
@@ -69,7 +88,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _editPage(int index) async {
-    // No detect/adjust flow on web (see _captureImage) — nothing to edit.
+    // No detect/adjust flow on web (see _addCapturedPhoto) — nothing to edit.
     if (kIsWeb) return;
 
     final page = _pages[index];
@@ -79,6 +98,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           originalBytes: page.originalBytes,
           initialCorners: page.corners,
           initialFilter: page.filter,
+          initialRotationQuarterTurns: page.rotationQuarterTurns,
+          initialBrightness: page.brightness,
+          initialContrast: page.contrast,
         ),
       ),
     );
@@ -89,6 +111,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _removePage(int index) {
     setState(() => _pages.removeAt(index));
+  }
+
+  void _reorderPage(int fromIndex, int toIndex) {
+    if (fromIndex == toIndex) return;
+    setState(() {
+      final page = _pages.removeAt(fromIndex);
+      _pages.insert(toIndex, page);
+    });
   }
 
   void _clearPages() {
@@ -162,6 +192,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.photo_library_outlined),
+            onPressed: _importFromGallery,
+            tooltip: 'Import from gallery',
+          ),
           if (_pages.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.clear_all),
@@ -204,7 +239,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               itemCount: _pages.length,
               itemBuilder: (context, index) {
                 final page = _pages[index];
-                return Card(
+                final card = Card(
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
                     onTap: () => _editPage(index),
@@ -244,6 +279,40 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       ],
                     ),
                   ),
+                );
+
+                // Drag-to-reorder: long-press a page to pick it up, drop it
+                // on another page's slot to swap it into that position.
+                return DragTarget<int>(
+                  onWillAcceptWithDetails: (details) => details.data != index,
+                  onAcceptWithDetails: (details) => _reorderPage(details.data, index),
+                  builder: (context, candidateData, rejectedData) {
+                    final isDropTarget = candidateData.isNotEmpty;
+                    return LongPressDraggable<int>(
+                      data: index,
+                      feedback: SizedBox(
+                        width: 140,
+                        height: 200,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: Opacity(opacity: 0.85, child: card),
+                        ),
+                      ),
+                      childWhenDragging: Opacity(opacity: 0.3, child: card),
+                      child: isDropTarget
+                          ? Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  width: 3,
+                                ),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: card,
+                            )
+                          : card,
+                    );
+                  },
                 );
               },
             ),
