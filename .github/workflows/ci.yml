@@ -19,3 +19,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      # Tests compile the host (Linux) native assets only. Compile one shipping
+      # Android ABI as well so Gradle/NDK/native-asset regressions fail before
+      # a release tag is created.
+      - run: flutter build apk --debug --target-platform android-arm64

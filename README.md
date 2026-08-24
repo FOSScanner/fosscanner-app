@@ -81,7 +81,10 @@ flutter run
 
 `docker-compose.yml` provides two services that build against
 `ghcr.io/cirruslabs/flutter:stable`, so you don't need the Flutter/Android
-SDKs installed locally:
+SDKs installed locally. The APK service uses the image's x86_64 Android
+SDK/NDK toolchain; Docker Desktop uses emulation automatically on Apple
+Silicon, so that build is slower there. Native arm64 Linux Docker engines need
+amd64 emulation (for example, binfmt/QEMU) for the APK service:
 
 ```bash
 # Web preview, served on http://localhost:8080

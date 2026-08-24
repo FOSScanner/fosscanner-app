@@ -1,9 +1,11 @@
 FROM ghcr.io/cirruslabs/flutter:stable
 
-# cmake/build-essential: required to build opencv_dart's native (dartcv4)
-# component via Dart's native-assets build hooks at `pub get` time.
+# cmake/ninja/build-essential: required to build opencv_dart's native
+# (dartcv4) component via Dart's native-assets build hooks during Flutter
+# builds.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
+    ninja-build \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
