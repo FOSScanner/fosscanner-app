@@ -12,8 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set the working directory
 WORKDIR /app
 
-# Copy pubspec files first to leverage Docker cache
+# Cache package downloads in the image; the bind-mounted project regenerates
+# only its lightweight .dart_tool metadata when a container starts.
 COPY pubspec.* ./
+RUN flutter pub get
 
 # Safe directory for git
 RUN git config --global --add safe.directory /app
