@@ -26,7 +26,9 @@ List<Offset>? detectCorners(Uint8List imageBytes) {
   try {
     final src = track(cv.imdecode(imageBytes, cv.IMREAD_COLOR));
     final longEdge = math.max(src.cols, src.rows);
-    final scale = longEdge > _maxDetectionEdge ? _maxDetectionEdge / longEdge : 1.0;
+    final scale = longEdge > _maxDetectionEdge
+        ? _maxDetectionEdge / longEdge
+        : 1.0;
     final small = track(
       scale < 1.0 ? cv.resize(src, (0, 0), fx: scale, fy: scale) : src.clone(),
     );
@@ -36,20 +38,35 @@ List<Offset>? detectCorners(Uint8List imageBytes) {
     final kernel = track(cv.getStructuringElement(cv.MORPH_RECT, (3, 3)));
     final dilated = track(cv.dilate(edges, kernel));
 
-    final (contours, _) = cv.findContours(dilated, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    final (contours, hierarchy) = cv.findContours(
+      dilated,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE,
+    );
     try {
       final quad = _findDocumentQuad(contours, small.cols * small.rows);
       if (quad == null) return null;
 
       final invScale = 1.0 / scale;
-      final scaledCorners = quad.map((p) => Offset(p.x * invScale, p.y * invScale)).toList();
-      return orderCorners(scaledCorners);
+      final scaledCorners = quad
+          .map((p) => Offset(p.x * invScale, p.y * invScale))
+          .toList();
+      final ordered = orderCorners(scaledCorners);
+      try {
+        calculateWarpSize(ordered);
+      } on ArgumentError {
+        // A four-point contour can still be concave or collapse after scaling.
+        // Treat it as no detection so the editor starts from safe full bounds.
+        return null;
+      }
+      return ordered;
     } finally {
       // IMPORTANT: dispose the VecVecPoint container itself, not its
       // individual contour elements — disposing elements one-by-one causes
       // a native double-free (confirmed via a standalone `dart run`
       // repro: crashes with SEGV_MAPERR in __libc_free during later
       // cleanup, only on non-trivial images).
+      hierarchy.dispose();
       contours.dispose();
     }
   } finally {
@@ -90,8 +107,12 @@ List<cv.Point>? _findDocumentQuad(cv.VecVecPoint contours, int imageArea) {
 /// bottom-right, bottom-left, in the image's pixel space), producing a
 /// flattened, upright JPEG. Output size is derived from the corners' side
 /// lengths so the result keeps the document's real proportions.
-Uint8List warpDocument(Uint8List imageBytes, List<Offset> corners) {
-  assert(corners.length == 4);
+Uint8List warpDocument(
+  Uint8List imageBytes,
+  List<Offset> corners, {
+  int maxPixels = maxWarpPixels,
+  int maxEdge = maxWarpEdge,
+}) {
   final mats = <cv.Mat>[];
   cv.Mat track(cv.Mat m) {
     mats.add(m);
@@ -99,11 +120,13 @@ Uint8List warpDocument(Uint8List imageBytes, List<Offset> corners) {
   }
 
   try {
-    final src = track(cv.imdecode(imageBytes, cv.IMREAD_COLOR));
+    final (outW, outH) = calculateWarpSize(
+      corners,
+      maxPixels: maxPixels,
+      maxEdge: maxEdge,
+    );
     final tl = corners[0], tr = corners[1], br = corners[2], bl = corners[3];
-
-    final outW = math.max(cornerDistance(tl, tr), cornerDistance(bl, br)).round().clamp(1, 1 << 16);
-    final outH = math.max(cornerDistance(tl, bl), cornerDistance(tr, br)).round().clamp(1, 1 << 16);
+    final src = track(cv.imdecode(imageBytes, cv.IMREAD_COLOR));
 
     final srcPts = cv.VecPoint.fromList([
       cv.Point(tl.dx.round(), tl.dy.round()),
@@ -111,21 +134,28 @@ Uint8List warpDocument(Uint8List imageBytes, List<Offset> corners) {
       cv.Point(br.dx.round(), br.dy.round()),
       cv.Point(bl.dx.round(), bl.dy.round()),
     ]);
-    final dstPts = cv.VecPoint.fromList([
-      cv.Point(0, 0),
-      cv.Point(outW, 0),
-      cv.Point(outW, outH),
-      cv.Point(0, outH),
-    ]);
+    try {
+      final dstPts = cv.VecPoint.fromList([
+        cv.Point(0, 0),
+        cv.Point(outW - 1, 0),
+        cv.Point(outW - 1, outH - 1),
+        cv.Point(0, outH - 1),
+      ]);
+      try {
+        final transform = track(cv.getPerspectiveTransform(srcPts, dstPts));
+        final warped = track(cv.warpPerspective(src, transform, (outW, outH)));
 
-    final transform = track(cv.getPerspectiveTransform(srcPts, dstPts));
-    final warped = track(cv.warpPerspective(src, transform, (outW, outH)));
-
-    final (success, encoded) = cv.imencode('.jpg', warped);
-    if (!success) {
-      throw StateError('Failed to encode warped document image');
+        final (success, encoded) = cv.imencode('.jpg', warped);
+        if (!success) {
+          throw StateError('Failed to encode warped document image');
+        }
+        return encoded;
+      } finally {
+        dstPts.dispose();
+      }
+    } finally {
+      srcPts.dispose();
     }
-    return encoded;
   } finally {
     for (final m in mats) {
       m.dispose();
@@ -234,7 +264,9 @@ Uint8List adjustBrightnessContrast(
 
   try {
     final src = track(cv.imdecode(imageBytes, cv.IMREAD_COLOR));
-    final adjusted = track(src.convertTo(src.type, alpha: contrast, beta: brightness));
+    final adjusted = track(
+      src.convertTo(src.type, alpha: contrast, beta: brightness),
+    );
     final (success, encoded) = cv.imencode('.jpg', adjusted);
     if (!success) {
       throw StateError('Failed to encode brightness/contrast-adjusted image');
@@ -247,18 +279,52 @@ Uint8List adjustBrightnessContrast(
   }
 }
 
+/// Runs the export pipeline as one isolate-friendly operation.
+Uint8List processDocument(
+  Uint8List imageBytes,
+  List<Offset> corners, {
+  required PageFilter filter,
+  required int rotationQuarterTurns,
+  required double brightness,
+  required double contrast,
+}) {
+  final warped = warpDocument(imageBytes, corners);
+  final filtered = applyFilter(warped, filter);
+  return adjustBrightnessContrast(
+    rotateImage(filtered, rotationQuarterTurns),
+    brightness: brightness,
+    contrast: contrast,
+  );
+}
+
 /// "Magic color"-style enhance: CLAHE (local contrast boost) on the L
 /// channel of Lab color space, leaving color (a/b channels) untouched so
 /// this doesn't shift color balance, just makes text/background pop more.
 cv.Mat _autoEnhance(cv.Mat src, cv.Mat Function(cv.Mat) track) {
   final lab = track(cv.cvtColor(src, cv.COLOR_BGR2Lab));
   final channels = cv.split(lab);
-  for (final c in channels) {
-    track(c);
+  try {
+    // VecMat indexing returns independently allocated Mat wrappers; both the
+    // wrappers and their container need deterministic cleanup.
+    final channelMats = [for (final channel in channels) track(channel)];
+    final clahe = cv.createCLAHE(clipLimit: 2.0, tileGridSize: (8, 8));
+    try {
+      final enhancedL = track(clahe.apply(channelMats[0]));
+      final mergeChannels = cv.VecMat.fromList([
+        enhancedL,
+        channelMats[1],
+        channelMats[2],
+      ]);
+      try {
+        final merged = track(cv.merge(mergeChannels));
+        return cv.cvtColor(merged, cv.COLOR_Lab2BGR);
+      } finally {
+        mergeChannels.dispose();
+      }
+    } finally {
+      clahe.dispose();
+    }
+  } finally {
+    channels.dispose();
   }
-  final clahe = cv.createCLAHE(clipLimit: 2.0, tileGridSize: (8, 8));
-  final enhancedL = track(clahe.apply(channels[0]));
-  clahe.dispose();
-  final merged = track(cv.merge(cv.VecMat.fromList([enhancedL, channels[1], channels[2]])));
-  return cv.cvtColor(merged, cv.COLOR_Lab2BGR);
 }
