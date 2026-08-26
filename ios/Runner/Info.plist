@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>FOSScanner needs camera access to capture document pages. Photos are processed on-device and never uploaded anywhere.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>FOSScanner needs photo library access to import document pages. Photos are processed on-device and never uploaded anywhere.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
