@@ -117,27 +117,83 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _showAppInfo() async {
     final packageInfo = await PackageInfo.fromPlatform();
     if (!mounted) return;
-    showAboutDialog(
+    final theme = Theme.of(context);
+    final mutedStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+
+    await showDialog<void>(
       context: context,
-      applicationName: 'FOSScanner',
-      applicationVersion: '${packageInfo.version}+${packageInfo.buildNumber}',
-      applicationLegalese: 'Licensed under the GNU GPL v3.0',
-      children: [
-        const SizedBox(height: 16),
-        InkWell(
-          onTap: () => launchUrl(
-            Uri.parse(_sourceCodeUrl),
-            mode: LaunchMode.externalApplication,
-          ),
-          child: Text(
-            _sourceCodeUrl,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.primary,
-              decoration: TextDecoration.underline,
-            ),
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Image.asset('assets/icon/icon.png', width: 40, height: 40),
+            const SizedBox(width: 12),
+            const Text('FOSScanner'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Version ${packageInfo.version} (build ${packageInfo.buildNumber})',
+                style: mutedStyle,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'A privacy-first, free and open-source document scanner. '
+                'Scan documents with your camera, auto-crop and dewarp them, '
+                'and export a PDF — all on-device. No accounts, no cloud, '
+                'no tracking.',
+              ),
+              const SizedBox(height: 20),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () => launchUrl(
+                  Uri.parse(_sourceCodeUrl),
+                  mode: LaunchMode.externalApplication,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.code, size: 18, color: theme.colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'View source code',
+                      style: TextStyle(
+                        color: theme.colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
+            ],
           ),
         ),
-      ],
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              showLicensePage(
+                context: context,
+                applicationName: 'FOSScanner',
+                applicationVersion: packageInfo.version,
+              );
+            },
+            child: const Text('Open-source licenses'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
