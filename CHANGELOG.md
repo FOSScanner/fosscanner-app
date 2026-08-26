@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
-* align platform configuration and CI ([fdf9856](https://github.com/FOSScanner/fosscanner-app/commit/fdf98565c202d9b07c2b35a1503bcfe47b9ee035))
-* harden image intake and sharing ([3c49a7d](https://github.com/FOSScanner/fosscanner-app/commit/3c49a7d6d1359d4e224c9573fd3b85fe84e01a8a))
-* harden native document processing ([ee0580d](https://github.com/FOSScanner/fosscanner-app/commit/ee0580d6b5eb66e7163dfb0492c77c39c2ea8f71))
-* improve corner control accessibility ([c4b091f](https://github.com/FOSScanner/fosscanner-app/commit/c4b091f9bd61a31cccb974d277bcf5e9cde50e7f))
+* align platform configuration and CI
+* harden image intake and sharing
+* harden native document processing
+* improve corner control accessibility
 
 ## [1.2.1](https://github.com/FOSScanner/fosscanner-app/compare/v1.2.0...v1.2.1) (2026-08-23)
 
