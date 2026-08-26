@@ -6,15 +6,18 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/image_metadata.dart';
 import 'corner_adjust_screen.dart';
 
 const _thumbnailCacheWidth = 512;
+const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
 class _DocumentCapacityException implements Exception {
   const _DocumentCapacityException();
@@ -109,6 +112,33 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         context,
       )?.showSnackBar(SnackBar(content: Text(message)));
     });
+  }
+
+  Future<void> _showAppInfo() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    showAboutDialog(
+      context: context,
+      applicationName: 'FOSScanner',
+      applicationVersion: '${packageInfo.version}+${packageInfo.buildNumber}',
+      applicationLegalese: 'Licensed under the GNU GPL v3.0',
+      children: [
+        const SizedBox(height: 16),
+        InkWell(
+          onTap: () => launchUrl(
+            Uri.parse(_sourceCodeUrl),
+            mode: LaunchMode.externalApplication,
+          ),
+          child: Text(
+            _sourceCodeUrl,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _recoverLostImages() async {
@@ -477,6 +507,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               onPressed: _clearPages,
               tooltip: 'Clear all',
             ),
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: _showAppInfo,
+            tooltip: 'About FOSScanner',
+          ),
         ],
       ),
       body: _pages.isEmpty
