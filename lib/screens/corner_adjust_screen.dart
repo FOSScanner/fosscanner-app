@@ -1,12 +1,18 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../models/scanned_page.dart';
+import '../services/corner_geometry.dart';
 import '../services/document_processor.dart';
 import '../widgets/corner_overlay.dart';
+
+const _fullPreviewDecodeSize = 2048;
+const _filterChipDecodeSize = 256;
 
 const _filterLabels = {
   PageFilter.original: 'Original',
@@ -60,10 +66,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   late int _rotationQuarterTurns = widget.initialRotationQuarterTurns;
   late double _brightness = widget.initialBrightness;
   late double _contrast = widget.initialContrast;
-  // Cache of the current corners' warp + per-filter previews, so dragging
-  // doesn't redo expensive OpenCV work every frame (only on drag-end), and
-  // so the filter step / Confirm can reuse this instead of recomputing.
-  Uint8List? _warpedForPreview;
+  // Cache reduced-resolution filter previews so dragging only reprocesses on
+  // drag-end. Confirm deliberately recomputes the selected filter at the full
+  // bounded export resolution.
   Map<PageFilter, Uint8List>? _filterPreviews;
   bool _isGeneratingPreviews = false;
   // Rotation + brightness/contrast applied on top of _filterPreviews[
@@ -82,13 +87,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     try {
       final codec = await ui.instantiateImageCodec(widget.originalBytes);
       final frame = await codec.getNextFrame();
-      final size = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+      final size = Size(
+        frame.image.width.toDouble(),
+        frame.image.height.toDouble(),
+      );
       frame.image.dispose();
       codec.dispose();
 
-      final corners = widget.initialCorners ??
-          detectCorners(widget.originalBytes) ??
-          _fullBoundsCorners(size);
+      final candidateCorners =
+          widget.initialCorners ?? detectCorners(widget.originalBytes);
+      final corners = _hasRenderableCorners(candidateCorners)
+          ? candidateCorners!
+          : _fullBoundsCorners(size);
 
       if (!mounted) return;
       setState(() {
@@ -103,6 +113,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       });
     }
   }
+
+  bool _hasRenderableCorners(List<Offset>? corners) =>
+      corners != null &&
+      corners.length == 4 &&
+      corners.toSet().length == 4 &&
+      corners.every((corner) => corner.dx.isFinite && corner.dy.isFinite);
 
   List<Offset> _fullBoundsCorners(Size size) {
     const marginFrac = 0.05;
@@ -119,24 +135,52 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Future<void> _updatePreviews() async {
     final corners = _corners;
     if (corners == null) return;
-    setState(() => _isGeneratingPreviews = true);
+    setState(() {
+      _isGeneratingPreviews = true;
+      _filterPreviews = null;
+      _finalPreviewBytes = null;
+      _error = null;
+    });
+    // Keep geometry failures separate from decoder/backend failures so the
+    // recovery guidance matches what the user can actually fix.
     try {
-      final warped = warpDocument(widget.originalBytes, corners);
+      calculateWarpSize(
+        corners,
+        maxPixels: maxPreviewWarpPixels,
+        maxEdge: maxPreviewWarpEdge,
+      );
+    } on ArgumentError {
+      if (!mounted) return;
+      setState(() {
+        _isGeneratingPreviews = false;
+        _error =
+            'Could not preview this crop. Adjust the corners and try again.';
+      });
+      return;
+    }
+
+    try {
+      final warped = warpDocument(
+        widget.originalBytes,
+        corners,
+        maxPixels: maxPreviewWarpPixels,
+        maxEdge: maxPreviewWarpEdge,
+      );
       final previews = <PageFilter, Uint8List>{
         for (final f in PageFilter.values) f: applyFilter(warped, f),
       };
       if (!mounted) return;
       setState(() {
-        _warpedForPreview = warped;
         _filterPreviews = previews;
         _isGeneratingPreviews = false;
       });
       _updateFinalPreview();
     } catch (_) {
-      // Previews are a nice-to-have; if generation fails, Confirm still
-      // falls back to computing fresh from the current corners.
       if (!mounted) return;
-      setState(() => _isGeneratingPreviews = false);
+      setState(() {
+        _isGeneratingPreviews = false;
+        _error = 'Could not process this photo. Try another image.';
+      });
     }
   }
 
@@ -163,10 +207,32 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
   }
 
+  Future<Uint8List> _processForExport(
+    List<Offset> corners, {
+    required PageFilter filter,
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) {
+    final imageBytes = widget.originalBytes;
+    Uint8List process() => processDocument(
+      imageBytes,
+      corners,
+      filter: filter,
+      rotationQuarterTurns: rotationQuarterTurns,
+      brightness: brightness,
+      contrast: contrast,
+    );
+
+    // Native OpenCV work is CPU/FFI-heavy; yielding it to another isolate lets
+    // the progress indicator paint and keeps pointer/system events responsive.
+    return kIsWeb ? Future.value(process()) : Isolate.run(process);
+  }
+
   Future<void> _goToFilterStep() async {
     if (_filterPreviews == null) {
       await _updatePreviews();
-      if (!mounted) return;
+      if (!mounted || _filterPreviews == null) return;
     }
     setState(() => _step = _Step.filter);
   }
@@ -174,36 +240,39 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Future<void> _confirm() async {
     final corners = _corners;
     if (corners == null || _isProcessing) return;
+    final filter = _selectedFilter;
+    final rotationQuarterTurns = _rotationQuarterTurns;
+    final brightness = _brightness;
+    final contrast = _contrast;
     setState(() {
       _isProcessing = true;
       _error = null;
     });
     try {
-      final Uint8List filtered = _filterPreviews?[_selectedFilter] ??
-          applyFilter(_warpedForPreview ?? warpDocument(widget.originalBytes, corners), _selectedFilter);
-      final Uint8List processed = _finalPreviewBytes ??
-          adjustBrightnessContrast(
-            rotateImage(filtered, _rotationQuarterTurns),
-            brightness: _brightness,
-            contrast: _contrast,
-          );
+      final processed = await _processForExport(
+        corners,
+        filter: filter,
+        rotationQuarterTurns: rotationQuarterTurns,
+        brightness: brightness,
+        contrast: contrast,
+      );
       if (!mounted) return;
       Navigator.of(context).pop(
         ScannedPage(
           originalBytes: widget.originalBytes,
           corners: corners,
-          filter: _selectedFilter,
-          rotationQuarterTurns: _rotationQuarterTurns,
-          brightness: _brightness,
-          contrast: _contrast,
+          filter: filter,
+          rotationQuarterTurns: rotationQuarterTurns,
+          brightness: brightness,
+          contrast: contrast,
           processedBytes: processed,
         ),
       );
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _isProcessing = false;
-        _error = 'Could not process this page: $e';
+        _error = 'Could not process this page. Try another image.';
       });
     }
   }
@@ -240,8 +309,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                   : const CircularProgressIndicator(),
             )
           : _step == _Step.corners
-              ? _buildCornersStep(context, imageSize, corners)
-              : _buildFilterStep(context),
+          ? _buildCornersStep(context, imageSize, corners)
+          : _buildFilterStep(context),
     );
   }
 
@@ -250,7 +319,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
-  Widget _buildCornersStep(BuildContext context, Size imageSize, List<Offset> corners) {
+  Widget _buildCornersStep(
+    BuildContext context,
+    Size imageSize,
+    List<Offset> corners,
+  ) {
     return Column(
       children: [
         if (_error != null)
@@ -308,8 +381,23 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  Widget _boundedPreviewImage(
+    Uint8List bytes, {
+    required BoxFit fit,
+    required int maxDimension,
+  }) => Image(
+    image: ResizeImage(
+      MemoryImage(bytes),
+      width: maxDimension,
+      height: maxDimension,
+      policy: ResizeImagePolicy.fit,
+    ),
+    fit: fit,
+  );
+
   Widget _buildFilterStep(BuildContext context) {
-    final previewBytes = _finalPreviewBytes ?? _filterPreviews?[_selectedFilter];
+    final previewBytes =
+        _finalPreviewBytes ?? _filterPreviews?[_selectedFilter];
     return Column(
       children: [
         if (_error != null)
@@ -324,7 +412,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: previewBytes != null
-                ? Image.memory(previewBytes, fit: BoxFit.contain)
+                ? _boundedPreviewImage(
+                    previewBytes,
+                    fit: BoxFit.contain,
+                    maxDimension: _fullPreviewDecodeSize,
+                  )
                 : const Center(child: CircularProgressIndicator()),
           ),
         ),
@@ -338,8 +430,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                   value: _brightness,
                   min: -100,
                   max: 100,
-                  onChanged: (v) => setState(() => _brightness = v),
-                  onChangeEnd: (_) => _updateFinalPreview(),
+                  onChanged: _isProcessing
+                      ? null
+                      : (v) => setState(() => _brightness = v),
+                  onChangeEnd: _isProcessing
+                      ? null
+                      : (_) => _updateFinalPreview(),
                 ),
               ),
             ],
@@ -355,8 +451,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                   value: _contrast,
                   min: 0.5,
                   max: 2.0,
-                  onChanged: (v) => setState(() => _contrast = v),
-                  onChangeEnd: (_) => _updateFinalPreview(),
+                  onChanged: _isProcessing
+                      ? null
+                      : (v) => setState(() => _contrast = v),
+                  onChangeEnd: _isProcessing
+                      ? null
+                      : (_) => _updateFinalPreview(),
                 ),
               ),
             ],
@@ -368,7 +468,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             children: [
-              for (final filter in PageFilter.values) _filterChip(context, filter),
+              for (final filter in PageFilter.values)
+                _filterChip(context, filter),
             ],
           ),
         ),
@@ -380,7 +481,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _isProcessing ? null : () => setState(() => _step = _Step.corners),
+                    onPressed: _isProcessing
+                        ? null
+                        : () => setState(() => _step = _Step.corners),
                     child: const Text('Back'),
                   ),
                 ),
@@ -412,10 +515,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return Padding(
       padding: const EdgeInsets.only(right: 12),
       child: GestureDetector(
-        onTap: () {
-          setState(() => _selectedFilter = filter);
-          _updateFinalPreview();
-        },
+        onTap: _isProcessing
+            ? null
+            : () {
+                setState(() => _selectedFilter = filter);
+                _updateFinalPreview();
+              },
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -425,18 +530,29 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: selected ? primary : Colors.transparent, width: 2),
+                border: Border.all(
+                  color: selected ? primary : Colors.transparent,
+                  width: 2,
+                ),
               ),
               child: previewBytes != null
-                  ? Image.memory(previewBytes, fit: BoxFit.cover)
+                  ? _boundedPreviewImage(
+                      previewBytes,
+                      fit: BoxFit.cover,
+                      maxDimension: _filterChipDecodeSize,
+                    )
                   : ColoredBox(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       child: _isGeneratingPreviews
                           ? const Center(
                               child: SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
                             )
                           : null,
@@ -446,9 +562,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             Text(
               _filterLabels[filter]!,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: selected ? primary : null,
-                    fontWeight: selected ? FontWeight.bold : null,
-                  ),
+                color: selected ? primary : null,
+                fontWeight: selected ? FontWeight.bold : null,
+              ),
             ),
           ],
         ),
@@ -469,7 +585,11 @@ class _InitErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, size: 48, color: Theme.of(context).colorScheme.error),
+          Icon(
+            Icons.error_outline,
+            size: 48,
+            color: Theme.of(context).colorScheme.error,
+          ),
           const SizedBox(height: 16),
           Text(message, textAlign: TextAlign.center),
           const SizedBox(height: 16),
