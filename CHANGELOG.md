@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.2](https://github.com/FOSScanner/fosscanner-app/compare/v1.2.1...v1.2.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* align platform configuration and CI ([fdf9856](https://github.com/FOSScanner/fosscanner-app/commit/fdf98565c202d9b07c2b35a1503bcfe47b9ee035))
+* align platform configuration and CI ([61bdf2c](https://github.com/FOSScanner/fosscanner-app/commit/61bdf2cd6afed98bf120146911c81669ffe18fd6))
+* harden image intake and sharing ([3c49a7d](https://github.com/FOSScanner/fosscanner-app/commit/3c49a7d6d1359d4e224c9573fd3b85fe84e01a8a))
+* harden image intake and sharing ([3a1429b](https://github.com/FOSScanner/fosscanner-app/commit/3a1429b4e85162d5d5e5e45a72ff206decc95e9a))
+* harden native document processing ([ee0580d](https://github.com/FOSScanner/fosscanner-app/commit/ee0580d6b5eb66e7163dfb0492c77c39c2ea8f71))
+* harden native document processing ([7fe6009](https://github.com/FOSScanner/fosscanner-app/commit/7fe60098247322037c366fb36728aaf5ac820868))
+* improve corner control accessibility ([c4b091f](https://github.com/FOSScanner/fosscanner-app/commit/c4b091f9bd61a31cccb974d277bcf5e9cde50e7f))
+* improve corner control accessibility ([b58f2f5](https://github.com/FOSScanner/fosscanner-app/commit/b58f2f5db8a30731213fedd568e1da36f8bec605))
+
 ## [1.2.1](https://github.com/FOSScanner/fosscanner-app/compare/v1.2.0...v1.2.1) (2026-08-23)
 
 
