@@ -178,17 +178,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              showLicensePage(
-                context: context,
-                applicationName: 'FOSScanner',
-                applicationVersion: packageInfo.version,
-              );
-            },
-            child: const Text('Open-source licenses'),
-          ),
-          TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Close'),
           ),
@@ -563,11 +552,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               onPressed: _clearPages,
               tooltip: 'Clear all',
             ),
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: _showAppInfo,
-            tooltip: 'About FOSScanner',
-          ),
         ],
       ),
       body: _pages.isEmpty
@@ -716,11 +700,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               child: const Icon(Icons.camera_alt),
             )
           : null,
-      bottomNavigationBar: _pages.isNotEmpty
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: ElevatedButton.icon(
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_pages.isNotEmpty) ...[
+                ElevatedButton.icon(
                   key: _shareButtonKey,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -740,9 +727,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     style: const TextStyle(fontSize: 16),
                   ),
                 ),
+                const SizedBox(height: 4),
+              ],
+              TextButton(
+                onPressed: _showAppInfo,
+                child: Text(
+                  'About FOSScanner',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-            )
-          : null,
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
