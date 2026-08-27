@@ -94,6 +94,27 @@ void main() {
     );
   });
 
+  test(
+    'warp dimensions reject a valid quad whose corners are role-shifted',
+    () {
+      // Same rectangle as tl,tr,br,bl but rotated one position in the array
+      // (tr,br,bl,tl). Still convex and consistently wound — the shape
+      // itself is completely valid — so this only fails if role order is
+      // checked, not just geometry. Regression test for the corner-adjust
+      // bug where dragging handles past each other silently flipped output
+      // instead of being rejected.
+      expect(
+        () => calculateWarpSize(const [
+          Offset(100, 0),
+          Offset(100, 100),
+          Offset(0, 100),
+          Offset(0, 0),
+        ]),
+        throwsArgumentError,
+      );
+    },
+  );
+
   test('warp dimensions reject self-intersecting corners', () {
     expect(
       () => calculateWarpSize(const [

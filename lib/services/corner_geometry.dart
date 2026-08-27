@@ -99,6 +99,24 @@ void _validateConvexQuad(List<Offset> corners) {
       );
     }
   }
+
+  // A convex, consistently-wound quad can still have its 4 points in the
+  // wrong tl/tr/br/bl positions — e.g. two adjacent handles dragged past
+  // each other, or all 4 roles shifted by one — which looks like a
+  // perfectly valid crop shape but warps into a flipped/rotated page.
+  // orderCorners applies the same geometric role assignment used at
+  // detection time; if it disagrees with the order given here, the corners
+  // are mislabeled even though the shape itself is fine.
+  final canonical = orderCorners(corners);
+  for (var i = 0; i < 4; i++) {
+    if (canonical[i] != corners[i]) {
+      throw ArgumentError.value(
+        corners,
+        'corners',
+        'Corners must be ordered top-left, top-right, bottom-right, bottom-left',
+      );
+    }
+  }
 }
 
 /// Calculates a bounded output size from ordered document [corners], preserving
