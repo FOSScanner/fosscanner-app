@@ -40,10 +40,14 @@ and this page list.*
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
   and contrast) without re-scanning
 - Capture multiple pages in sequence and reorder them with drag-and-drop
+- Import existing photos from your gallery instead of (or alongside)
+  capturing new ones
 - Combine captured pages into a single PDF
 - Share the PDF via the OS share sheet (or download it directly on web)
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
+- An in-app About screen (the ⓘ icon) shows the exact running version and
+  links straight to this source repo
 
 Edge detection, perspective correction, and filters run on real OpenCV
 (`opencv_dart`) on Android/iOS/desktop. Desktop builds support importing

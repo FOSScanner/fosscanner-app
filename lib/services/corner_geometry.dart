@@ -101,6 +101,34 @@ void _validateConvexQuad(List<Offset> corners) {
   }
 }
 
+// A convex, consistently-wound quad can still have its 4 points in the
+// wrong tl/tr/br/bl positions — e.g. two adjacent handles dragged past
+// each other, or all 4 roles shifted by one — which looks like a
+// perfectly valid crop shape but warps into a flipped/rotated page.
+// orderCorners applies the same geometric role assignment used at
+// detection time; if it disagrees with the order given here, the corners
+// are mislabeled even though the shape itself is fine.
+//
+// Deliberately separate from _validateConvexQuad (and only ever called
+// once, on the caller's original un-rounded corners): orderCorners' choice
+// of starting edge is a tie-break on midpoint y that can flip once corners
+// are rounded to integers, even when the un-rounded quad was unambiguous.
+// Running this same check again against a rounded copy would then reject
+// perfectly valid, correctly-labeled crops whenever that tie happened to
+// land on opposite sides of the rounding boundary.
+void _validateCornerRoles(List<Offset> corners) {
+  final canonical = orderCorners(corners);
+  for (var i = 0; i < 4; i++) {
+    if (canonical[i] != corners[i]) {
+      throw ArgumentError.value(
+        corners,
+        'corners',
+        'Corners must be ordered top-left, top-right, bottom-right, bottom-left',
+      );
+    }
+  }
+}
+
 /// Calculates a bounded output size from ordered document [corners], preserving
 /// the selected crop's aspect ratio when it must be downscaled.
 (int width, int height) calculateWarpSize(
@@ -112,6 +140,7 @@ void _validateConvexQuad(List<Offset> corners) {
     throw ArgumentError('Warp limits must allow an image of at least 2×2');
   }
   _validateConvexQuad(corners);
+  _validateCornerRoles(corners);
 
   // OpenCV receives integer source points. Validate and size from those exact
   // points so a valid-looking fractional quad cannot collapse when converted.

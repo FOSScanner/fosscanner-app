@@ -41,6 +41,9 @@ add `Co-Authored-By` trailers for AI coding assistants.
 
 ## Pull requests
 
+- Base your branch on `dev` and open pull requests against `dev`, not
+  `main`. `main` only advances when `dev` is deliberately promoted for a
+  release — PRs opened against it directly won't be merged there.
 - Keep PRs focused — one logical change per PR is easier to review and
   keeps `git bisect` useful.
 - CI (`flutter analyze` + `flutter test`) must pass before merge.

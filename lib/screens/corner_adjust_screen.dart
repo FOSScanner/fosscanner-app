@@ -10,6 +10,7 @@ import '../models/scanned_page.dart';
 import '../services/corner_geometry.dart';
 import '../services/document_processor.dart';
 import '../widgets/corner_overlay.dart';
+import '../widgets/transient_message.dart';
 
 const _fullPreviewDecodeSize = 2048;
 const _filterChipDecodeSize = 256;
@@ -132,6 +133,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     ];
   }
 
+  void _showError(String message) => showTransientMessage(context, message);
+
   Future<void> _updatePreviews() async {
     final corners = _corners;
     if (corners == null) return;
@@ -139,7 +142,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _isGeneratingPreviews = true;
       _filterPreviews = null;
       _finalPreviewBytes = null;
-      _error = null;
     });
     // Keep geometry failures separate from decoder/backend failures so the
     // recovery guidance matches what the user can actually fix.
@@ -151,11 +153,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       );
     } on ArgumentError {
       if (!mounted) return;
-      setState(() {
-        _isGeneratingPreviews = false;
-        _error =
-            'Could not preview this crop. Adjust the corners and try again.';
-      });
+      setState(() => _isGeneratingPreviews = false);
+      _showError(
+        'Could not preview this crop. Adjust the corners and try again.',
+      );
       return;
     }
 
@@ -177,10 +178,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _updateFinalPreview();
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _isGeneratingPreviews = false;
-        _error = 'Could not process this photo. Try another image.';
-      });
+      setState(() => _isGeneratingPreviews = false);
+      _showError('Could not process this photo. Try another image.');
     }
   }
 
@@ -244,10 +243,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
     final contrast = _contrast;
-    setState(() {
-      _isProcessing = true;
-      _error = null;
-    });
+    setState(() => _isProcessing = true);
     try {
       final processed = await _processForExport(
         corners,
@@ -270,10 +266,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       );
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _isProcessing = false;
-        _error = 'Could not process this page. Try another image.';
-      });
+      setState(() => _isProcessing = false);
+      _showError('Could not process this page. Try another image.');
     }
   }
 
@@ -326,14 +320,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   ) {
     return Column(
       children: [
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -400,14 +386,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _finalPreviewBytes ?? _filterPreviews?[_selectedFilter];
     return Column(
       children: [
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(16),

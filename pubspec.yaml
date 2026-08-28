@@ -14,6 +14,9 @@ dependencies:
   pdf: ^3.10.7
   share_plus: ^13.3.0
   opencv_dart: ^2.2.1
+  package_info_plus: ^10.2.1
+  url_launcher: ^6.3.2
+  flutter_zxing: ^2.3.0
 
 dev_dependencies:
   flutter_test:

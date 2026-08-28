@@ -6,15 +6,20 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/image_metadata.dart';
+import '../widgets/transient_message.dart';
+import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
 
 const _thumbnailCacheWidth = 512;
+const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
 class _DocumentCapacityException implements Exception {
   const _DocumentCapacityException();
@@ -99,16 +104,87 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return true;
   }
 
-  void _showMessage(String message) {
+  void _showMessage(String message) => showTransientMessage(context, message);
+
+  Future<void> _openSourceCode() async {
+    try {
+      final launched = await launchUrl(
+        Uri.parse(_sourceCodeUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) _showMessage('Could not open the source code link.');
+    } catch (_) {
+      _showMessage('Could not open the source code link.');
+    }
+  }
+
+  Future<void> _showAppInfo() async {
+    final packageInfo = await PackageInfo.fromPlatform();
     if (!mounted) return;
-    // Startup lost-data recovery can fail from initState, before this page's
-    // Scaffold has registered with the surrounding ScaffoldMessenger.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(message)));
-    });
+    final theme = Theme.of(context);
+    final mutedStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Image.asset('assets/icon/icon.png', width: 40, height: 40),
+            const SizedBox(width: 12),
+            const Text('FOSScanner'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Version ${packageInfo.version} (build ${packageInfo.buildNumber})',
+                style: mutedStyle,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'A privacy-first, free and open-source document scanner. '
+                'Scan documents with your camera, auto-crop and dewarp them, '
+                'and export a PDF — all on-device. No accounts, no cloud, '
+                'no tracking.',
+              ),
+              const SizedBox(height: 20),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: _openSourceCode,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.code, size: 18, color: theme.colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'View source code',
+                      style: TextStyle(
+                        color: theme.colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _recoverLostImages() async {
@@ -464,6 +540,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
+          // flutter_zxing has no web decoding backend (its web implementation
+          // throws UnimplementedError on every frame) — same platform gap as
+          // opencv_dart, so this follows the same kIsWeb convention used for
+          // the detect/adjust flow elsewhere in this screen.
+          if (!kIsWeb)
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
+              ),
+              tooltip: 'Scan QR/barcode',
+            ),
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
             onPressed: _isPickingImages || !_canStartImagePick
@@ -625,11 +713,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               child: const Icon(Icons.camera_alt),
             )
           : null,
-      bottomNavigationBar: _pages.isNotEmpty
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: ElevatedButton.icon(
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_pages.isNotEmpty) ...[
+                ElevatedButton.icon(
                   key: _shareButtonKey,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -649,9 +740,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     style: const TextStyle(fontSize: 16),
                   ),
                 ),
+                const SizedBox(height: 4),
+              ],
+              TextButton(
+                onPressed: _showAppInfo,
+                child: Text(
+                  'About FOSScanner',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-            )
-          : null,
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
