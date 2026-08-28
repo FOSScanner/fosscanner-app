@@ -82,6 +82,11 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
             showGallery: true,
             cropPercent: 0,
             showScannerOverlay: false,
+            // 1D formats (EAN/UPC/Code128, common on physical product
+            // packaging) carry far less redundancy than a QR code and are
+            // much more sensitive to a slight skew/angle, so they need the
+            // more exhaustive per-frame decode attempt this enables.
+            tryHarder: true,
           ),
           if (result == null)
             IgnorePointer(
