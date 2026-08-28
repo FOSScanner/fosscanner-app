@@ -17,6 +17,13 @@ jobs:
           channel: stable
 
       - run: flutter pub get
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pubspec-lock
+          path: pubspec.lock
+          retention-days: 14
+
       - run: flutter analyze
       - run: flutter test
       # Tests compile the host (Linux) native assets only. Compile one shipping
