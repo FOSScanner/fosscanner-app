@@ -56,7 +56,19 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       appBar: AppBar(title: const Text('Scan QR / Barcode')),
       body: Stack(
         children: [
-          ReaderWidget(onScan: _handleScan, showGallery: true),
+          // cropPercent must stay 0 here: ReaderWidget's crop-indicator square
+          // only lines up with the region it actually decodes when the widget
+          // is truly full-screen. This screen has an AppBar above it (so the
+          // preview is letterboxed), which is exactly the case the flutter_zxing
+          // maintainers flag as producing a crop guide that visually looks
+          // centered on the code while the real decode window is offset
+          // elsewhere — the code never gets read even though it's framed
+          // correctly on screen. See khoren93/flutter_zxing#196.
+          ReaderWidget(
+            onScan: _handleScan,
+            showGallery: true,
+            cropPercent: 0,
+          ),
           if (result != null)
             Positioned(
               left: 0,
