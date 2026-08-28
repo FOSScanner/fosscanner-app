@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0](https://github.com/FOSScanner/fosscanner-app/compare/v1.2.2...v1.3.0) (2026-08-28)
+
+
+### Features
+
+* add in-app about screen with version and source link
+* add QR/barcode scanning as a standalone camera mode
+
+
+### Bug Fixes
+
+* clarify version display and expand the about dialog
+* corner role validation could reject valid, correctly-ordered crops
+* dedupe snackbar helper, guard a post-dispose setState, surface launchUrl failures
+* enable tryHarder so 1D barcodes (EAN/UPC/Code128) actually decode
+* QR scan result never clears, and the found-code overlay looked clickable
+* QR/barcode scanning never detecting a code
+* reject corner quads with mismatched tl/tr/br/bl roles, closes [#20](https://github.com/FOSScanner/fosscanner-app/issues/20)
+* show corner-adjust errors in a snackbar instead of shrinking the preview, closes [#21](https://github.com/FOSScanner/fosscanner-app/issues/21)
+* use FOSScanner consistently in user-facing display strings
+* use_build_context_synchronously lint in _openResult
+
 ## [1.2.2](https://github.com/FOSScanner/fosscanner-app/compare/v1.2.1...v1.2.2) (2026-08-26)
 
 
