@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/image_metadata.dart';
+import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
 
 const _thumbnailCacheWidth = 512;
@@ -539,6 +540,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
+          // flutter_zxing has no web decoding backend (its web implementation
+          // throws UnimplementedError on every frame) — same platform gap as
+          // opencv_dart, so this follows the same kIsWeb convention used for
+          // the detect/adjust flow elsewhere in this screen.
+          if (!kIsWeb)
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
+              ),
+              tooltip: 'Scan QR/barcode',
+            ),
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
             onPressed: _isPickingImages || !_canStartImagePick

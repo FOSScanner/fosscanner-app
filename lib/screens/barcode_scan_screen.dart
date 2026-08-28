@@ -1,0 +1,112 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter_zxing/flutter_zxing.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+/// A live QR/barcode scanning mode, separate from the document-scan flow:
+/// point the camera at a code and get the decoded value with quick actions
+/// (copy, open link), rather than treating the code as a document page.
+class BarcodeScanScreen extends StatefulWidget {
+  const BarcodeScanScreen({super.key});
+
+  @override
+  State<BarcodeScanScreen> createState() => _BarcodeScanScreenState();
+}
+
+class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
+  String? _lastResult;
+
+  Uri? get _resultUri {
+    final result = _lastResult;
+    if (result == null) return null;
+    final uri = Uri.tryParse(result);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return null;
+    }
+    return uri;
+  }
+
+  void _handleScan(Code code) {
+    final text = code.text;
+    if (!code.isValid || text == null || text.isEmpty) return;
+    if (text == _lastResult) return;
+    setState(() => _lastResult = text);
+  }
+
+  Future<void> _copyResult() async {
+    final result = _lastResult;
+    if (result == null) return;
+    await Clipboard.setData(ClipboardData(text: result));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+  }
+
+  Future<void> _openResult() async {
+    final uri = _resultUri;
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final result = _lastResult;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan QR / Barcode')),
+      body: Stack(
+        children: [
+          ReaderWidget(onScan: _handleScan, showGallery: true),
+          if (result != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                top: false,
+                child: Card(
+                  margin: const EdgeInsets.all(16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          result,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            if (_resultUri != null) ...[
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: _openResult,
+                                  icon: const Icon(Icons.open_in_new),
+                                  label: const Text('Open'),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                            ],
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _copyResult,
+                                icon: const Icon(Icons.copy),
+                                label: const Text('Copy'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
