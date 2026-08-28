@@ -10,22 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Features
 
-* add in-app about screen with version and source link ([c3e4c56](https://github.com/FOSScanner/fosscanner-app/commit/c3e4c56cc940cab7e39e5c2e2e61b7bb8caf85c1))
-* add QR/barcode scanning as a standalone camera mode ([18dc243](https://github.com/FOSScanner/fosscanner-app/commit/18dc243bbe22f8fbd803a7d0e5558090b03e9cb5))
+* add in-app about screen with version and source link
+* add QR/barcode scanning as a standalone camera mode
 
 
 ### Bug Fixes
 
-* clarify version display and expand the about dialog ([71592fe](https://github.com/FOSScanner/fosscanner-app/commit/71592fed3f0f2af32555de41840250402dc77c83))
-* corner role validation could reject valid, correctly-ordered crops ([e61972b](https://github.com/FOSScanner/fosscanner-app/commit/e61972b4892716366409d94df18705777f9fb59c))
-* dedupe snackbar helper, guard a post-dispose setState, surface launchUrl failures ([c478ecb](https://github.com/FOSScanner/fosscanner-app/commit/c478ecb64aff8424ce4a08be024edf244cb97e4c))
-* enable tryHarder so 1D barcodes (EAN/UPC/Code128) actually decode ([d0661ba](https://github.com/FOSScanner/fosscanner-app/commit/d0661bae8eb832f018bd93333da0e606736bf689))
-* QR scan result never clears, and the found-code overlay looked clickable ([01c2c36](https://github.com/FOSScanner/fosscanner-app/commit/01c2c361b916d9b962c49a1932d4cc32b6e2fc3b))
-* QR/barcode scanning never detecting a code ([1e92ad7](https://github.com/FOSScanner/fosscanner-app/commit/1e92ad76c256fcac45c0daf4c6b4849f6b174c53))
-* reject corner quads with mismatched tl/tr/br/bl roles ([d726d4d](https://github.com/FOSScanner/fosscanner-app/commit/d726d4df7e77cd792bf9ff5164f73f1574ee412d)), closes [#20](https://github.com/FOSScanner/fosscanner-app/issues/20)
-* show corner-adjust errors in a snackbar instead of shrinking the preview ([012d0fe](https://github.com/FOSScanner/fosscanner-app/commit/012d0fe10144b8aef596ea8c9334996ca2c34c3e)), closes [#21](https://github.com/FOSScanner/fosscanner-app/issues/21)
-* use FOSScanner consistently in user-facing display strings ([600fbe0](https://github.com/FOSScanner/fosscanner-app/commit/600fbe0b5b320c657fcb03b28aba121127cecf3d))
-* use_build_context_synchronously lint in _openResult ([e9c9fa3](https://github.com/FOSScanner/fosscanner-app/commit/e9c9fa304f9349e43218231dd19a8ef8199f277b))
+* clarify version display and expand the about dialog
+* corner role validation could reject valid, correctly-ordered crops
+* dedupe snackbar helper, guard a post-dispose setState, surface launchUrl failures
+* enable tryHarder so 1D barcodes (EAN/UPC/Code128) actually decode
+* QR scan result never clears, and the found-code overlay looked clickable
+* QR/barcode scanning never detecting a code
+* reject corner quads with mismatched tl/tr/br/bl roles, closes [#20](https://github.com/FOSScanner/fosscanner-app/issues/20)
+* show corner-adjust errors in a snackbar instead of shrinking the preview, closes [#21](https://github.com/FOSScanner/fosscanner-app/issues/21)
+* use FOSScanner consistently in user-facing display strings
+* use_build_context_synchronously lint in _openResult
 
 ## [1.2.2](https://github.com/FOSScanner/fosscanner-app/compare/v1.2.1...v1.2.2) (2026-08-26)
 
