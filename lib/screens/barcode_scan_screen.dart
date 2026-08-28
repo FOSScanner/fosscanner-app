@@ -33,6 +33,10 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     setState(() => _lastResult = text);
   }
 
+  void _dismissResult() {
+    setState(() => _lastResult = null);
+  }
+
   Future<void> _copyResult() async {
     final result = _lastResult;
     if (result == null) return;
@@ -64,11 +68,37 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
           // centered on the code while the real decode window is offset
           // elsewhere — the code never gets read even though it's framed
           // correctly on screen. See khoren93/flutter_zxing#196.
+          //
+          // showScannerOverlay is also off: at cropPercent 0, flutter_zxing's
+          // built-in overlay switches to a "tap the highlighted code" mode
+          // instead of a plain guide, which reads as scanning requiring a
+          // tap when it doesn't — onScan already fires as soon as a frame
+          // decodes. The plain square below is a purely cosmetic aiming hint
+          // with no effect on what actually gets decoded (the whole frame
+          // always does), so it can't drift out of sync the way the built-in
+          // one did.
           ReaderWidget(
             onScan: _handleScan,
             showGallery: true,
             cropPercent: 0,
+            showScannerOverlay: false,
           ),
+          if (result == null)
+            IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: MediaQuery.sizeOf(context).shortestSide * 0.6,
+                  height: MediaQuery.sizeOf(context).shortestSide * 0.6,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 3,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
           if (result != null)
             Positioned(
               left: 0,
@@ -84,10 +114,25 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          result,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                result,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              tooltip: 'Dismiss and keep scanning',
+                              onPressed: _dismissResult,
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         Row(
