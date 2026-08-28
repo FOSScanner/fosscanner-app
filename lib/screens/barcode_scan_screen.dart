@@ -3,6 +3,8 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_zxing/flutter_zxing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../widgets/transient_message.dart';
+
 /// A live QR/barcode scanning mode, separate from the document-scan flow:
 /// point the camera at a code and get the decoded value with quick actions
 /// (copy, open link), rather than treating the code as a document page.
@@ -27,6 +29,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   }
 
   void _handleScan(Code code) {
+    if (!mounted) return;
     final text = code.text;
     if (!code.isValid || text == null || text.isEmpty) return;
     if (text == _lastResult) return;
@@ -50,7 +53,15 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   Future<void> _openResult() async {
     final uri = _resultUri;
     if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) showTransientMessage(context, 'Could not open the link.');
+    } catch (_) {
+      showTransientMessage(context, 'Could not open the link.');
+    }
   }
 
   @override

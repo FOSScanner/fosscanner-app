@@ -10,6 +10,7 @@ import '../models/scanned_page.dart';
 import '../services/corner_geometry.dart';
 import '../services/document_processor.dart';
 import '../widgets/corner_overlay.dart';
+import '../widgets/transient_message.dart';
 
 const _fullPreviewDecodeSize = 2048;
 const _filterChipDecodeSize = 256;
@@ -132,17 +133,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     ];
   }
 
-  void _showError(String message) {
-    if (!mounted) return;
-    // Defer to a post-frame callback so the SnackBar shows against this
-    // screen's own Scaffold rather than racing an in-flight build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(message)));
-    });
-  }
+  void _showError(String message) => showTransientMessage(context, message);
 
   Future<void> _updatePreviews() async {
     final corners = _corners;

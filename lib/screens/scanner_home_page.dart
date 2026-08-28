@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/image_metadata.dart';
+import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
 
@@ -103,16 +104,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return true;
   }
 
-  void _showMessage(String message) {
-    if (!mounted) return;
-    // Startup lost-data recovery can fail from initState, before this page's
-    // Scaffold has registered with the surrounding ScaffoldMessenger.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(message)));
-    });
+  void _showMessage(String message) => showTransientMessage(context, message);
+
+  Future<void> _openSourceCode() async {
+    try {
+      final launched = await launchUrl(
+        Uri.parse(_sourceCodeUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) _showMessage('Could not open the source code link.');
+    } catch (_) {
+      _showMessage('Could not open the source code link.');
+    }
   }
 
   Future<void> _showAppInfo() async {
@@ -153,10 +156,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               const Divider(height: 1),
               const SizedBox(height: 12),
               InkWell(
-                onTap: () => launchUrl(
-                  Uri.parse(_sourceCodeUrl),
-                  mode: LaunchMode.externalApplication,
-                ),
+                onTap: _openSourceCode,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
