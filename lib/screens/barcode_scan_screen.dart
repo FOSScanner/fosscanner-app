@@ -58,9 +58,11 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
         uri,
         mode: LaunchMode.externalApplication,
       );
-      if (!launched) showTransientMessage(context, 'Could not open the link.');
+      if (!launched && mounted) {
+        showTransientMessage(context, 'Could not open the link.');
+      }
     } catch (_) {
-      showTransientMessage(context, 'Could not open the link.');
+      if (mounted) showTransientMessage(context, 'Could not open the link.');
     }
   }
 
