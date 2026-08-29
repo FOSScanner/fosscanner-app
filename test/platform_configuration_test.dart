@@ -802,6 +802,25 @@ void main() {
     expect(
       fastlane,
       matches(
+        RegExp(
+          r'after\s+sharing[^.]*choose[^.]*clear[^.]*keep[^.]*draft',
+          caseSensitive: false,
+        ),
+      ),
+      reason: 'Fastlane must disclose the post-share retention choice',
+    );
+    expect(
+      fastlane,
+      isNot(
+        matches(
+          RegExp(r'(removed|deleted)[^.]*after[^.]*shar', caseSensitive: false),
+        ),
+      ),
+      reason: 'Sharing does not always remove the draft',
+    );
+    expect(
+      fastlane,
+      matches(
         RegExp(r'app-owned\s+camera\s+temp\s+files', caseSensitive: false),
       ),
     );
