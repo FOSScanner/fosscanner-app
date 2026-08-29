@@ -206,6 +206,31 @@ String _runner(_WorkflowJob job) => RegExp(
 ).firstMatch(job.source)!.group(1)!;
 
 void main() {
+  test('Android excludes app-private drafts from OS backup', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+
+    expect(
+      manifest,
+      matches(
+        RegExp(
+          r'<application[\s\S]*?android:allowBackup="false"',
+          caseSensitive: false,
+        ),
+      ),
+    );
+  });
+
+  test('native drafts use the OS-managed application cache', () {
+    final source = File(
+      'lib/services/draft_store_native.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('getApplicationCacheDirectory()'));
+    expect(source, isNot(contains('getApplicationSupportDirectory()')));
+  });
+
   test('active-line checks ignore commented directives', () {
     expect(
       _hasActiveLine(
@@ -438,9 +463,9 @@ void main() {
       isEmpty,
       reason: 'Docker ignore exclusions must not be re-included later',
     );
-    final gitIgnored = _activeLines(File('.gitignore').readAsStringSync())
-        .map((line) => line.trim().replaceAll(RegExp(r'^/|/$'), ''))
-        .toSet();
+    final gitIgnored = _activeLines(
+      File('.gitignore').readAsStringSync(),
+    ).map((line) => line.trim().replaceAll(RegExp(r'^/|/$'), '')).toSet();
     expect(gitIgnored, containsAll({'docker-output', '.clean-check-tmp'}));
 
     final compose = File('docker-compose.yml').readAsStringSync();
@@ -543,74 +568,77 @@ void main() {
     );
   });
 
-  test('release preflight validates the tag before the release environment', () {
-    final release = File('.github/workflows/release.yml').readAsStringSync();
-    expect(
-      _yamlListValues(release, 'tags'),
-      equals(['v[0-9]*.[0-9]*.[0-9]*']),
-    );
+  test(
+    'release preflight validates the tag before the release environment',
+    () {
+      final release = File('.github/workflows/release.yml').readAsStringSync();
+      expect(
+        _yamlListValues(release, 'tags'),
+        equals(['v[0-9]*.[0-9]*.[0-9]*']),
+      );
 
-    final jobs = _workflowJobs(release);
-    expect(jobs.keys, equals(['preflight', 'build-and-release']));
-    final preflight = jobs['preflight']!;
-    final build = jobs['build-and-release']!;
-    expect(preflight.source, isNot(contains('environment:')));
-    expect(preflight.source, isNot(contains(r'${{ secrets.')));
-    expect(
-      build.source,
-      matches(RegExp(r'^\s+needs:\s*preflight\s*$', multiLine: true)),
-    );
-    expect(
-      build.source,
-      matches(RegExp(r'^\s+environment:\s*release\s*$', multiLine: true)),
-    );
+      final jobs = _workflowJobs(release);
+      expect(jobs.keys, equals(['preflight', 'build-and-release']));
+      final preflight = jobs['preflight']!;
+      final build = jobs['build-and-release']!;
+      expect(preflight.source, isNot(contains('environment:')));
+      expect(preflight.source, isNot(contains(r'${{ secrets.')));
+      expect(
+        build.source,
+        matches(RegExp(r'^\s+needs:\s*preflight\s*$', multiLine: true)),
+      );
+      expect(
+        build.source,
+        matches(RegExp(r'^\s+environment:\s*release\s*$', multiLine: true)),
+      );
 
-    final preflightCommands = _workflowRunCommands(
-      preflight.source,
-    ).join('\n');
-    const exactSemverPattern =
-        r'^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$';
-    expect(preflightCommands, contains(exactSemverPattern));
-    final exactSemver = RegExp(exactSemverPattern);
-    for (final tag in ['v0.0.0', 'v1.2.2', 'v10.20.30']) {
-      expect(exactSemver.hasMatch(tag), isTrue, reason: tag);
-    }
-    for (final tag in ['v01.2.2', 'v1.2', 'v1.2.2-rc.1', 'v1.2.2+5']) {
-      expect(exactSemver.hasMatch(tag), isFalse, reason: tag);
-    }
-    expect(
-      preflightCommands,
-      contains(r'git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"'),
-    );
-    expect(preflightCommands, contains('pubspec.yaml'));
-    expect(preflightCommands, contains(r'${pubspec_version%%+*}'));
-    expect(
-      preflightCommands,
-      contains(r'"$GITHUB_REF_NAME" != "v$release_version"'),
-    );
-    for (final command in [
-      'flutter pub get',
-      'flutter analyze',
-      'flutter test',
-    ]) {
-      expect(preflightCommands, contains(command), reason: command);
-    }
+      final preflightCommands = _workflowRunCommands(
+        preflight.source,
+      ).join('\n');
+      const exactSemverPattern =
+          r'^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$';
+      expect(preflightCommands, contains(exactSemverPattern));
+      final exactSemver = RegExp(exactSemverPattern);
+      for (final tag in ['v0.0.0', 'v1.2.2', 'v10.20.30']) {
+        expect(exactSemver.hasMatch(tag), isTrue, reason: tag);
+      }
+      for (final tag in ['v01.2.2', 'v1.2', 'v1.2.2-rc.1', 'v1.2.2+5']) {
+        expect(exactSemver.hasMatch(tag), isFalse, reason: tag);
+      }
+      expect(
+        preflightCommands,
+        contains(r'git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"'),
+      );
+      expect(preflightCommands, contains('pubspec.yaml'));
+      expect(preflightCommands, contains(r'${pubspec_version%%+*}'));
+      expect(
+        preflightCommands,
+        contains(r'"$GITHUB_REF_NAME" != "v$release_version"'),
+      );
+      for (final command in [
+        'flutter pub get',
+        'flutter analyze',
+        'flutter test',
+      ]) {
+        expect(preflightCommands, contains(command), reason: command);
+      }
 
-    final preflightCheckout = _workflowSteps(
-      preflight.source,
-    ).singleWhere((step) => step.action == 'actions/checkout');
-    expect(
-      preflightCheckout.source,
-      matches(RegExp(r'^\s+fetch-depth:\s*0\s*$', multiLine: true)),
-    );
-    final buildCheckout = _workflowSteps(
-      build.source,
-    ).singleWhere((step) => step.action == 'actions/checkout');
-    expect(
-      buildCheckout.source,
-      contains(r'ref: ${{ needs.preflight.outputs.validated-sha }}'),
-    );
-  });
+      final preflightCheckout = _workflowSteps(
+        preflight.source,
+      ).singleWhere((step) => step.action == 'actions/checkout');
+      expect(
+        preflightCheckout.source,
+        matches(RegExp(r'^\s+fetch-depth:\s*0\s*$', multiLine: true)),
+      );
+      final buildCheckout = _workflowSteps(
+        build.source,
+      ).singleWhere((step) => step.action == 'actions/checkout');
+      expect(
+        buildCheckout.source,
+        contains(r'ref: ${{ needs.preflight.outputs.validated-sha }}'),
+      );
+    },
+  );
 
   test('release attests every APK and fails if publishing matches nothing', () {
     final release = File('.github/workflows/release.yml').readAsStringSync();
@@ -675,9 +703,8 @@ void main() {
     final jobs = _workflowJobs(source);
 
     _WorkflowJob jobWith(String command) => jobs.values.singleWhere(
-      (job) => _workflowRunCommands(
-        job.source,
-      ).any((run) => run.contains(command)),
+      (job) =>
+          _workflowRunCommands(job.source).any((run) => run.contains(command)),
       orElse: () => throw TestFailure('No CI job runs `$command`'),
     );
 

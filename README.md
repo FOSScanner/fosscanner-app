@@ -40,6 +40,7 @@ and this page list.*
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
   and contrast) without re-scanning
 - Capture multiple pages in sequence and reorder them with drag-and-drop
+- Automatically restore an unfinished draft after a native app restart
 - Import existing photos from your gallery instead of (or alongside)
   capturing new ones
 - Combine captured pages into a single PDF
@@ -62,8 +63,19 @@ used as-is there.
 - All image processing and PDF generation happens on-device.
 - Imported gallery originals are never modified or deleted. App-owned camera
   temp files are removed after the app attempts to copy their bytes into
-  memory (including failed reads), and in-progress pages remain only in memory
-  until the app is closed.
+  memory (including failed reads).
+- On native platforms, unfinished drafts are saved automatically in the app's
+  private, OS-managed application cache. They survive normal process death and
+  app restarts, but caches are transient and can be purged by the OS under
+  storage pressure; they are not durable storage or included in Android OS
+  backups. A draft includes both original and processed page images plus
+  crop/filter/edit settings. Atomic staging plus one backup generation can
+  retain the current and immediately previous draft contents. Draft data is
+  also removed when you confirm **Clear all**, choose **Clear draft** after
+  sharing, clear the app's storage, or uninstall the app. Sharing does not
+  delete a draft unless you explicitly choose that option.
+- The web build does not persist drafts; its in-progress pages remain only in
+  memory and disappear when the page is closed or reloaded.
 - PDF sharing starts from in-memory bytes. Depending on the platform,
   `share_plus` may materialize a copy in the app/OS cache for the receiving app;
   that cache is OS-managed and is not guaranteed to disappear immediately

@@ -18,13 +18,17 @@ a private discussion with maintainers before anything becomes public.
 
 Given the app's design — all image processing and PDF generation happens
 on-device, and it makes no network requests of its own (see the README's
-"Privacy" section) — the most relevant classes of report are:
+"Privacy" section) — the most relevant classes of report are below. Automatic
+native drafts use the app-private, OS-managed application cache: they survive
+normal process death and restarts, but can be purged under storage pressure and
+are excluded from Android OS backup.
 
 - Anything that would let a malicious document/image trigger memory
   corruption or a crash via the native OpenCV pipeline
   (`document_processor_native.dart`)
-- Anything that would cause photos or generated PDFs to be persisted or
-  leaked when they shouldn't be (see the README's privacy guarantees)
+- Anything that would expose app-private automatic draft files, retain them
+  after an explicit clear, or cause photos/generated PDFs to be persisted or
+  leaked outside the retention behavior documented in the README
 
 Dependency vulnerabilities are also welcome as reports, though Dependabot
 already opens PRs for those automatically where a fix is available.
