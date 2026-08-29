@@ -21,6 +21,7 @@ Privacy:
 * All image processing and PDF generation happens on-device
 * Imported gallery originals are never modified or deleted. App-owned camera temp files
   are removed after the app attempts to copy them into memory, including failed reads
-* In-progress pages stay in memory. Sharing a PDF may create a copy in an OS-managed cache
-  for the receiving app, and the OS decides when that cache is removed
+* An unfinished draft is saved automatically in the app's private, OS-managed cache so it
+  can be restored after an app restart. It is removed after you clear or share the document,
+  and the OS may evict cached data. Sharing may create a separate cached PDF copy
 * The app makes no network requests of its own

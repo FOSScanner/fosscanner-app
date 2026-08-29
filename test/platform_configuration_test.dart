@@ -766,10 +766,39 @@ void main() {
     final fastlane = File(
       'fastlane/metadata/android/en-US/full_description.txt',
     ).readAsStringSync();
-    expect(
-      fastlane,
-      matches(RegExp(r'OS-managed\s+cache', caseSensitive: false)),
-    );
+    final featureRequest = File(
+      '.github/ISSUE_TEMPLATE/feature_request.yml',
+    ).readAsStringSync();
+    for (final (name, disclosure) in [
+      ('Fastlane description', fastlane),
+      ('feature request template', featureRequest),
+    ]) {
+      expect(
+        disclosure,
+        matches(
+          RegExp(r'private,?\s+OS-managed\s+cache', caseSensitive: false),
+        ),
+        reason: '$name must disclose automatic native draft persistence',
+      );
+      expect(
+        disclosure,
+        matches(RegExp(r'unfinished\s+draft', caseSensitive: false)),
+        reason: '$name must explain what the cache contains',
+      );
+      expect(
+        disclosure,
+        isNot(
+          matches(
+            RegExp(
+              r'(in-progress\s+pages\s+stay|keeps?\s+in-progress\s+pages)'
+              r'\s+in\s+memory',
+              caseSensitive: false,
+            ),
+          ),
+        ),
+        reason: '$name must not claim native pages are memory-only',
+      );
+    }
     expect(
       fastlane,
       matches(
