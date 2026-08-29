@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
@@ -295,7 +296,7 @@ void main() {
     },
   );
 
-  testWidgets('a disposed screen cannot overlap work from its replacement', (
+  testWidgets('home editors share work after a route is disposed', (
     tester,
   ) async {
     final bytes = await _iconBytes();
@@ -303,30 +304,35 @@ void main() {
       detectResult: _corners,
       completeFinalImmediately: true,
     );
-    final processingQueue = ImageProcessingQueue();
+    final page = ScannedPage(
+      originalBytes: bytes,
+      corners: _corners,
+      processedBytes: bytes,
+    );
 
-    Future<void> showEditor() => tester.pumpWidget(
+    await tester.pumpWidget(
       MaterialApp(
-        home: CornerAdjustScreen(
-          originalBytes: bytes,
-          initialCorners: _corners,
-          operations: operations,
-          processingQueue: processingQueue,
+        home: ScannerHomePage(
+          initialPages: [page, page],
+          cornerAdjustOperations: operations,
+          sourceImageSizeReader: (_) async => const Size(100, 100),
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
-    await showEditor();
+    await tester.tap(find.byType(Card).at(0));
     await _waitForPreviewStart(tester, operations, 0);
-    await tester.pumpWidget(const SizedBox());
-    await showEditor();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Card).at(1));
     await tester.pump();
     await tester.pump();
 
     expect(
       operations.previewResults,
       hasLength(1),
-      reason: 'replacement screens must share the active worker queue',
+      reason: 'replacement routes must share the home screen worker queue',
     );
 
     operations.previewResults[0].complete(_previews(bytes));
@@ -334,7 +340,8 @@ void main() {
     expect(operations.maxConcurrentWorkers, 1);
     operations.previewResults[1].complete(_previews(bytes));
     await tester.pump();
-    await tester.pump();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
   });
 
   testWidgets('disposing with pending preview work is safe', (tester) async {

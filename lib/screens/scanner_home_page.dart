@@ -390,6 +390,22 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  CornerAdjustScreen _buildEditor(
+    Uint8List originalBytes, {
+    ScannedPage? page,
+  }) {
+    return CornerAdjustScreen(
+      originalBytes: originalBytes,
+      initialCorners: page?.corners,
+      initialFilter: page?.filter ?? PageFilter.original,
+      initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
+      initialBrightness: page?.brightness ?? 0,
+      initialContrast: page?.contrast ?? 1,
+      operations: widget.cornerAdjustOperations,
+      processingQueue: _imageProcessingQueue,
+    );
+  }
+
   /// Shared by camera capture and gallery import: read the file's bytes,
   /// optionally delete the source file, then (native only) run the photo
   /// through the detect/adjust flow before adding it as a page.
@@ -510,15 +526,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
-    final result = await Navigator.of(context).push<ScannedPage>(
-      MaterialPageRoute(
-        builder: (_) => CornerAdjustScreen(
-          originalBytes: bytes,
-          operations: widget.cornerAdjustOperations,
-          processingQueue: _imageProcessingQueue,
-        ),
-      ),
-    );
+    final result = await Navigator.of(
+      context,
+    ).push<ScannedPage>(MaterialPageRoute(builder: (_) => _buildEditor(bytes)));
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
@@ -586,16 +596,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
       final result = await Navigator.of(context).push<ScannedPage>(
         MaterialPageRoute(
-          builder: (_) => CornerAdjustScreen(
-            originalBytes: page.originalBytes,
-            initialCorners: page.corners,
-            initialFilter: page.filter,
-            initialRotationQuarterTurns: page.rotationQuarterTurns,
-            initialBrightness: page.brightness,
-            initialContrast: page.contrast,
-            operations: widget.cornerAdjustOperations,
-            processingQueue: _imageProcessingQueue,
-          ),
+          builder: (_) => _buildEditor(page.originalBytes, page: page),
         ),
       );
       if (result != null &&
