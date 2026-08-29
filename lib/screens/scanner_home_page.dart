@@ -60,6 +60,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   late final List<ScannedPage> _pages;
   late final SharePlus _sharePlus;
   final ImagePicker _picker = ImagePicker();
+  final ImageProcessingQueue _imageProcessingQueue = ImageProcessingQueue();
   Future<void> _draftWriteTail = Future<void>.value();
   var _draftRevision = 0;
   var _documentGeneration = 0;
@@ -514,6 +515,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         builder: (_) => CornerAdjustScreen(
           originalBytes: bytes,
           operations: widget.cornerAdjustOperations,
+          processingQueue: _imageProcessingQueue,
         ),
       ),
     );
@@ -592,6 +594,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             initialBrightness: page.brightness,
             initialContrast: page.contrast,
             operations: widget.cornerAdjustOperations,
+            processingQueue: _imageProcessingQueue,
           ),
         ),
       );
@@ -971,8 +974,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                 color: Colors.white,
                               ),
                               tooltip: 'Delete page ${index + 1}',
-                              onPressed:
-                                  _isClearingDraft || _isOpeningEditor
+                              onPressed: _isClearingDraft || _isOpeningEditor
                                   ? null
                                   : () => _removePage(index),
                             ),
@@ -996,8 +998,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     final isDropTarget = candidateData.isNotEmpty;
                     return LongPressDraggable<int>(
                       data: index,
-                      maxSimultaneousDrags:
-                          _isClearingDraft || _isOpeningEditor ? 0 : 1,
+                      maxSimultaneousDrags: _isClearingDraft || _isOpeningEditor
+                          ? 0
+                          : 1,
                       feedback: SizedBox(
                         width: 140,
                         height: 200,

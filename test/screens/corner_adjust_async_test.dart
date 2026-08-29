@@ -51,7 +51,7 @@ class _ControlledOperations implements CornerAdjustOperations {
 
   @override
   Future<Size> decodeSize(Uint8List imageBytes) async {
-    decodeCompleted.complete();
+    if (!decodeCompleted.isCompleted) decodeCompleted.complete();
     return const Size(100, 100);
   }
 
@@ -294,6 +294,48 @@ void main() {
       await tester.pump();
     },
   );
+
+  testWidgets('a disposed screen cannot overlap work from its replacement', (
+    tester,
+  ) async {
+    final bytes = await _iconBytes();
+    final operations = _ControlledOperations(
+      detectResult: _corners,
+      completeFinalImmediately: true,
+    );
+    final processingQueue = ImageProcessingQueue();
+
+    Future<void> showEditor() => tester.pumpWidget(
+      MaterialApp(
+        home: CornerAdjustScreen(
+          originalBytes: bytes,
+          initialCorners: _corners,
+          operations: operations,
+          processingQueue: processingQueue,
+        ),
+      ),
+    );
+
+    await showEditor();
+    await _waitForPreviewStart(tester, operations, 0);
+    await tester.pumpWidget(const SizedBox());
+    await showEditor();
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      operations.previewResults,
+      hasLength(1),
+      reason: 'replacement screens must share the active worker queue',
+    );
+
+    operations.previewResults[0].complete(_previews(bytes));
+    await _waitForPreviewStart(tester, operations, 1);
+    expect(operations.maxConcurrentWorkers, 1);
+    operations.previewResults[1].complete(_previews(bytes));
+    await tester.pump();
+    await tester.pump();
+  });
 
   testWidgets('disposing with pending preview work is safe', (tester) async {
     final bytes = await _iconBytes();

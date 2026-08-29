@@ -175,6 +175,26 @@ class _QueuedWorkResult<T> {
   final T? value;
 }
 
+/// Serializes OpenCV workers owned by one scanner session.
+///
+/// A route may be disposed before its worker finishes, so every editor opened
+/// by the same home screen must share this queue.
+class ImageProcessingQueue {
+  Future<void> _tail = Future<void>.value();
+
+  Future<T> run<T>(Future<T> Function() work) {
+    final result = Completer<T>();
+    _tail = _tail.then((_) async {
+      try {
+        result.complete(await work());
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
+  }
+}
+
 const _filterLabels = {
   PageFilter.original: 'Original',
   PageFilter.autoEnhance: 'Enhance',
@@ -204,6 +224,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.initialBrightness = 0.0,
     this.initialContrast = 1.0,
     this.operations = const DefaultCornerAdjustOperations(),
+    this.processingQueue,
   });
 
   final Uint8List originalBytes;
@@ -213,6 +234,7 @@ class CornerAdjustScreen extends StatefulWidget {
   final double initialBrightness;
   final double initialContrast;
   final CornerAdjustOperations operations;
+  final ImageProcessingQueue? processingQueue;
 
   @override
   State<CornerAdjustScreen> createState() => _CornerAdjustScreenState();
@@ -223,7 +245,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   List<Offset>? _corners;
   bool _isProcessing = false;
   String? _error;
-  Future<void> _workTail = Future<void>.value();
+  late final ImageProcessingQueue _processingQueue;
   int _initializationGeneration = 0;
   int _exportGeneration = 0;
 
@@ -250,6 +272,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   @override
   void initState() {
     super.initState();
+    _processingQueue = widget.processingQueue ?? ImageProcessingQueue();
     _initialize();
   }
 
@@ -257,19 +280,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     required bool Function() canStart,
     required Future<T> Function() work,
   }) {
-    final result = Completer<_QueuedWorkResult<T>>();
-    _workTail = _workTail.then((_) async {
-      if (!canStart()) {
-        result.complete(_QueuedWorkResult<T>.skipped());
-        return;
-      }
-      try {
-        result.complete(_QueuedWorkResult<T>.started(await work()));
-      } catch (error, stackTrace) {
-        result.completeError(error, stackTrace);
-      }
+    return _processingQueue.run(() async {
+      if (!canStart()) return _QueuedWorkResult<T>.skipped();
+      return _QueuedWorkResult<T>.started(await work());
     });
-    return result.future;
   }
 
   Future<void> _initialize() async {
