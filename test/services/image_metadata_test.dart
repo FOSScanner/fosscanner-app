@@ -166,8 +166,7 @@ void main() {
     const size = Size(4000, 5000);
     const encodedBytes = 64 * 1024;
     const transientBytes = encodedBytes + 224000000;
-    const retainedHeadroom =
-        maxImageProcessingWorkingSetBytes - transientBytes;
+    const retainedHeadroom = maxImageProcessingWorkingSetBytes - transientBytes;
 
     expect(
       canProcessSourceImage(

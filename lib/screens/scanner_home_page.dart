@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart'
+    show CustomSemanticsAction, OrdinalSortKey, SemanticsService;
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -15,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/scanned_page.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
+import '../services/platform_capabilities.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -682,6 +685,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pages.insert(toIndex, page);
     });
     _queueDraftSave();
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Page moved to position ${toIndex + 1} of ${_pages.length}.',
+      Directionality.of(context),
+    );
   }
 
   Future<void> _clearPages() async {
@@ -824,12 +832,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // after presenting the share UI. Only an explicit dismissal means the
       // user definitely did not share or download the PDF.
       shared = shareResult.status != ShareResultStatus.dismissed;
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('PDF generation failed (${error.runtimeType}).');
       }
+      if (mounted) _showMessage('Could not generate or share the PDF.');
     } finally {
       if (mounted) {
         setState(() {
@@ -848,11 +855,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
-          // flutter_zxing has no web decoding backend (its web implementation
-          // throws UnimplementedError on every frame) — same platform gap as
-          // opencv_dart, so this follows the same kIsWeb convention used for
-          // the detect/adjust flow elsewhere in this screen.
-          if (!kIsWeb)
+          if (supportsBarcodeCamera(
+            platform: defaultTargetPlatform,
+            isWeb: kIsWeb,
+          ))
             IconButton(
               icon: const Icon(Icons.qr_code_scanner),
               onPressed: () => Navigator.of(context).push(
@@ -986,45 +992,63 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   ),
                 );
 
-                // Drag-to-reorder: long-press a page to pick it up, drop it
-                // on another page's slot to swap it into that position.
-                return DragTarget<int>(
-                  onWillAcceptWithDetails: (details) =>
-                      !_isClearingDraft &&
+                // Drag-to-reorder remains available alongside equivalent
+                // semantic actions for switch and screen-reader users.
+                final reorderActions = <CustomSemanticsAction, VoidCallback>{
+                  if (!_isClearingDraft && !_isOpeningEditor && index > 0)
+                    const CustomSemanticsAction(label: 'Move earlier'): () =>
+                        _reorderPage(index, index - 1),
+                  if (!_isClearingDraft &&
                       !_isOpeningEditor &&
-                      details.data != index,
-                  onAcceptWithDetails: (details) =>
-                      _reorderPage(details.data, index),
-                  builder: (context, candidateData, rejectedData) {
-                    final isDropTarget = candidateData.isNotEmpty;
-                    return LongPressDraggable<int>(
-                      data: index,
-                      maxSimultaneousDrags: _isClearingDraft || _isOpeningEditor
-                          ? 0
-                          : 1,
-                      feedback: SizedBox(
-                        width: 140,
-                        height: 200,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: Opacity(opacity: 0.85, child: card),
+                      index < _pages.length - 1)
+                    const CustomSemanticsAction(label: 'Move later'): () =>
+                        _reorderPage(index, index + 1),
+                };
+                return Semantics(
+                  key: ValueKey('page_semantics_$index'),
+                  label: 'Page ${index + 1} of ${_pages.length}',
+                  sortKey: OrdinalSortKey(index.toDouble()),
+                  container: true,
+                  customSemanticsActions: reorderActions,
+                  child: DragTarget<int>(
+                    onWillAcceptWithDetails: (details) =>
+                        !_isClearingDraft &&
+                        !_isOpeningEditor &&
+                        details.data != index,
+                    onAcceptWithDetails: (details) =>
+                        _reorderPage(details.data, index),
+                    builder: (context, candidateData, rejectedData) {
+                      final isDropTarget = candidateData.isNotEmpty;
+                      return LongPressDraggable<int>(
+                        data: index,
+                        maxSimultaneousDrags:
+                            _isClearingDraft || _isOpeningEditor ? 0 : 1,
+                        feedback: SizedBox(
+                          width: 140,
+                          height: 200,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: Opacity(opacity: 0.85, child: card),
+                          ),
                         ),
-                      ),
-                      childWhenDragging: Opacity(opacity: 0.3, child: card),
-                      child: isDropTarget
-                          ? Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  width: 3,
+                        childWhenDragging: Opacity(opacity: 0.3, child: card),
+                        child: isDropTarget
+                            ? Container(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    width: 3,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
                                 ),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: card,
-                            )
-                          : card,
-                    );
-                  },
+                                child: card,
+                              )
+                            : card,
+                      );
+                    },
+                  ),
                 );
               },
             ),

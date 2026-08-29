@@ -70,11 +70,15 @@ class _ImagePickerPlatform extends ImagePickerPlatform {
 }
 
 class _SharePlatform implements SharePlatform {
+  _SharePlatform({this.error});
+
+  final Object? error;
   var calls = 0;
 
   @override
   Future<ShareResult> share(ShareParams params) async {
     calls++;
+    if (error case final value?) throw value;
     return const ShareResult('shared', ShareResultStatus.success);
   }
 }
@@ -358,6 +362,25 @@ void main() {
     expect(find.text('Clearing draft...'), findsNothing);
     expect(iconButton(tester, 'Delete page 1').onPressed, isNotNull);
     expect(iconButton(tester, 'Clear all').onPressed, isNotNull);
+  });
+
+  testWidgets('PDF failures hide raw exception details', (tester) async {
+    final store = _DraftStore();
+    final sharePlatform = _SharePlatform(
+      error: StateError('private share provider details'),
+    );
+    await pumpHome(
+      tester,
+      store,
+      pages: [page(1)],
+      sharePlus: SharePlus.custom(sharePlatform),
+    );
+
+    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Could not generate or share the PDF.'), findsOneWidget);
+    expect(find.textContaining('private share provider details'), findsNothing);
   });
 
   testWidgets('successful share keeps the draft unless clear is chosen', (
