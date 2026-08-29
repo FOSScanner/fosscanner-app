@@ -19,6 +19,8 @@ Features:
 Privacy:
 
 * All image processing and PDF generation happens on-device
-* Captured photos and the generated PDF are only ever held in memory or
-  short-lived temp storage, cleaned up as soon as they're no longer needed
+* Imported gallery originals are never modified or deleted. App-owned camera temp files
+  are removed after the app attempts to copy them into memory, including failed reads
+* In-progress pages stay in memory. Sharing a PDF may create a copy in an OS-managed cache
+  for the receiving app, and the OS decides when that cache is removed
 * The app makes no network requests of its own

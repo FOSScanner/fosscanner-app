@@ -11,7 +11,11 @@ body:
         to the raw photo. This matters a lot for triage.
       options:
         - Android
+        - iOS
         - Web
+        - Linux
+        - macOS
+        - Windows
         - Other (specify below)
     validations:
       required: true

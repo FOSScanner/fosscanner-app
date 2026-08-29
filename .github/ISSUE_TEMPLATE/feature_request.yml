@@ -23,9 +23,9 @@ body:
     attributes:
       label: Privacy
       description: >-
-        FOSScanner makes no network calls of its own and never persists
-        scans/PDFs beyond the current session (see the README). Please
-        confirm your suggestion doesn't require breaking that.
+        FOSScanner makes no network calls of its own and keeps in-progress
+        pages in memory (the OS may cache a shared PDF; see the README).
+        Please confirm your suggestion doesn't require breaking that.
       options:
         - label: This doesn't require adding network calls or persistent storage of scanned content
           required: true

@@ -88,23 +88,23 @@ flutter run
 |---|---|
 | `flutter analyze` | Static analysis / lint |
 | `flutter test` | Run the test suite |
-| `flutter build apk --split-per-abi` | Build signed, per-ABI release APKs |
+| `flutter build apk --release --split-per-abi` | Build signed, per-ABI release APKs (requires `android/key.properties`) |
 | `flutter build web` | Build a release web bundle |
 
 ### Running with Docker
 
-`docker-compose.yml` provides two services that build against
-`ghcr.io/cirruslabs/flutter:stable`, so you don't need the Flutter/Android
-SDKs installed locally. The APK service uses the image's x86_64 Android
-SDK/NDK toolchain; Docker Desktop uses emulation automatically on Apple
-Silicon, so that build is slower there. Native arm64 Linux Docker engines need
-amd64 emulation (for example, binfmt/QEMU) for the APK service:
+`docker-compose.yml` provides two services built from the pinned Flutter
+3.44.0 container image, so you don't need the Flutter/Android SDKs installed
+locally. The APK service uses the image's x86_64 Android SDK/NDK toolchain;
+Docker Desktop uses emulation automatically on Apple Silicon, so that build is
+slower there. Native arm64 Linux Docker engines need amd64 emulation (for
+example, binfmt/QEMU) for the APK service:
 
 ```bash
-# Web preview, served on http://localhost:8080
+# Web preview, bound to this machine and served on http://localhost:8080
 docker compose up flutter-web
 
-# Release Android APKs (one per ABI), output to build/app/outputs/flutter-apk/
+# Debug Android APKs (one per ABI), output to ./docker-output/
 docker compose run --rm build-apk
 ```
 

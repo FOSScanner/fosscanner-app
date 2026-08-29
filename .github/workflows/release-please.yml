@@ -14,17 +14,12 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # Default GITHUB_TOKEN is read-only for this repo/org with no
-      # repo-level override (see release.yml) and release-please needs to
-      # open PRs and push tags, so it needs the same RELEASE_TOKEN PAT.
-      - uses: googleapis/release-please-action@v4
+      # The organization enforces a read-only GITHUB_TOKEN. Keep the
+      # repository-scoped PAT confined to this publishing action.
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # Without this, release-please-action defaults to the repo's
-          # GitHub-configured default branch — which is `dev` (the PR
-          # target for day-to-day work), not `main` (the only branch
-          # this workflow actually triggers on and releases from). Pin
-          # it explicitly so the two can't silently diverge again.
+          # The repository default branch is dev, while releases come from main.
           target-branch: main

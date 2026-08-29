@@ -4,17 +4,14 @@ services:
     build: .
     container_name: fosscanner_web
     ports:
-      - "8080:8080"
-    volumes:
-      - .:/app
-    # Ensure the flutter project structure exists, get dependencies, and run the web server
-    # Uses a real release build (minified, tree-shaken) rather than
+      - "127.0.0.1:8080:8080"
+    # Uses the source baked into the image and a real release build (minified,
+    # tree-shaken) rather than
     # `flutter run -d web-server`: the debug dev-server ships an unoptimized,
     # multi-megabyte JS bundle intended for desktop hot-reload, which can be
     # slow or fail to render at all on a phone's browser.
     command: >
-      bash -c "flutter pub get &&
-               flutter build web &&
+      bash -c "flutter build web &&
                cd build/web &&
                python3 -m http.server 8080 --bind 0.0.0.0"
 
@@ -27,7 +24,7 @@ services:
     platform: linux/amd64
     container_name: fosscanner_apk_builder
     volumes:
-      - .:/app
+      - ./docker-output:/app/docker-output
     command: >
-      bash -c "flutter pub get &&
-               flutter build apk --split-per-abi"
+      bash -c "flutter build apk --debug --split-per-abi &&
+               cp build/app/outputs/flutter-apk/app-*-debug.apk /app/docker-output/"
