@@ -54,9 +54,10 @@ add `Co-Authored-By` trailers for AI coding assistants.
 
 ## Reporting bugs / requesting features
 
-Use the issue templates — they ask for the platform (Android/web) and
-Flutter version, which is usually the first thing needed to reproduce
-anything in this codebase given how much of it is native-only.
+Use the issue templates — they ask whether the problem occurs on Android,
+iOS, web, Linux, macOS, or Windows, plus the Flutter version. That platform
+report is usually the first thing needed to reproduce an issue in this
+codebase given how much behavior is platform-specific.
 
 ## Security
 

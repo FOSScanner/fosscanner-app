@@ -1,0 +1,34 @@
+# Secrets and signing material
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+secrets/
+android/key.properties
+
+# Generated output and dependency metadata
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+artifacts/
+docker-output/
+.clean-check-tmp/
+
+# Version-control metadata
+.git/
+.gitignore
+
+# Local IDE and machine configuration
+.idea/
+.vscode/
+*.iml
+android/local.properties
+
+# Files not needed to build the image
+coverage/
+.DS_Store

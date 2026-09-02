@@ -8,13 +8,27 @@ plugins {
 }
 
 // Release signing lives outside version control (android/key.properties, gitignored;
-// see android/key.properties.example). Falls back to debug signing when it's absent
-// so `flutter run --release` and local/CI analyze-and-test still work without secrets.
+// see android/key.properties.example). Debug and release verification tasks do not need
+// this file, but release artifact tasks must never fall back to the debug key.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 val hasReleaseKeystore = keystorePropertiesFile.exists()
 if (hasReleaseKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+gradle.taskGraph.whenReady {
+    val releaseArtifactTask =
+        Regex("^(assemble|bundle|package).*Release(?:Bundle|UniversalApk)?\$")
+    val requestsReleaseArtifact = allTasks.any { task ->
+        releaseArtifactTask.matches(task.name)
+    }
+    if (requestsReleaseArtifact && !hasReleaseKeystore) {
+        throw GradleException(
+            "Release signing is required: copy android/key.properties.example " +
+                "to android/key.properties and configure a release keystore.",
+        )
+    }
 }
 
 android {
@@ -50,10 +64,8 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (hasReleaseKeystore) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }
