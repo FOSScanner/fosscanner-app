@@ -18,7 +18,7 @@ jobs:
 
       - run: flutter pub get
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pubspec-lock
           path: pubspec.lock
@@ -31,7 +31,7 @@ jobs:
       # a release tag is created.
       - run: flutter build apk --debug --target-platform android-arm64
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-debug-arm64
           path: build/app/outputs/flutter-apk/app-debug.apk
