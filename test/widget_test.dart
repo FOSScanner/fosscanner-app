@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -83,6 +84,40 @@ class _FakeSharePlatform implements SharePlatform {
   }
 }
 
+class _ImmediateCornerOperations implements CornerAdjustOperations {
+  const _ImmediateCornerOperations();
+
+  @override
+  Future<Size> decodeSize(Uint8List imageBytes) async => const Size(1024, 1024);
+
+  @override
+  Future<List<Offset>?> detectCorners(Uint8List imageBytes) async => null;
+
+  @override
+  Future<Map<PageFilter, Uint8List>> buildPreviews(
+    Uint8List imageBytes,
+    List<Offset> corners,
+  ) async => {for (final filter in PageFilter.values) filter: imageBytes};
+
+  @override
+  Future<Uint8List> buildFinalPreview(
+    Uint8List imageBytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => imageBytes;
+
+  @override
+  Future<Uint8List> processForExport(
+    Uint8List imageBytes,
+    List<Offset> corners, {
+    required PageFilter filter,
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => imageBytes;
+}
+
 class _TrackingXFile extends XFile {
   _TrackingXFile(super.path);
 
@@ -126,6 +161,16 @@ class _UnsupportedStreamXFile extends _SizedXFile {
   @override
   Stream<Uint8List> openRead([int? start, int? end]) =>
       Stream.error(UnsupportedError('backend cannot stream'));
+}
+
+class _TrackingNavigatorObserver extends NavigatorObserver {
+  var pushCount = 0;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushCount++;
+    super.didPush(route, previousRoute);
+  }
 }
 
 class _ThrowingXFile extends XFile {
@@ -493,12 +538,184 @@ void main() {
     );
   });
 
+  testWidgets('gallery reports a distinct transient processing-budget error', (
+    tester,
+  ) async {
+    final icon = File('assets/icon/icon.png').readAsBytesSync();
+    final retainedBytes = Uint8List(5 * 1024 * 1024)
+      ..setRange(0, icon.length, icon);
+    final page = ScannedPage(
+      originalBytes: retainedBytes,
+      corners: const [],
+      processedBytes: retainedBytes,
+    );
+    ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+      images: [_SizedXFile('selection.png', icon)],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: ScannerHomePage(initialPages: List.filled(50, page))),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
+        )
+        .onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'This image needs too much temporary memory to process safely. '
+        'Remove pages or choose a smaller image.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expect(find.textContaining('Document memory limit reached'), findsNothing);
+  });
+
+  testWidgets(
+    'initial 20MP-metadata page near the cap cannot open the editor',
+    (tester) async {
+      final icon = File('assets/icon/icon.png').readAsBytesSync();
+      final sharedRetainedBytes = Uint8List(2 * 1024 * 1024)
+        ..setRange(0, icon.length, icon);
+      final page = ScannedPage(
+        originalBytes: sharedRetainedBytes,
+        corners: const [
+          Offset(0, 0),
+          Offset(3999, 0),
+          Offset(3999, 4999),
+          Offset(0, 4999),
+        ],
+        processedBytes: sharedRetainedBytes,
+      );
+      Uint8List? inspectedBytes;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            initialPages: List.filled(52, page),
+            sourceImageSizeReader: (bytes) async {
+              inspectedBytes = bytes;
+              return const Size(4000, 5000);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(Card).first);
+      await tester.pumpAndSettle();
+
+      expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
+      expect(
+        find.text(
+          'This image needs too much temporary memory to process safely. '
+          'Remove pages or choose a smaller image.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'rapid page taps perform one metadata read and open one editor route',
+    (tester) async {
+      final icon = File('assets/icon/icon.png').readAsBytesSync();
+      final page = ScannedPage(
+        originalBytes: icon,
+        corners: const [],
+        processedBytes: icon,
+      );
+      final metadata = Completer<Size>();
+      final observer = _TrackingNavigatorObserver();
+      var metadataReads = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [observer],
+          home: ScannerHomePage(
+            initialPages: [page],
+            cornerAdjustOperations: const _ImmediateCornerOperations(),
+            sourceImageSizeReader: (_) {
+              metadataReads++;
+              return metadata.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final card = find.byType(Card).first;
+
+      await tester.tap(card);
+      await tester.tap(card);
+      expect(metadataReads, 1);
+
+      await tester.pump();
+      expect(
+        tester
+            .widget<InkWell>(
+              find.descendant(of: card, matching: find.byType(InkWell)).first,
+            )
+            .onTap,
+        isNull,
+      );
+
+      metadata.complete(const Size(1024, 1024));
+      await tester.pumpAndSettle();
+
+      expect(observer.pushCount, 2);
+      expect(find.byType(CornerAdjustScreen), findsOneWidget);
+      final offstageHomeCard = find
+          .descendant(
+            of: find.byType(ScannerHomePage, skipOffstage: false),
+            matching: find.byType(Card, skipOffstage: false),
+            skipOffstage: false,
+          )
+          .first;
+      expect(
+        tester
+            .widget<InkWell>(
+              find
+                  .descendant(
+                    of: offstageHomeCard,
+                    matching: find.byType(InkWell, skipOffstage: false),
+                    skipOffstage: false,
+                  )
+                  .first,
+            )
+            .onTap,
+        isNull,
+      );
+
+      Navigator.of(tester.element(find.byType(CornerAdjustScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<InkWell>(
+              find
+                  .descendant(
+                    of: find.byType(Card).first,
+                    matching: find.byType(InkWell),
+                  )
+                  .first,
+            )
+            .onTap,
+        isNotNull,
+      );
+    },
+  );
+
   testWidgets('gallery reports capacity when a prior selection fills it', (
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
     const pageCount = 90;
-    final targetRetainedBytes = maxRetainedDocumentBytes - icon.length;
+    const additionalProcessedBytes = 24 * 1024 * 1024;
+    final targetRetainedBytes =
+        maxRetainedDocumentBytes - icon.length - additionalProcessedBytes;
     final sharedLength = targetRetainedBytes ~/ pageCount;
     final sharedBytes = Uint8List(sharedLength);
     final remainderBytes = Uint8List(
@@ -519,7 +736,12 @@ void main() {
     ImagePickerPlatform.instance = platform;
 
     await tester.pumpWidget(
-      MaterialApp(home: ScannerHomePage(initialPages: pages)),
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: pages,
+          cornerAdjustOperations: const _ImmediateCornerOperations(),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
     tester
@@ -527,16 +749,7 @@ void main() {
           find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
         )
         .onPressed!();
-    for (
-      var i = 0;
-      i < 20 && find.byType(CornerAdjustScreen).evaluate().isEmpty;
-      i++
-    ) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 10)),
-      );
-      await tester.pump();
-    }
+    await tester.pumpAndSettle();
     final editor = tester.widget<CornerAdjustScreen>(
       find.byType(CornerAdjustScreen),
     );
@@ -544,7 +757,7 @@ void main() {
       ScannedPage(
         originalBytes: editor.originalBytes,
         corners: const [],
-        processedBytes: editor.originalBytes,
+        processedBytes: Uint8List(additionalProcessedBytes),
       ),
     );
     await tester.pumpAndSettle();

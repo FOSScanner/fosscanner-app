@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 
 import '../models/scanned_page.dart';
@@ -18,10 +17,19 @@ const _filterChipDecodeSize = 256;
 abstract interface class CornerAdjustOperations {
   Future<Size> decodeSize(Uint8List imageBytes);
 
+  Future<List<Offset>?> detectCorners(Uint8List imageBytes);
+
   Future<Map<PageFilter, Uint8List>> buildPreviews(
     Uint8List imageBytes,
     List<Offset> corners,
   );
+
+  Future<Uint8List> buildFinalPreview(
+    Uint8List imageBytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  });
 
   Future<Uint8List> processForExport(
     Uint8List imageBytes,
@@ -33,38 +41,113 @@ abstract interface class CornerAdjustOperations {
   });
 }
 
+typedef _PreviewWorkerRequest = ({
+  Uint8List imageBytes,
+  List<double> cornerCoordinates,
+});
+typedef _FinalPreviewWorkerRequest = ({
+  Uint8List imageBytes,
+  int rotationQuarterTurns,
+  double brightness,
+  double contrast,
+});
+typedef _ExportWorkerRequest = ({
+  Uint8List imageBytes,
+  List<double> cornerCoordinates,
+  PageFilter filter,
+  int rotationQuarterTurns,
+  double brightness,
+  double contrast,
+});
+
+List<double> _serializeCorners(List<Offset> corners) => [
+  for (final corner in corners) ...[corner.dx, corner.dy],
+];
+
+List<Offset> _deserializeCorners(List<double> coordinates) => [
+  for (var i = 0; i < coordinates.length; i += 2)
+    Offset(coordinates[i], coordinates[i + 1]),
+];
+
+List<double>? _detectCornersWorker(Uint8List imageBytes) {
+  final corners = detectCorners(imageBytes);
+  return corners == null ? null : _serializeCorners(corners);
+}
+
+Map<PageFilter, Uint8List> _buildPreviewsWorker(_PreviewWorkerRequest request) {
+  final warped = warpDocument(
+    request.imageBytes,
+    _deserializeCorners(request.cornerCoordinates),
+    maxPixels: maxPreviewWarpPixels,
+    maxEdge: maxPreviewWarpEdge,
+  );
+  return {
+    for (final filter in PageFilter.values) filter: applyFilter(warped, filter),
+  };
+}
+
+Uint8List _buildFinalPreviewWorker(_FinalPreviewWorkerRequest request) {
+  final rotated = rotateImage(request.imageBytes, request.rotationQuarterTurns);
+  return adjustBrightnessContrast(
+    rotated,
+    brightness: request.brightness,
+    contrast: request.contrast,
+  );
+}
+
+Uint8List _processForExportWorker(_ExportWorkerRequest request) =>
+    processDocument(
+      request.imageBytes,
+      _deserializeCorners(request.cornerCoordinates),
+      filter: request.filter,
+      rotationQuarterTurns: request.rotationQuarterTurns,
+      brightness: request.brightness,
+      contrast: request.contrast,
+    );
+
 class DefaultCornerAdjustOperations implements CornerAdjustOperations {
   const DefaultCornerAdjustOperations();
 
   @override
   Future<Size> decodeSize(Uint8List imageBytes) async {
     final codec = await ui.instantiateImageCodec(imageBytes);
-    final frame = await codec.getNextFrame();
-    final size = Size(
-      frame.image.width.toDouble(),
-      frame.image.height.toDouble(),
-    );
-    frame.image.dispose();
-    codec.dispose();
-    return size;
+    ui.FrameInfo? frame;
+    try {
+      frame = await codec.getNextFrame();
+      return Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+    } finally {
+      frame?.image.dispose();
+      codec.dispose();
+    }
+  }
+
+  @override
+  Future<List<Offset>?> detectCorners(Uint8List imageBytes) async {
+    final coordinates = await compute(_detectCornersWorker, imageBytes);
+    return coordinates == null ? null : _deserializeCorners(coordinates);
   }
 
   @override
   Future<Map<PageFilter, Uint8List>> buildPreviews(
     Uint8List imageBytes,
     List<Offset> corners,
-  ) async {
-    final warped = warpDocument(
-      imageBytes,
-      corners,
-      maxPixels: maxPreviewWarpPixels,
-      maxEdge: maxPreviewWarpEdge,
-    );
-    return {
-      for (final filter in PageFilter.values)
-        filter: applyFilter(warped, filter),
-    };
-  }
+  ) => compute(_buildPreviewsWorker, (
+    imageBytes: imageBytes,
+    cornerCoordinates: _serializeCorners(corners),
+  ));
+
+  @override
+  Future<Uint8List> buildFinalPreview(
+    Uint8List imageBytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) => compute(_buildFinalPreviewWorker, (
+    imageBytes: imageBytes,
+    rotationQuarterTurns: rotationQuarterTurns,
+    brightness: brightness,
+    contrast: contrast,
+  ));
 
   @override
   Future<Uint8List> processForExport(
@@ -74,16 +157,41 @@ class DefaultCornerAdjustOperations implements CornerAdjustOperations {
     required int rotationQuarterTurns,
     required double brightness,
     required double contrast,
-  }) {
-    Uint8List process() => processDocument(
-      imageBytes,
-      corners,
-      filter: filter,
-      rotationQuarterTurns: rotationQuarterTurns,
-      brightness: brightness,
-      contrast: contrast,
-    );
-    return kIsWeb ? Future.value(process()) : Isolate.run(process);
+  }) => compute(_processForExportWorker, (
+    imageBytes: imageBytes,
+    cornerCoordinates: _serializeCorners(corners),
+    filter: filter,
+    rotationQuarterTurns: rotationQuarterTurns,
+    brightness: brightness,
+    contrast: contrast,
+  ));
+}
+
+class _QueuedWorkResult<T> {
+  const _QueuedWorkResult.started(this.value) : started = true;
+  const _QueuedWorkResult.skipped() : started = false, value = null;
+
+  final bool started;
+  final T? value;
+}
+
+/// Serializes OpenCV workers owned by one scanner session.
+///
+/// A route may be disposed before its worker finishes, so every editor opened
+/// by the same home screen must share this queue.
+class ImageProcessingQueue {
+  Future<void> _tail = Future<void>.value();
+
+  Future<T> run<T>(Future<T> Function() work) {
+    final result = Completer<T>();
+    _tail = _tail.then((_) async {
+      try {
+        result.complete(await work());
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
   }
 }
 
@@ -116,6 +224,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.initialBrightness = 0.0,
     this.initialContrast = 1.0,
     this.operations = const DefaultCornerAdjustOperations(),
+    this.processingQueue,
   });
 
   final Uint8List originalBytes;
@@ -125,6 +234,7 @@ class CornerAdjustScreen extends StatefulWidget {
   final double initialBrightness;
   final double initialContrast;
   final CornerAdjustOperations operations;
+  final ImageProcessingQueue? processingQueue;
 
   @override
   State<CornerAdjustScreen> createState() => _CornerAdjustScreenState();
@@ -135,6 +245,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   List<Offset>? _corners;
   bool _isProcessing = false;
   String? _error;
+  late final ImageProcessingQueue _processingQueue;
+  int _initializationGeneration = 0;
+  int _exportGeneration = 0;
 
   _Step _step = _Step.corners;
   LocalHistoryEntry? _filterHistoryEntry;
@@ -147,24 +260,48 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   // bounded export resolution.
   Map<PageFilter, Uint8List>? _filterPreviews;
   bool _isGeneratingPreviews = false;
+  int _previewGeneration = 0;
   // Rotation + brightness/contrast applied on top of _filterPreviews[
   // _selectedFilter], recomputed on rotate/slider-release/filter-change
   // rather than baked into _filterPreviews (which only need to answer
   // "what does each filter choice look like", not track these extras).
   Uint8List? _finalPreviewBytes;
+  bool _isGeneratingFinalPreview = false;
+  int _finalPreviewGeneration = 0;
 
   @override
   void initState() {
     super.initState();
+    _processingQueue = widget.processingQueue ?? ImageProcessingQueue();
     _initialize();
   }
 
+  Future<_QueuedWorkResult<T>> _enqueueWork<T>({
+    required bool Function() canStart,
+    required Future<T> Function() work,
+  }) {
+    return _processingQueue.run(() async {
+      if (!canStart()) return _QueuedWorkResult<T>.skipped();
+      return _QueuedWorkResult<T>.started(await work());
+    });
+  }
+
   Future<void> _initialize() async {
+    final generation = ++_initializationGeneration;
     try {
       final size = await widget.operations.decodeSize(widget.originalBytes);
 
-      final candidateCorners =
-          widget.initialCorners ?? detectCorners(widget.originalBytes);
+      List<Offset>? candidateCorners = widget.initialCorners;
+      if (candidateCorners == null) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted || generation != _initializationGeneration) return;
+        final detection = await _enqueueWork<List<Offset>?>(
+          canStart: () => mounted && generation == _initializationGeneration,
+          work: () => widget.operations.detectCorners(widget.originalBytes),
+        );
+        if (!detection.started) return;
+        candidateCorners = detection.value;
+      }
       final corners = _hasRenderableCorners(candidateCorners)
           ? candidateCorners!
           : _fullBoundsCorners(size);
@@ -181,6 +318,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _error = 'Could not read this photo: $e';
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _initializationGeneration++;
+    _previewGeneration++;
+    _finalPreviewGeneration++;
+    _exportGeneration++;
+    super.dispose();
   }
 
   bool _hasRenderableCorners(List<Offset>? corners) =>
@@ -204,13 +350,23 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   void _showError(String message) => showTransientMessage(context, message);
 
   Future<void> _updatePreviews() async {
-    final corners = _corners;
-    if (corners == null) return;
+    final currentCorners = _corners;
+    if (currentCorners == null || !mounted) return;
+    final corners = List<Offset>.of(currentCorners);
+    final generation = ++_previewGeneration;
+    _finalPreviewGeneration++;
     setState(() {
       _isGeneratingPreviews = true;
+      _isGeneratingFinalPreview = false;
       _filterPreviews = null;
       _finalPreviewBytes = null;
     });
+
+    // Do not let an immediately completing worker erase the progress state
+    // before Flutter has painted it once.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || generation != _previewGeneration) return;
+
     // Keep geometry failures separate from decoder/backend failures so the
     // recovery guidance matches what the user can actually fix.
     try {
@@ -220,7 +376,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         maxEdge: maxPreviewWarpEdge,
       );
     } on ArgumentError {
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
       setState(() => _isGeneratingPreviews = false);
       _showError(
         'Could not preview this crop. Adjust the corners and try again.',
@@ -229,43 +385,69 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
 
     try {
-      final previews = await widget.operations.buildPreviews(
-        widget.originalBytes,
-        corners,
+      final queuedPreviews = await _enqueueWork<Map<PageFilter, Uint8List>>(
+        canStart: () => mounted && generation == _previewGeneration,
+        work: () =>
+            widget.operations.buildPreviews(widget.originalBytes, corners),
       );
-      if (!mounted) return;
+      if (!queuedPreviews.started ||
+          !mounted ||
+          generation != _previewGeneration) {
+        return;
+      }
       setState(() {
-        _filterPreviews = previews;
+        _filterPreviews = queuedPreviews.value!;
         _isGeneratingPreviews = false;
       });
-      _updateFinalPreview();
+      unawaited(_updateFinalPreview());
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
       setState(() => _isGeneratingPreviews = false);
       _showError('Could not process this photo. Try another image.');
     }
   }
 
   /// Applies the current rotation + brightness/contrast on top of the
-  /// selected filter's cached preview. Cheap enough (a single decode +
-  /// OpenCV op + encode, no contour search) to redo on every rotate tap
-  /// or slider release, unlike the full warp+filter set in
-  /// [_updatePreviews].
-  void _updateFinalPreview() {
+  /// selected filter's cached preview. This still decodes and transforms an
+  /// image, so the default operations run it outside the UI isolate.
+  Future<void> _updateFinalPreview() async {
     final base = _filterPreviews?[_selectedFilter];
-    if (base == null) return;
+    if (base == null || !mounted) return;
+    final rotationQuarterTurns = _rotationQuarterTurns;
+    final brightness = _brightness;
+    final contrast = _contrast;
+    final generation = ++_finalPreviewGeneration;
+    setState(() {
+      _isGeneratingFinalPreview = true;
+      _finalPreviewBytes = null;
+    });
+
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || generation != _finalPreviewGeneration) return;
+
     try {
-      final rotated = rotateImage(base, _rotationQuarterTurns);
-      final adjusted = adjustBrightnessContrast(
-        rotated,
-        brightness: _brightness,
-        contrast: _contrast,
+      final queuedPreview = await _enqueueWork<Uint8List>(
+        canStart: () => mounted && generation == _finalPreviewGeneration,
+        work: () => widget.operations.buildFinalPreview(
+          base,
+          rotationQuarterTurns: rotationQuarterTurns,
+          brightness: brightness,
+          contrast: contrast,
+        ),
       );
-      if (!mounted) return;
-      setState(() => _finalPreviewBytes = adjusted);
+      if (!queuedPreview.started ||
+          !mounted ||
+          generation != _finalPreviewGeneration) {
+        return;
+      }
+      setState(() {
+        _finalPreviewBytes = queuedPreview.value!;
+        _isGeneratingFinalPreview = false;
+      });
     } catch (_) {
-      // Same reasoning as _updatePreviews: this is preview-only, Confirm
-      // recomputes from scratch if something's off.
+      if (!mounted || generation != _finalPreviewGeneration) return;
+      // This is preview-only; Confirm recomputes from scratch if it fails.
+      setState(() => _isGeneratingFinalPreview = false);
     }
   }
 
@@ -307,17 +489,29 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
     final contrast = _contrast;
-    setState(() => _isProcessing = true);
+    _previewGeneration++;
+    _finalPreviewGeneration++;
+    final exportGeneration = ++_exportGeneration;
+    setState(() {
+      _isProcessing = true;
+      _isGeneratingPreviews = false;
+      _isGeneratingFinalPreview = false;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     try {
-      final processed = await widget.operations.processForExport(
-        widget.originalBytes,
-        corners,
-        filter: filter,
-        rotationQuarterTurns: rotationQuarterTurns,
-        brightness: brightness,
-        contrast: contrast,
+      final queuedExport = await _enqueueWork<Uint8List>(
+        canStart: () => mounted && exportGeneration == _exportGeneration,
+        work: () => widget.operations.processForExport(
+          widget.originalBytes,
+          corners,
+          filter: filter,
+          rotationQuarterTurns: rotationQuarterTurns,
+          brightness: brightness,
+          contrast: contrast,
+        ),
       );
-      if (!mounted) return;
+      if (!queuedExport.started || !mounted) return;
       final page = ScannedPage(
         originalBytes: widget.originalBytes,
         corners: corners,
@@ -325,7 +519,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         rotationQuarterTurns: rotationQuarterTurns,
         brightness: brightness,
         contrast: contrast,
-        processedBytes: processed,
+        processedBytes: queuedExport.value!,
       );
       // Otherwise Navigator.pop would consume the local filter history entry
       // instead of completing this route with the scanned page.
@@ -340,7 +534,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   void _rotate() {
     setState(() => _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4);
-    _updateFinalPreview();
+    unawaited(_updateFinalPreview());
   }
 
   bool get _isEditingExistingPage => widget.initialCorners != null;
@@ -399,7 +593,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               corners: corners,
               onChanged: (c) {
                 setState(() => _corners = c);
-                _updatePreviews();
+                unawaited(_updatePreviews());
               },
             ),
           ),
@@ -459,13 +653,19 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: previewBytes != null
-                ? _boundedPreviewImage(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (previewBytes != null)
+                  _boundedPreviewImage(
                     previewBytes,
                     fit: BoxFit.contain,
                     maxDimension: _fullPreviewDecodeSize,
-                  )
-                : const Center(child: CircularProgressIndicator()),
+                  ),
+                if (previewBytes == null || _isGeneratingFinalPreview)
+                  const Center(child: CircularProgressIndicator()),
+              ],
+            ),
           ),
         ),
         Padding(
@@ -483,7 +683,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                       : (v) => setState(() => _brightness = v),
                   onChangeEnd: _isProcessing
                       ? null
-                      : (_) => _updateFinalPreview(),
+                      : (_) => unawaited(_updateFinalPreview()),
                 ),
               ),
             ],
@@ -504,7 +704,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                       : (v) => setState(() => _contrast = v),
                   onChangeEnd: _isProcessing
                       ? null
-                      : (_) => _updateFinalPreview(),
+                      : (_) => unawaited(_updateFinalPreview()),
                 ),
               ),
             ],
@@ -565,7 +765,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             ? null
             : () {
                 setState(() => _selectedFilter = filter);
-                _updateFinalPreview();
+                unawaited(_updateFinalPreview());
               },
         child: Column(
           mainAxisSize: MainAxisSize.min,
