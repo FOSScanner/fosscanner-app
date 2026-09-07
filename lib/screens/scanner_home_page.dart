@@ -28,17 +28,23 @@ class _DocumentCapacityException implements Exception {
 
 enum _PhotoIntakeResult { added, skipped, capacityReached }
 
+typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
+
 class ScannerHomePage extends StatefulWidget {
   const ScannerHomePage({
     super.key,
     this.initialPages = const [],
     this.sharePlus,
     this.draftStore = const NoOpDraftStore(),
+    this.cornerAdjustOperations = const DefaultCornerAdjustOperations(),
+    this.sourceImageSizeReader = readEncodedImageSize,
   });
 
   final List<ScannedPage> initialPages;
   final SharePlus? sharePlus;
   final DraftStore draftStore;
+  final CornerAdjustOperations cornerAdjustOperations;
+  final SourceImageSizeReader sourceImageSizeReader;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -54,6 +60,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   late final List<ScannedPage> _pages;
   late final SharePlus _sharePlus;
   final ImagePicker _picker = ImagePicker();
+  final ImageProcessingQueue _imageProcessingQueue = ImageProcessingQueue();
   Future<void> _draftWriteTail = Future<void>.value();
   var _draftRevision = 0;
   var _documentGeneration = 0;
@@ -62,6 +69,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _isGeneratingPdf = false;
   bool _isPickingImages = false;
   bool _isClearingDraft = false;
+  bool _isOpeningEditor = false;
   late bool _cameraSupported;
 
   @override
@@ -382,6 +390,22 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  CornerAdjustScreen _buildEditor(
+    Uint8List originalBytes, {
+    ScannedPage? page,
+  }) {
+    return CornerAdjustScreen(
+      originalBytes: originalBytes,
+      initialCorners: page?.corners,
+      initialFilter: page?.filter ?? PageFilter.original,
+      initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
+      initialBrightness: page?.brightness ?? 0,
+      initialContrast: page?.contrast ?? 1,
+      operations: widget.cornerAdjustOperations,
+      processingQueue: _imageProcessingQueue,
+    );
+  }
+
   /// Shared by camera capture and gallery import: read the file's bytes,
   /// optionally delete the source file, then (native only) run the photo
   /// through the detect/adjust flow before adding it as a page.
@@ -459,8 +483,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       validateSourceImageSize(imageSize);
     } on UnsupportedError {
       _showMessage(
-        'This image has dimensions too large to process safely. Choose an '
-        'image up to ${maxSourceImageEdge}px per edge and '
+        'This image has unsupported dimensions. Choose an image from 3x3 '
+        'up to ${maxSourceImageEdge}px per edge and '
         '$maxSourceImagePixels pixels.',
       );
       return _PhotoIntakeResult.skipped;
@@ -490,11 +514,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           : _PhotoIntakeResult.capacityReached;
     }
 
-    final result = await Navigator.of(context).push<ScannedPage>(
-      MaterialPageRoute(
-        builder: (_) => CornerAdjustScreen(originalBytes: bytes),
-      ),
-    );
+    if (!canProcessSourceImage(
+      currentRetainedBytes: _retainedDocumentBytes,
+      encodedBytes: bytes.length,
+      size: imageSize,
+    )) {
+      _showMessage(
+        'This image needs too much temporary memory to process safely. '
+        'Remove pages or choose a smaller image.',
+      );
+      return _PhotoIntakeResult.skipped;
+    }
+
+    final result = await Navigator.of(
+      context,
+    ).push<ScannedPage>(MaterialPageRoute(builder: (_) => _buildEditor(bytes)));
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
@@ -508,44 +542,97 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   Future<void> _editPage(int index) async {
     // No detect/adjust flow on web (see _addCapturedPhoto) — nothing to edit.
-    if (kIsWeb || _isClearingDraft || index >= _pages.length) return;
+    if (kIsWeb ||
+        _isClearingDraft ||
+        _isOpeningEditor ||
+        index < 0 ||
+        index >= _pages.length) {
+      return;
+    }
 
-    final page = _pages[index];
-    final documentGeneration = _documentGeneration;
-    final result = await Navigator.of(context).push<ScannedPage>(
-      MaterialPageRoute(
-        builder: (_) => CornerAdjustScreen(
-          originalBytes: page.originalBytes,
-          initialCorners: page.corners,
-          initialFilter: page.filter,
-          initialRotationQuarterTurns: page.rotationQuarterTurns,
-          initialBrightness: page.brightness,
-          initialContrast: page.contrast,
-        ),
-      ),
-    );
-    if (result != null &&
-        mounted &&
-        !_isClearingDraft &&
-        documentGeneration == _documentGeneration &&
-        index < _pages.length &&
-        identical(_pages[index], page)) {
-      if (!canReplaceDocumentPage(
-        currentBytes: _retainedDocumentBytes,
-        currentPages: _pages.length,
-        replacedBytes: _pageMemoryBytes(page),
-        replacementBytes: _pageMemoryBytes(result),
-      )) {
-        _showDocumentLimit();
+    // Acquire this home page's editor lock before metadata loading yields.
+    // This blocks stale, rapid card taps from starting overlapping routes.
+    setState(() => _isOpeningEditor = true);
+    try {
+      final page = _pages[index];
+      final documentGeneration = _documentGeneration;
+      bool requestIsCurrent() =>
+          mounted &&
+          !_isClearingDraft &&
+          documentGeneration == _documentGeneration &&
+          index < _pages.length &&
+          identical(_pages[index], page);
+
+      late final Size imageSize;
+      try {
+        imageSize = await widget.sourceImageSizeReader(page.originalBytes);
+        validateSourceImageSize(imageSize);
+      } on UnsupportedError {
+        if (!requestIsCurrent()) return;
+        _showMessage(
+          'This image has unsupported dimensions. Choose an image from 3x3 '
+          'up to ${maxSourceImageEdge}px per edge and '
+          '$maxSourceImagePixels pixels.',
+        );
+        return;
+      } catch (_) {
+        if (requestIsCurrent()) _showMessage('Could not read this photo.');
         return;
       }
-      setState(() => _pages[index] = result);
-      _queueDraftSave();
+      if (!requestIsCurrent()) return;
+      if (!canProcessSourceImage(
+        currentRetainedBytes: _retainedDocumentBytes,
+        // The source is already part of the retained document total.
+        encodedBytes: 0,
+        size: imageSize,
+      )) {
+        _showMessage(
+          'This image needs too much temporary memory to process safely. '
+          'Remove pages or choose a smaller image.',
+        );
+        return;
+      }
+      if (!mounted) return;
+
+      final result = await Navigator.of(context).push<ScannedPage>(
+        MaterialPageRoute(
+          builder: (_) => _buildEditor(page.originalBytes, page: page),
+        ),
+      );
+      if (result != null &&
+          mounted &&
+          !_isClearingDraft &&
+          documentGeneration == _documentGeneration &&
+          index < _pages.length &&
+          identical(_pages[index], page)) {
+        if (!canReplaceDocumentPage(
+          currentBytes: _retainedDocumentBytes,
+          currentPages: _pages.length,
+          replacedBytes: _pageMemoryBytes(page),
+          replacementBytes: _pageMemoryBytes(result),
+        )) {
+          _showDocumentLimit();
+          return;
+        }
+        setState(() => _pages[index] = result);
+        _queueDraftSave();
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isOpeningEditor = false);
+      } else {
+        _isOpeningEditor = false;
+      }
     }
   }
 
   void _removePage(int index) {
-    if (_isClearingDraft || index < 0 || index >= _pages.length) return;
+    if (_isClearingDraft ||
+        _isOpeningEditor ||
+        index < 0 ||
+        index >= _pages.length) {
+      return;
+    }
     final removed = _pages[index];
     final undoGeneration = ++_undoGeneration;
     final messenger = ScaffoldMessenger.of(context);
@@ -582,6 +669,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _reorderPage(int fromIndex, int toIndex) {
     if (_isClearingDraft ||
+        _isOpeningEditor ||
         fromIndex < 0 ||
         fromIndex >= _pages.length ||
         toIndex < 0 ||
@@ -841,7 +929,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 final card = Card(
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    onTap: _isClearingDraft ? null : () => _editPage(index),
+                    onTap: _isClearingDraft || _isOpeningEditor
+                        ? null
+                        : () => _editPage(index),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -885,7 +975,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                 color: Colors.white,
                               ),
                               tooltip: 'Delete page ${index + 1}',
-                              onPressed: _isClearingDraft
+                              onPressed: _isClearingDraft || _isOpeningEditor
                                   ? null
                                   : () => _removePage(index),
                             ),
@@ -900,14 +990,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 // on another page's slot to swap it into that position.
                 return DragTarget<int>(
                   onWillAcceptWithDetails: (details) =>
-                      !_isClearingDraft && details.data != index,
+                      !_isClearingDraft &&
+                      !_isOpeningEditor &&
+                      details.data != index,
                   onAcceptWithDetails: (details) =>
                       _reorderPage(details.data, index),
                   builder: (context, candidateData, rejectedData) {
                     final isDropTarget = candidateData.isNotEmpty;
                     return LongPressDraggable<int>(
                       data: index,
-                      maxSimultaneousDrags: _isClearingDraft ? 0 : 1,
+                      maxSimultaneousDrags: _isClearingDraft || _isOpeningEditor
+                          ? 0
+                          : 1,
                       feedback: SizedBox(
                         width: 140,
                         height: 200,

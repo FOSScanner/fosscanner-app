@@ -16,10 +16,21 @@ class _Operations implements CornerAdjustOperations {
   Future<Size> decodeSize(Uint8List imageBytes) async => const Size(100, 100);
 
   @override
+  Future<List<Offset>?> detectCorners(Uint8List imageBytes) async => null;
+
+  @override
   Future<Map<PageFilter, Uint8List>> buildPreviews(
     Uint8List imageBytes,
     List<Offset> corners,
   ) async => {for (final filter in PageFilter.values) filter: bytes};
+
+  @override
+  Future<Uint8List> buildFinalPreview(
+    Uint8List imageBytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => imageBytes;
 
   @override
   Future<Uint8List> processForExport(

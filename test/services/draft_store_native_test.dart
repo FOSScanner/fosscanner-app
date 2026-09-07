@@ -7,10 +7,7 @@ import 'package:fosscanner/services/draft_store_native.dart';
 
 void main() {
   late Directory directory;
-  final tinyPng = base64Decode(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk'
-    '+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  );
+  final tinyPng = File('assets/icon/icon.png').readAsBytesSync();
 
   setUp(() async {
     directory = Directory('.draft-store-test-tmp');

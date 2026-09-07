@@ -2,6 +2,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'corner_geometry.dart' show maxWarpPixels;
+
 /// Bound source decoding before document processing. Image decoders expand
 /// compressed inputs into multi-byte pixel buffers, so compressed file size
 /// alone is not a safe allocation limit.
@@ -11,6 +13,13 @@ const maxPickerEdge = 4472.0;
 const maxEncodedImageBytes = 32 * 1024 * 1024;
 const maxDocumentPages = 100;
 const maxRetainedDocumentBytes = 256 * 1024 * 1024;
+const maxImageProcessingWorkingSetBytes = 256 * 1024 * 1024;
+
+// Peak processing allowance: the source decoder retains one four-channel
+// buffer while export/auto-enhance can hold four four-channel warp-sized
+// intermediates. Warp allocations are bounded by maxWarpPixels.
+const _sourceDecodeBytesPerPixel = 4;
+const _warpIntermediateBytesPerPixel = 16;
 
 class EncodedImageTooLargeError extends UnsupportedError {
   EncodedImageTooLargeError(int maxBytes)
@@ -106,6 +115,15 @@ void validateSourceImageSize(ui.Size size) {
     throw const FormatException('Image dimensions must be finite and positive');
   }
 
+  if (size.width != size.width.truncateToDouble() ||
+      size.height != size.height.truncateToDouble()) {
+    throw const FormatException('Image dimensions must be whole pixels');
+  }
+
+  if (size.width < 3 || size.height < 3) {
+    throw UnsupportedError('Image dimensions must be at least 3x3 pixels');
+  }
+
   if (size.width > maxSourceImageEdge ||
       size.height > maxSourceImageEdge ||
       size.width * size.height > maxSourceImagePixels) {
@@ -114,4 +132,44 @@ void validateSourceImageSize(ui.Size size) {
       'or $maxSourceImagePixels pixel limit',
     );
   }
+}
+
+int estimateDecodedOpenCvBytes(ui.Size size) {
+  validateSourceImageSize(size);
+  final sourcePixels = size.width.toInt() * size.height.toInt();
+  final warpPixels = math.min(sourcePixels, maxWarpPixels);
+  return sourcePixels * _sourceDecodeBytesPerPixel +
+      warpPixels * _warpIntermediateBytesPerPixel;
+}
+
+int estimateImageProcessingWorkingSet({
+  required int currentRetainedBytes,
+  required int encodedBytes,
+  required ui.Size size,
+}) {
+  if (currentRetainedBytes < 0 || encodedBytes < 0) {
+    throw ArgumentError('Image processing byte counters must not be negative');
+  }
+  return currentRetainedBytes + encodedBytes + estimateDecodedOpenCvBytes(size);
+}
+
+bool canProcessSourceImage({
+  required int currentRetainedBytes,
+  required int encodedBytes,
+  required ui.Size size,
+  int maxWorkingSetBytes = maxImageProcessingWorkingSetBytes,
+}) {
+  if (maxWorkingSetBytes < 0) {
+    throw ArgumentError.value(
+      maxWorkingSetBytes,
+      'maxWorkingSetBytes',
+      'Must not be negative',
+    );
+  }
+  return estimateImageProcessingWorkingSet(
+        currentRetainedBytes: currentRetainedBytes,
+        encodedBytes: encodedBytes,
+        size: size,
+      ) <=
+      maxWorkingSetBytes;
 }
