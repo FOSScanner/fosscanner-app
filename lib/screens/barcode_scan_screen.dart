@@ -5,59 +5,107 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/transient_message.dart';
 
-/// A live QR/barcode scanning mode, separate from the document-scan flow:
-/// point the camera at a code and get the decoded value with quick actions
-/// (copy, open link), rather than treating the code as a document page.
+class BarcodeScanResult {
+  const BarcodeScanResult({required this.isValid, required this.text});
+
+  final bool isValid;
+  final String? text;
+}
+
+typedef BarcodeScanViewBuilder =
+    Widget Function(
+      BuildContext context,
+      ValueChanged<BarcodeScanResult> onScan,
+    );
+typedef BarcodeClipboardWriter = Future<void> Function(String text);
+typedef BarcodeUriLauncher = Future<bool> Function(Uri uri);
+
+Widget _defaultScanView(
+  BuildContext context,
+  ValueChanged<BarcodeScanResult> onScan,
+) => ReaderWidget(
+  onScan: (code) =>
+      onScan(BarcodeScanResult(isValid: code.isValid, text: code.text)),
+  showGallery: true,
+  // cropPercent must stay 0 here: ReaderWidget's crop-indicator square only
+  // lines up with the region it actually decodes when the widget is truly
+  // full-screen. See khoren93/flutter_zxing#196.
+  cropPercent: 0,
+  // At cropPercent 0 the built-in overlay suggests tapping is required. The
+  // aiming guide below is cosmetic; decoding always uses the whole frame.
+  showScannerOverlay: false,
+  // Common 1D formats need a more exhaustive per-frame decode attempt.
+  tryHarder: true,
+);
+
+Future<void> _writeClipboard(String text) =>
+    Clipboard.setData(ClipboardData(text: text));
+
+Future<bool> _launchBarcodeUri(Uri uri) =>
+    launchUrl(uri, mode: LaunchMode.externalApplication);
+
+/// A live QR/barcode scanning mode, separate from the document-scan flow.
 class BarcodeScanScreen extends StatefulWidget {
-  const BarcodeScanScreen({super.key});
+  const BarcodeScanScreen({
+    super.key,
+    this.scanViewBuilder = _defaultScanView,
+    this.clipboardWriter = _writeClipboard,
+    this.uriLauncher = _launchBarcodeUri,
+  });
+
+  final BarcodeScanViewBuilder scanViewBuilder;
+  final BarcodeClipboardWriter clipboardWriter;
+  final BarcodeUriLauncher uriLauncher;
 
   @override
   State<BarcodeScanScreen> createState() => _BarcodeScanScreenState();
 }
 
 class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
-  String? _lastResult;
+  String? _latchedResult;
 
   Uri? get _resultUri {
-    final result = _lastResult;
+    final result = _latchedResult;
     if (result == null) return null;
     final uri = Uri.tryParse(result);
-    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty) {
       return null;
     }
     return uri;
   }
 
-  void _handleScan(Code code) {
-    if (!mounted) return;
-    final text = code.text;
-    if (!code.isValid || text == null || text.isEmpty) return;
-    if (text == _lastResult) return;
-    setState(() => _lastResult = text);
+  void _handleScan(BarcodeScanResult scan) {
+    if (!mounted || _latchedResult != null) return;
+    final text = scan.text;
+    if (!scan.isValid || text == null || text.isEmpty) return;
+    setState(() => _latchedResult = text);
   }
 
   void _dismissResult() {
-    setState(() => _lastResult = null);
+    setState(() => _latchedResult = null);
   }
 
   Future<void> _copyResult() async {
-    final result = _lastResult;
+    final result = _latchedResult;
     if (result == null) return;
-    await Clipboard.setData(ClipboardData(text: result));
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+    try {
+      await widget.clipboardWriter(result);
+      if (mounted) showTransientMessage(context, 'Copied to clipboard');
+    } catch (_) {
+      if (mounted) {
+        showTransientMessage(context, 'Could not copy to clipboard.');
+      }
+    }
   }
 
   Future<void> _openResult() async {
     final uri = _resultUri;
     if (uri == null) return;
     try {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
+      final launched = await widget.uriLauncher(uri);
       if (!launched && mounted) {
         showTransientMessage(context, 'Could not open the link.');
       }
@@ -68,39 +116,12 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final result = _lastResult;
+    final result = _latchedResult;
     return Scaffold(
       appBar: AppBar(title: const Text('Scan QR / Barcode')),
       body: Stack(
         children: [
-          // cropPercent must stay 0 here: ReaderWidget's crop-indicator square
-          // only lines up with the region it actually decodes when the widget
-          // is truly full-screen. This screen has an AppBar above it (so the
-          // preview is letterboxed), which is exactly the case the flutter_zxing
-          // maintainers flag as producing a crop guide that visually looks
-          // centered on the code while the real decode window is offset
-          // elsewhere — the code never gets read even though it's framed
-          // correctly on screen. See khoren93/flutter_zxing#196.
-          //
-          // showScannerOverlay is also off: at cropPercent 0, flutter_zxing's
-          // built-in overlay switches to a "tap the highlighted code" mode
-          // instead of a plain guide, which reads as scanning requiring a
-          // tap when it doesn't — onScan already fires as soon as a frame
-          // decodes. The plain square below is a purely cosmetic aiming hint
-          // with no effect on what actually gets decoded (the whole frame
-          // always does), so it can't drift out of sync the way the built-in
-          // one did.
-          ReaderWidget(
-            onScan: _handleScan,
-            showGallery: true,
-            cropPercent: 0,
-            showScannerOverlay: false,
-            // 1D formats (EAN/UPC/Code128, common on physical product
-            // packaging) carry far less redundancy than a QR code and are
-            // much more sensitive to a slight skew/angle, so they need the
-            // more exhaustive per-frame decode attempt this enables.
-            tryHarder: true,
-          ),
+          widget.scanViewBuilder(context, _handleScan),
           if (result == null)
             IgnorePointer(
               child: Center(
@@ -136,10 +157,17 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
-                              child: Text(
-                                result,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
+                              child: Semantics(
+                                container: true,
+                                liveRegion: true,
+                                label: 'Scanned code result: $result',
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    result,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ),
                             ),
                             IconButton(
@@ -157,19 +185,35 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                           children: [
                             if (_resultUri != null) ...[
                               Expanded(
-                                child: FilledButton.icon(
-                                  onPressed: _openResult,
-                                  icon: const Icon(Icons.open_in_new),
-                                  label: const Text('Open'),
+                                child: Semantics(
+                                  container: true,
+                                  button: true,
+                                  label: 'Open scanned link',
+                                  onTap: _openResult,
+                                  child: ExcludeSemantics(
+                                    child: FilledButton.icon(
+                                      onPressed: _openResult,
+                                      icon: const Icon(Icons.open_in_new),
+                                      label: const Text('Open'),
+                                    ),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 12),
                             ],
                             Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: _copyResult,
-                                icon: const Icon(Icons.copy),
-                                label: const Text('Copy'),
+                              child: Semantics(
+                                container: true,
+                                button: true,
+                                label: 'Copy scanned result',
+                                onTap: _copyResult,
+                                child: ExcludeSemantics(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _copyResult,
+                                    icon: const Icon(Icons.copy),
+                                    label: const Text('Copy'),
+                                  ),
+                                ),
                               ),
                             ),
                           ],
