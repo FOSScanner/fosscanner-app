@@ -1,7 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show MethodChannel;
+import 'package:flutter/services.dart'
+    show MethodCall, MethodChannel, PlatformException;
 import 'package:path_provider/path_provider.dart';
 
 import 'image_metadata.dart';
@@ -9,6 +10,7 @@ import 'image_metadata.dart';
 // Android's Tesseract renderer preserves page images and adds selectable text.
 const _channel = MethodChannel('com.fosscanner.app/ocr');
 bool _isCreatingPdf = false;
+void Function(int completed, int total)? _progressCallback;
 
 bool get isSupported =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -17,10 +19,32 @@ Future<void> _ensureTessdata() async {
   await _channel.invokeMethod<void>('ensureTessdata');
 }
 
+Future<void> _handleNativeCall(MethodCall call) async {
+  if (call.method != 'ocrProgress') return;
+  final arguments = call.arguments;
+  if (arguments is! Map) return;
+  final completed = arguments['completed'];
+  final total = arguments['total'];
+  if (completed is int && total is int && total > 0) {
+    _progressCallback?.call(completed, total);
+  }
+}
+
+bool isCancellation(Object error) =>
+    error is PlatformException && error.code == 'ocr_cancelled';
+
+Future<void> cancelSearchablePdf() async {
+  if (!_isCreatingPdf) return;
+  await _channel.invokeMethod<void>('cancelSearchablePdf');
+}
+
 // Renders a multi-page searchable PDF (each page's image with an invisible,
 // selectable OCR text layer, in the given order) using libtesseract's own
 // native PDF renderer. Returns the finished PDF's bytes.
-Future<Uint8List> createSearchablePdf(List<Uint8List> pageImages) async {
+Future<Uint8List> createSearchablePdf(
+  List<Uint8List> pageImages, {
+  void Function(int completed, int total)? onProgress,
+}) async {
   if (!isSupported) {
     throw UnsupportedError('Searchable PDF export requires Android');
   }
@@ -40,6 +64,8 @@ Future<Uint8List> createSearchablePdf(List<Uint8List> pageImages) async {
     }
   }
   _isCreatingPdf = true;
+  _progressCallback = onProgress;
+  _channel.setMethodCallHandler(_handleNativeCall);
   Directory? jobDirectory;
   try {
     await _ensureTessdata();
@@ -79,6 +105,8 @@ Future<Uint8List> createSearchablePdf(List<Uint8List> pageImages) async {
       // Best effort; app/OS cache copies can persist if deletion fails.
     } finally {
       _isCreatingPdf = false;
+      _progressCallback = null;
+      _channel.setMethodCallHandler(null);
     }
   }
 }

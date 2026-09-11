@@ -33,6 +33,7 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'ensureTessdata') return null;
+      if (call.method == 'cancelSearchablePdf') return null;
       return render(call);
     });
   });
@@ -157,6 +158,25 @@ void main() {
       expect(await first, pdf);
     },
   );
+
+  test('forwards cancellation while an export is active', () async {
+    final started = Completer<void>();
+    final finish = Completer<void>();
+    render = (call) async {
+      started.complete();
+      await finish.future;
+      final output = File('${(call.arguments as Map)['outputPath']}.pdf');
+      await output.writeAsBytes(pdf);
+      return output.path;
+    };
+
+    final first = ocr.createSearchablePdf([page]);
+    await started.future;
+    await ocr.cancelSearchablePdf();
+    expect(calls.last.method, 'cancelSearchablePdf');
+    finish.complete();
+    expect(await first, pdf);
+  });
 
   test('model installation failure releases the busy guard', () async {
     messenger.setMockMethodCallHandler(channel, (_) async {

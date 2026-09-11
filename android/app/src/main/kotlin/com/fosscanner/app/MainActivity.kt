@@ -18,6 +18,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 
+private class OcrCancelledException : Exception()
+
 // Keep the channel contract synchronized with lib/services/ocr_service.dart.
 class MainActivity : FlutterActivity() {
     private var executor = Executors.newSingleThreadExecutor()
@@ -25,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
+    private val cancellationRequested = AtomicBoolean(false)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -35,6 +38,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "ensureTessdata" -> handleEnsureTessdata(result)
                 "createSearchablePdf" -> handleCreateSearchablePdf(call, result)
+                "cancelSearchablePdf" -> handleCancelSearchablePdf(result)
                 else -> result.notImplemented()
             }
         }
@@ -56,6 +60,8 @@ class MainActivity : FlutterActivity() {
                 try {
                     val value = work()
                     mainHandler.post { result.success(value) }
+                } catch (e: OcrCancelledException) {
+                    mainHandler.post { result.error("ocr_cancelled", "OCR export cancelled", null) }
                 } catch (e: Exception) {
                     // Do not expose native exception messages, paths, or OCR text.
                     mainHandler.post { result.error("ocr_failed", "OCR operation failed", null) }
@@ -92,6 +98,7 @@ class MainActivity : FlutterActivity() {
             result.error("ocr_busy", "An OCR export is already running", null)
             return
         }
+        cancellationRequested.set(false)
         if (executor.isShutdown) {
             rendering.set(false)
             result.error("ocr_unavailable", "OCR worker is unavailable", null)
@@ -117,9 +124,9 @@ class MainActivity : FlutterActivity() {
                     encodedBytes += image.length()
                     require(encodedBytes <= MAX_DOCUMENT_BYTES)
                 }
-                check(!jobDetached.get())
+                checkNotCancelled(jobDetached)
                 renderPdf(filesDir, images, output.path, jobDetached)
-                check(!jobDetached.get())
+                checkNotCancelled(jobDetached)
                 succeeded = true
                 "$outputPath.pdf"
             } finally {
@@ -134,6 +141,11 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun handleCancelSearchablePdf(result: MethodChannel.Result) {
+        if (rendering.get()) cancellationRequested.set(true)
+        result.success(null)
+    }
+
     private fun renderPdf(filesDir: File, images: List<File>, outputPath: String, jobDetached: AtomicBoolean) {
         val baseApi = TessBaseAPI()
         try {
@@ -142,7 +154,7 @@ class MainActivity : FlutterActivity() {
             try {
                 check(baseApi.beginDocument(renderer, "FOSScanner"))
                 for (image in images) {
-                    check(!jobDetached.get())
+                    checkNotCancelled(jobDetached)
                     // Mirror image_metadata.dart's source limits before allocating
                     // bitmap/Pix buffers, including pass-through imported pages.
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -161,7 +173,9 @@ class MainActivity : FlutterActivity() {
                         pix.recycle()
                     }
                     check(File("$outputPath.pdf").length() <= MAX_DOCUMENT_BYTES)
+                    reportProgress(images.size, images.indexOf(image) + 1)
                 }
+                checkNotCancelled(jobDetached)
                 check(baseApi.endDocument(renderer))
             } finally {
                 renderer.recycle()
@@ -174,6 +188,21 @@ class MainActivity : FlutterActivity() {
         // boolean result. Validate the finished document before reporting success.
         ParcelFileDescriptor.open(File("$outputPath.pdf"), ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
             PdfRenderer(descriptor).use { pdf -> check(pdf.pageCount == images.size) }
+        }
+    }
+
+    private fun checkNotCancelled(jobDetached: AtomicBoolean) {
+        if (jobDetached.get() || cancellationRequested.get()) {
+            throw OcrCancelledException()
+        }
+    }
+
+    private fun reportProgress(total: Int, completed: Int) {
+        mainHandler.post {
+            channel?.invokeMethod(
+                "ocrProgress",
+                mapOf("completed" to completed, "total" to total),
+            )
         }
     }
 

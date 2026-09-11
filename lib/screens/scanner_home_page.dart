@@ -63,6 +63,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
   bool _isGeneratingPdf = false;
+  bool _isCancellingPdf = false;
+  double? _ocrProgress;
   bool _isPickingImages = false;
   bool _isClearingDraft = false;
   late bool _cameraSupported;
@@ -677,7 +679,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
     return ocr_service.createSearchablePdf([
       for (final page in pages) page.processedBytes,
-    ]);
+    ], onProgress: (completed, total) {
+      if (!mounted) return;
+      setState(() => _ocrProgress = completed / total);
+    });
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -752,11 +757,27 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return box == null ? null : box.localToGlobal(Offset.zero) & box.size;
   }
 
+  Future<void> _cancelPdfGeneration() async {
+    if (!_isGeneratingPdf || _isCancellingPdf || !_ocrSupported) return;
+    setState(() => _isCancellingPdf = true);
+    try {
+      await ocr_service.cancelSearchablePdf();
+    } catch (error) {
+      if (mounted && !ocr_service.isCancellation(error)) {
+        _showMessage('Could not cancel PDF generation.');
+      }
+    }
+  }
+
   Future<void> _generateAndSharePdf() async {
     if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
 
-    setState(() => _isGeneratingPdf = true);
+    setState(() {
+      _isGeneratingPdf = true;
+      _isCancellingPdf = false;
+      _ocrProgress = _ocrSupported ? 0 : null;
+    });
 
     var shared = false;
     var needsImageOnlyFallback = !_ocrSupported;
@@ -765,7 +786,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         Uint8List? searchablePdf;
         try {
           searchablePdf = await _createSearchablePdf(pages);
-        } catch (_) {
+        } catch (error) {
+          if (ocr_service.isCancellation(error)) {
+            if (mounted) _showMessage('PDF generation cancelled.');
+            return;
+          }
           needsImageOnlyFallback = true;
           if (!await _confirmImageOnlyFallback()) return;
         }
@@ -794,7 +819,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _showMessage('Could not create a PDF: $e');
       }
     } finally {
-      if (mounted) setState(() => _isGeneratingPdf = false);
+      if (mounted) {
+        setState(() {
+          _isGeneratingPdf = false;
+          _isCancellingPdf = false;
+          _ocrProgress = null;
+        });
+      }
     }
     if (shared && mounted && !_isClearingDraft && _pages.isNotEmpty) {
       await _askWhetherToKeepDraft();
@@ -1003,8 +1034,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  onPressed: _isGeneratingPdf || _isClearingDraft
+                  onPressed: _isClearingDraft
                       ? null
+                      : _isGeneratingPdf
+                      ? (_ocrSupported ? _cancelPdfGeneration : null)
                       : _generateAndSharePdf,
                   icon: _isGeneratingPdf || _isClearingDraft
                       ? const SizedBox(
@@ -1017,7 +1050,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     _isClearingDraft
                         ? 'Clearing draft...'
                         : _isGeneratingPdf
-                        ? 'Generating PDF...'
+                        ? _isCancellingPdf
+                            ? 'Cancelling PDF...'
+                            : _ocrProgress == null
+                            ? 'Generating PDF...'
+                            : 'Generating PDF '
+                                '${(_ocrProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),
