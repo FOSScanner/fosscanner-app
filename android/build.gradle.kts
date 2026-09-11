@@ -2,6 +2,9 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // cz.adaptech.android:tesseract4android (the on-device OCR/searchable-
+        // PDF engine) is only published via JitPack, not Maven Central.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

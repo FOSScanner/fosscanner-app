@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/image_metadata.dart';
+import '../services/ocr_service.dart' as ocr_service;
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -32,10 +33,12 @@ class ScannerHomePage extends StatefulWidget {
     super.key,
     this.initialPages = const [],
     this.sharePlus,
+    this.searchablePdfEnabled,
   });
 
   final List<ScannedPage> initialPages;
   final SharePlus? sharePlus;
+  final bool? searchablePdfEnabled;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -68,6 +71,52 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       unawaited(_recoverLostImages());
     }
+  }
+
+  // tesseract4android only ships an Android native implementation; iOS is a
+  // deferred follow-up (its setup needs a committed Podfile/xcframework that
+  // hasn't been verified on real iOS hardware), so this pass gates to
+  // Android only rather than the broader native-vs-web split used elsewhere.
+  bool get _ocrSupported =>
+      widget.searchablePdfEnabled ??
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
+
+  Future<void> _createAndShareSearchablePdf() async {
+    if (_isGeneratingPdf || _pages.isEmpty) return;
+    final pages = List<ScannedPage>.of(_pages, growable: false);
+    setState(() => _isGeneratingPdf = true);
+    try {
+      final pdfBytes = await ocr_service.createSearchablePdf([
+        for (final page in pages) page.processedBytes,
+      ]);
+      final fileName =
+          'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      await _sharePlus.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              pdfBytes,
+              name: fileName,
+              mimeType: 'application/pdf',
+            ),
+          ],
+          fileNameOverrides: [fileName],
+          text: 'Searchable document scanned with FOSScanner',
+          sharePositionOrigin: _shareOrigin,
+          downloadFallbackEnabled: true,
+        ),
+      );
+    } catch (e) {
+      if (mounted) _showMessage('Could not create a searchable PDF: $e');
+    } finally {
+      if (mounted) setState(() => _isGeneratingPdf = false);
+    }
+  }
+
+  Rect? get _shareOrigin {
+    final box =
+        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    return box == null ? null : box.localToGlobal(Offset.zero) & box.size;
   }
 
   int _pageMemoryBytes(ScannedPage page) =>
@@ -458,6 +507,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _generateAndSharePdf() async {
     if (_pages.isEmpty) return;
 
+    if (_ocrSupported) {
+      await _createAndShareSearchablePdf();
+      return;
+    }
+
     setState(() {
       _isGeneratingPdf = true;
     });
@@ -465,11 +519,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     try {
       // Capture the iPad popover anchor before PDF encoding yields; the page
       // list can change while encoding, which may remove the share button.
-      final shareButtonBox =
-          _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
-      final shareOrigin = shareButtonBox == null
-          ? null
-          : shareButtonBox.localToGlobal(Offset.zero) & shareButtonBox.size;
+      final shareOrigin = _shareOrigin;
       final pdf = pw.Document();
 
       for (final page in _pages) {

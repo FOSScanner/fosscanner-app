@@ -627,6 +627,7 @@ void main() {
         home: ScannerHomePage(
           initialPages: [page],
           sharePlus: SharePlus.custom(sharePlatform),
+          searchablePdfEnabled: false,
         ),
       ),
     );
