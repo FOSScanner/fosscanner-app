@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
+import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
 import '../services/ocr_service.dart' as ocr_service;
 import '../widgets/transient_message.dart';
@@ -34,11 +35,13 @@ class ScannerHomePage extends StatefulWidget {
     this.initialPages = const [],
     this.sharePlus,
     this.searchablePdfEnabled,
+    this.draftStore = const NoOpDraftStore(),
   });
 
   final List<ScannedPage> initialPages;
   final SharePlus? sharePlus;
   final bool? searchablePdfEnabled;
+  final DraftStore draftStore;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -54,9 +57,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   late final List<ScannedPage> _pages;
   late final SharePlus _sharePlus;
   final ImagePicker _picker = ImagePicker();
+  Future<void> _draftWriteTail = Future<void>.value();
+  var _draftRevision = 0;
+  var _documentGeneration = 0;
+  var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
   bool _isGeneratingPdf = false;
   bool _isPickingImages = false;
+  bool _isClearingDraft = false;
   late bool _cameraSupported;
 
   @override
@@ -65,6 +73,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _pages = [...widget.initialPages];
     _sharePlus = widget.sharePlus ?? SharePlus.instance;
     _cameraSupported = _picker.supportsImageSource(ImageSource.camera);
+    if (_pages.isEmpty) _draftWriteTail = _restoreDraft();
     // Android can destroy MainActivity while the system picker/camera is in
     // front. image_picker stores that pending result for the restarted app,
     // but it is lost permanently unless retrieveLostData is called at startup.
@@ -73,134 +82,55 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  // tesseract4android only ships an Android native implementation; iOS is a
-  // deferred follow-up (its setup needs a committed Podfile/xcframework that
-  // hasn't been verified on real iOS hardware), so this pass gates to
-  // Android only rather than the broader native-vs-web split used elsewhere.
-  bool get _ocrSupported =>
-      widget.searchablePdfEnabled ??
-      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
-
-  Future<Uint8List> _createSearchablePdf(
-    List<ScannedPage> pages,
-  ) async {
-    return ocr_service.createSearchablePdf([
-      for (final page in pages) page.processedBytes,
-    ]);
-  }
-
-  Future<bool> _confirmImageOnlyFallback() async {
-    if (!mounted) return false;
-    final fallback = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Searchable export failed'),
-        content: const Text(
-          'OCR could not create a searchable PDF for this document. '
-          'Share an image-only PDF instead?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Share image-only PDF'),
-          ),
-        ],
-      ),
-    );
-    return fallback ?? false;
-  }
-
-  Future<void> _sharePdfBytes(
-    Uint8List pdfBytes, {
-    required String fileName,
-    required String message,
-  }) async {
-    await _sharePlus.share(
-      ShareParams(
-        files: [
-          XFile.fromData(
-            pdfBytes,
-            name: fileName,
-            mimeType: 'application/pdf',
-          ),
-        ],
-        fileNameOverrides: [fileName],
-        text: message,
-        sharePositionOrigin: _shareOrigin,
-        downloadFallbackEnabled: true,
-      ),
-    );
-  }
-
-  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
-    final pdf = pw.Document();
-
-    for (final page in pages) {
-      final image = pw.MemoryImage(page.processedBytes);
-      final pageFormat = PdfPageFormat(
-        image.width! / _scanDpi * PdfPageFormat.inch,
-        image.height! / _scanDpi * PdfPageFormat.inch,
-      );
-      pdf.addPage(
-        pw.Page(
-          pageFormat: pageFormat,
-          margin: pw.EdgeInsets.zero,
-          build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
-        ),
-      );
-    }
-
-    return pdf.save();
-  }
-
-  Future<void> _generateAndSharePdf() async {
-    if (_isGeneratingPdf || _pages.isEmpty) return;
-    final pages = List<ScannedPage>.of(_pages, growable: false);
-    setState(() => _isGeneratingPdf = true);
+  Future<void> _restoreDraft() async {
+    final revision = _draftRevision;
     try {
-      if (_ocrSupported) {
-        Uint8List? searchablePdf;
-        try {
-          searchablePdf = await _createSearchablePdf(pages);
-        } catch (_) {
-          if (!await _confirmImageOnlyFallback()) return;
+      final restored = await widget.draftStore.load();
+      if (!mounted || revision != _draftRevision || _pages.isNotEmpty) return;
+      var retainedBytes = 0;
+      for (var index = 0; index < restored.length; index++) {
+        final pageBytes = _pageMemoryBytes(restored[index]);
+        if (!canRetainDocument(
+          currentBytes: retainedBytes,
+          currentPages: index,
+          incomingBytes: pageBytes,
+        )) {
+          throw const _DocumentCapacityException();
         }
-
-        if (searchablePdf != null) {
-          final fileName =
-              'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf';
-          await _sharePdfBytes(
-            searchablePdf,
-            fileName: fileName,
-            message: 'Searchable document scanned with FOSScanner',
-          );
-          return;
-        }
+        retainedBytes += pageBytes;
       }
-
-      final pdfBytes = await _createImageOnlyPdf(pages);
-      final fileName =
-          'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      await _sharePdfBytes(
-        pdfBytes,
-        fileName: fileName,
-        message: 'Document scanned with FOSScanner',
-      );
-    } catch (e) {
-      if (mounted) _showMessage('Could not create a PDF: $e');
-    } finally {
-      if (mounted) setState(() => _isGeneratingPdf = false);
+      if (restored.isNotEmpty) setState(() => _pages.addAll(restored));
+    } catch (_) {
+      if (mounted) _showMessage('Could not restore the saved draft.');
     }
   }
 
-  Rect? get _shareOrigin {
-    final box =
-        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
-    return box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+  void _queueDraftSave() {
+    if (_isClearingDraft) return;
+    final snapshot = List<ScannedPage>.of(_pages);
+    _draftRevision++;
+    _draftWriteTail = _draftWriteTail.then((_) async {
+      try {
+        await widget.draftStore.save(snapshot);
+      } catch (_) {
+        if (mounted) _showMessage('Could not save the draft.');
+      }
+    });
+  }
+
+  Future<bool> _queueDraftClear() {
+    _draftRevision++;
+    final clearOperation = _draftWriteTail.then((_) async {
+      try {
+        await widget.draftStore.clear();
+        return true;
+      } catch (_) {
+        if (mounted) _showMessage('Could not clear the saved draft.');
+        return false;
+      }
+    });
+    _draftWriteTail = clearOperation.then<void>((_) {});
+    return clearOperation;
   }
 
   int _pageMemoryBytes(ScannedPage page) =>
@@ -224,7 +154,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  bool _tryAddPage(ScannedPage page) {
+  bool _tryAddPage(ScannedPage page, {required int documentGeneration}) {
+    if (_isClearingDraft ||
+        !mounted ||
+        documentGeneration != _documentGeneration) {
+      return false;
+    }
     if (!canRetainDocument(
       currentBytes: _retainedDocumentBytes,
       currentPages: _pages.length,
@@ -234,6 +169,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return false;
     }
     setState(() => _pages.add(page));
+    _queueDraftSave();
     return true;
   }
 
@@ -293,7 +229,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.code, size: 18, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.code,
+                      size: 18,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'View source code',
@@ -321,6 +261,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _recoverLostImages() async {
+    final documentGeneration = _documentGeneration;
     // Block a second picker request until startup recovery has completed; two
     // simultaneous results could otherwise push overlapping adjustment routes.
     _isPickingImages = true;
@@ -345,6 +286,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         final result = await _addCapturedPhoto(
           files[index],
           deleteAfterRead: true,
+          documentGeneration: documentGeneration,
         );
         if (result == _PhotoIntakeResult.capacityReached) {
           for (final remaining in files.skip(index + 1)) {
@@ -360,9 +302,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  // Best-effort cleanup: FOSScanner doesn't persist scanned pages, so the
-  // temp file image_picker writes on capture is deleted the moment we've
-  // read its bytes into memory.
+  // Best-effort cleanup: the picker temp file is no longer needed once its
+  // bytes are in app-managed memory (and, on native, queued for draft save).
   Future<void> _deleteFileQuietly(String path) async {
     try {
       await File(path).delete();
@@ -377,11 +318,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       const {'camera-unavailable', 'no_available_camera'}.contains(error.code);
 
   Future<void> _captureImage() async {
-    if (_isPickingImages) return;
+    if (_isPickingImages || _isClearingDraft) return;
     if (!_canStartImagePick) {
       _showDocumentLimit();
       return;
     }
+    final documentGeneration = _documentGeneration;
     setState(() => _isPickingImages = true);
     try {
       final XFile? photo = await _picker.pickImage(
@@ -391,7 +333,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       );
       if (photo == null) return;
       // Camera capture writes a fresh file that's genuinely ours to delete.
-      await _addCapturedPhoto(photo, deleteAfterRead: true);
+      await _addCapturedPhoto(
+        photo,
+        deleteAfterRead: true,
+        documentGeneration: documentGeneration,
+      );
     } catch (error) {
       if (_isDefinitiveCameraUnavailable(error) && mounted) {
         setState(() => _cameraSupported = false);
@@ -403,11 +349,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _importFromGallery() async {
-    if (_isPickingImages) return;
+    if (_isPickingImages || _isClearingDraft) return;
     if (!_canStartImagePick) {
       _showDocumentLimit();
       return;
     }
+    final documentGeneration = _documentGeneration;
     setState(() => _isPickingImages = true);
     try {
       final List<XFile> photos = await _picker.pickMultiImage(
@@ -416,6 +363,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         limit: maxDocumentPages - _pages.length,
       );
       for (final photo in photos) {
+        if (_isClearingDraft) break;
         if (!_canStartImagePick) {
           _showDocumentLimit();
           break;
@@ -423,7 +371,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         // Unlike camera capture, a gallery pick's path isn't reliably an
         // app-owned temp copy across platforms — don't risk deleting a file
         // that might actually be the user's original photo.
-        final result = await _addCapturedPhoto(photo, deleteAfterRead: false);
+        final result = await _addCapturedPhoto(
+          photo,
+          deleteAfterRead: false,
+          documentGeneration: documentGeneration,
+        );
         if (result == _PhotoIntakeResult.capacityReached) break;
       }
     } catch (_) {
@@ -439,7 +391,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<_PhotoIntakeResult> _addCapturedPhoto(
     XFile photo, {
     required bool deleteAfterRead,
+    required int documentGeneration,
   }) async {
+    if (_isClearingDraft || documentGeneration != _documentGeneration) {
+      if (deleteAfterRead) await _deleteFileQuietly(photo.path);
+      return _PhotoIntakeResult.skipped;
+    }
+
     late final Uint8List bytes;
     try {
       try {
@@ -486,6 +444,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
+    if (_isClearingDraft || documentGeneration != _documentGeneration) {
+      return _PhotoIntakeResult.skipped;
+    }
     if (!canRetainDocument(
       currentBytes: _retainedDocumentBytes,
       currentPages: _pages.length,
@@ -510,7 +471,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _showMessage('Could not read this photo.');
       return _PhotoIntakeResult.skipped;
     }
-    if (!mounted) return _PhotoIntakeResult.skipped;
+    if (!mounted ||
+        _isClearingDraft ||
+        documentGeneration != _documentGeneration) {
+      return _PhotoIntakeResult.skipped;
+    }
 
     if (kIsWeb) {
       // opencv_dart doesn't support web; use the photo as-is rather than
@@ -521,6 +486,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           corners: const [],
           processedBytes: bytes,
         ),
+        documentGeneration: documentGeneration,
       );
       return added
           ? _PhotoIntakeResult.added
@@ -532,17 +498,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         builder: (_) => CornerAdjustScreen(originalBytes: bytes),
       ),
     );
-    if (result == null || !mounted) return _PhotoIntakeResult.skipped;
-    return _tryAddPage(result)
+    if (result == null ||
+        !mounted ||
+        _isClearingDraft ||
+        documentGeneration != _documentGeneration) {
+      return _PhotoIntakeResult.skipped;
+    }
+    return _tryAddPage(result, documentGeneration: documentGeneration)
         ? _PhotoIntakeResult.added
         : _PhotoIntakeResult.capacityReached;
   }
 
   Future<void> _editPage(int index) async {
     // No detect/adjust flow on web (see _addCapturedPhoto) — nothing to edit.
-    if (kIsWeb) return;
+    if (kIsWeb || _isClearingDraft || index >= _pages.length) return;
 
     final page = _pages[index];
+    final documentGeneration = _documentGeneration;
     final result = await Navigator.of(context).push<ScannedPage>(
       MaterialPageRoute(
         builder: (_) => CornerAdjustScreen(
@@ -557,6 +529,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
     if (result != null &&
         mounted &&
+        !_isClearingDraft &&
+        documentGeneration == _documentGeneration &&
         index < _pages.length &&
         identical(_pages[index], page)) {
       if (!canReplaceDocumentPage(
@@ -569,23 +543,262 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         return;
       }
       setState(() => _pages[index] = result);
+      _queueDraftSave();
     }
   }
 
   void _removePage(int index) {
+    if (_isClearingDraft || index < 0 || index >= _pages.length) return;
+    final removed = _pages[index];
+    final undoGeneration = ++_undoGeneration;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
     setState(() => _pages.removeAt(index));
+    _queueDraftSave();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('Page deleted.'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted ||
+                _isClearingDraft ||
+                undoGeneration != _undoGeneration) {
+              return;
+            }
+            if (!canRetainDocument(
+              currentBytes: _retainedDocumentBytes,
+              currentPages: _pages.length,
+              incomingBytes: _pageMemoryBytes(removed),
+            )) {
+              _showDocumentLimit();
+              return;
+            }
+            final restoredIndex = index > _pages.length ? _pages.length : index;
+            setState(() => _pages.insert(restoredIndex, removed));
+            _queueDraftSave();
+          },
+        ),
+      ),
+    );
   }
 
   void _reorderPage(int fromIndex, int toIndex) {
-    if (fromIndex == toIndex) return;
+    if (_isClearingDraft ||
+        fromIndex < 0 ||
+        fromIndex >= _pages.length ||
+        toIndex < 0 ||
+        toIndex >= _pages.length ||
+        fromIndex == toIndex) {
+      return;
+    }
     setState(() {
       final page = _pages.removeAt(fromIndex);
       _pages.insert(toIndex, page);
     });
+    _queueDraftSave();
   }
 
-  void _clearPages() {
-    setState(() => _pages.clear());
+  Future<void> _clearPages() async {
+    if (_isClearingDraft) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear all pages?'),
+        content: const Text('This removes every page from the current draft.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _isClearingDraft) return;
+    await _clearCurrentDraft();
+  }
+
+  Future<void> _clearCurrentDraft() async {
+    if (_isClearingDraft) return;
+    _documentGeneration++;
+    setState(() => _isClearingDraft = true);
+
+    var cleared = false;
+    try {
+      cleared = await _queueDraftClear();
+    } catch (_) {
+      if (mounted) _showMessage('Could not clear the saved draft.');
+    }
+    if (!mounted) return;
+
+    if (cleared) {
+      _undoGeneration++;
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
+    setState(() {
+      if (cleared) _pages.clear();
+      _isClearingDraft = false;
+    });
+  }
+
+  Future<void> _askWhetherToKeepDraft() async {
+    if (_isClearingDraft || _pages.isEmpty) return;
+    final clear = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Keep this draft?'),
+        content: const Text(
+          'The PDF was shared. You can keep these pages for later or clear the draft now.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep draft'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear draft'),
+          ),
+        ],
+      ),
+    );
+    if (clear != true || !mounted || _isClearingDraft) return;
+    await _clearCurrentDraft();
+  }
+
+  bool get _ocrSupported =>
+      widget.searchablePdfEnabled ??
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
+
+  Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
+    return ocr_service.createSearchablePdf([
+      for (final page in pages) page.processedBytes,
+    ]);
+  }
+
+  Future<bool> _confirmImageOnlyFallback() async {
+    if (!mounted) return false;
+    final fallback = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Searchable export failed'),
+        content: const Text(
+          'OCR could not create a searchable PDF for this document. '
+          'Share an image-only PDF instead?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Share image-only PDF'),
+          ),
+        ],
+      ),
+    );
+    return fallback ?? false;
+  }
+
+  Future<ShareResult> _sharePdfBytes(
+    Uint8List pdfBytes, {
+    required String fileName,
+    required String message,
+  }) {
+    return _sharePlus.share(
+      ShareParams(
+        files: [
+          XFile.fromData(
+            pdfBytes,
+            name: fileName,
+            mimeType: 'application/pdf',
+          ),
+        ],
+        fileNameOverrides: [fileName],
+        text: message,
+        sharePositionOrigin: _shareOrigin,
+        downloadFallbackEnabled: true,
+      ),
+    );
+  }
+
+  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
+    final pdf = pw.Document();
+    for (final page in pages) {
+      final image = pw.MemoryImage(page.processedBytes);
+      final pageFormat = PdfPageFormat(
+        image.width! / _scanDpi * PdfPageFormat.inch,
+        image.height! / _scanDpi * PdfPageFormat.inch,
+      );
+      pdf.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.zero,
+          build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
+        ),
+      );
+    }
+    return pdf.save();
+  }
+
+  Rect? get _shareOrigin {
+    final box =
+        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    return box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  Future<void> _generateAndSharePdf() async {
+    if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
+    final pages = List<ScannedPage>.of(_pages, growable: false);
+
+    setState(() => _isGeneratingPdf = true);
+
+    var shared = false;
+    var needsImageOnlyFallback = !_ocrSupported;
+    try {
+      if (_ocrSupported) {
+        Uint8List? searchablePdf;
+        try {
+          searchablePdf = await _createSearchablePdf(pages);
+        } catch (_) {
+          needsImageOnlyFallback = true;
+          if (!await _confirmImageOnlyFallback()) return;
+        }
+        if (searchablePdf != null) {
+          final result = await _sharePdfBytes(
+            searchablePdf,
+            fileName:
+                'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf',
+            message: 'Searchable document scanned with FOSScanner',
+          );
+          shared = result.status != ShareResultStatus.dismissed;
+        }
+      }
+
+      if (needsImageOnlyFallback) {
+        final pdfBytes = await _createImageOnlyPdf(pages);
+        final result = await _sharePdfBytes(
+          pdfBytes,
+          fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
+          message: 'Document scanned with FOSScanner',
+        );
+        shared = result.status != ShareResultStatus.dismissed;
+      }
+    } catch (e) {
+      if (mounted) {
+        _showMessage('Could not create a PDF: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingPdf = false);
+    }
+    if (shared && mounted && !_isClearingDraft && _pages.isNotEmpty) {
+      await _askWhetherToKeepDraft();
+    }
   }
 
   @override
@@ -608,15 +821,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             ),
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
-            onPressed: _isPickingImages || !_canStartImagePick
+            onPressed:
+                _isPickingImages || _isClearingDraft || !_canStartImagePick
                 ? null
                 : _importFromGallery,
             tooltip: 'Import from gallery',
           ),
           if (_pages.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.clear_all),
-              onPressed: _clearPages,
+              icon: _isClearingDraft
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.clear_all),
+              onPressed: _isClearingDraft ? null : _clearPages,
               tooltip: 'Clear all',
             ),
         ],
@@ -669,7 +888,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 final card = Card(
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    onTap: () => _editPage(index),
+                    onTap: _isClearingDraft ? null : () => _editPage(index),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -713,7 +932,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                 color: Colors.white,
                               ),
                               tooltip: 'Delete page ${index + 1}',
-                              onPressed: () => _removePage(index),
+                              onPressed: _isClearingDraft
+                                  ? null
+                                  : () => _removePage(index),
                             ),
                           ),
                         ),
@@ -725,13 +946,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 // Drag-to-reorder: long-press a page to pick it up, drop it
                 // on another page's slot to swap it into that position.
                 return DragTarget<int>(
-                  onWillAcceptWithDetails: (details) => details.data != index,
+                  onWillAcceptWithDetails: (details) =>
+                      !_isClearingDraft && details.data != index,
                   onAcceptWithDetails: (details) =>
                       _reorderPage(details.data, index),
                   builder: (context, candidateData, rejectedData) {
                     final isDropTarget = candidateData.isNotEmpty;
                     return LongPressDraggable<int>(
                       data: index,
+                      maxSimultaneousDrags: _isClearingDraft ? 0 : 1,
                       feedback: SizedBox(
                         width: 140,
                         height: 200,
@@ -760,7 +983,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             ),
       floatingActionButton: _cameraSupported
           ? FloatingActionButton(
-              onPressed: _isPickingImages || !_canStartImagePick
+              onPressed:
+                  _isPickingImages || _isClearingDraft || !_canStartImagePick
                   ? null
                   : _captureImage,
               tooltip: 'Capture Image',
@@ -779,8 +1003,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  onPressed: _isGeneratingPdf ? null : _generateAndSharePdf,
-                  icon: _isGeneratingPdf
+                  onPressed: _isGeneratingPdf || _isClearingDraft
+                      ? null
+                      : _generateAndSharePdf,
+                  icon: _isGeneratingPdf || _isClearingDraft
                       ? const SizedBox(
                           width: 24,
                           height: 24,
@@ -788,7 +1014,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         )
                       : const Icon(Icons.picture_as_pdf),
                   label: Text(
-                    _isGeneratingPdf
+                    _isClearingDraft
+                        ? 'Clearing draft...'
+                        : _isGeneratingPdf
                         ? 'Generating PDF...'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),

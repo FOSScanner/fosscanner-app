@@ -23,9 +23,10 @@ body:
     attributes:
       label: Privacy
       description: >-
-        FOSScanner makes no network calls of its own and keeps in-progress
-        pages in memory (the OS may cache a shared PDF; see the README).
-        Please confirm your suggestion doesn't require breaking that.
+        FOSScanner makes no network calls of its own. On native platforms it
+        keeps an unfinished draft in the app's private, OS-managed cache; web
+        drafts are memory-only (see the README). Please confirm your suggestion
+        preserves these privacy boundaries.
       options:
-        - label: This doesn't require adding network calls or persistent storage of scanned content
+        - label: This doesn't require network calls or storage outside the app-private cache
           required: true

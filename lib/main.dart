@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/scanner_home_page.dart';
+import 'services/draft_store.dart';
 
 void main() {
   LicenseRegistry.addLicense(() async* {
@@ -13,11 +14,13 @@ void main() {
       'Tesseract4Android and native OCR dependencies',
     ], await rootBundle.loadString('assets/tessdata/THIRD_PARTY_NOTICES.txt'));
   });
-  runApp(const FOSScannerApp());
+  runApp(FOSScannerApp(draftStore: createDraftStore()));
 }
 
 class FOSScannerApp extends StatelessWidget {
-  const FOSScannerApp({super.key});
+  const FOSScannerApp({super.key, this.draftStore});
+
+  final DraftStore? draftStore;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +41,7 @@ class FOSScannerApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.system,
-      home: const ScannerHomePage(),
+      home: ScannerHomePage(draftStore: draftStore ?? const NoOpDraftStore()),
     );
   }
 }

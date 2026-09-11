@@ -15,6 +15,78 @@ import '../widgets/transient_message.dart';
 const _fullPreviewDecodeSize = 2048;
 const _filterChipDecodeSize = 256;
 
+abstract interface class CornerAdjustOperations {
+  Future<Size> decodeSize(Uint8List imageBytes);
+
+  Future<Map<PageFilter, Uint8List>> buildPreviews(
+    Uint8List imageBytes,
+    List<Offset> corners,
+  );
+
+  Future<Uint8List> processForExport(
+    Uint8List imageBytes,
+    List<Offset> corners, {
+    required PageFilter filter,
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  });
+}
+
+class DefaultCornerAdjustOperations implements CornerAdjustOperations {
+  const DefaultCornerAdjustOperations();
+
+  @override
+  Future<Size> decodeSize(Uint8List imageBytes) async {
+    final codec = await ui.instantiateImageCodec(imageBytes);
+    final frame = await codec.getNextFrame();
+    final size = Size(
+      frame.image.width.toDouble(),
+      frame.image.height.toDouble(),
+    );
+    frame.image.dispose();
+    codec.dispose();
+    return size;
+  }
+
+  @override
+  Future<Map<PageFilter, Uint8List>> buildPreviews(
+    Uint8List imageBytes,
+    List<Offset> corners,
+  ) async {
+    final warped = warpDocument(
+      imageBytes,
+      corners,
+      maxPixels: maxPreviewWarpPixels,
+      maxEdge: maxPreviewWarpEdge,
+    );
+    return {
+      for (final filter in PageFilter.values)
+        filter: applyFilter(warped, filter),
+    };
+  }
+
+  @override
+  Future<Uint8List> processForExport(
+    Uint8List imageBytes,
+    List<Offset> corners, {
+    required PageFilter filter,
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) {
+    Uint8List process() => processDocument(
+      imageBytes,
+      corners,
+      filter: filter,
+      rotationQuarterTurns: rotationQuarterTurns,
+      brightness: brightness,
+      contrast: contrast,
+    );
+    return kIsWeb ? Future.value(process()) : Isolate.run(process);
+  }
+}
+
 const _filterLabels = {
   PageFilter.original: 'Original',
   PageFilter.autoEnhance: 'Enhance',
@@ -43,6 +115,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.initialRotationQuarterTurns = 0,
     this.initialBrightness = 0.0,
     this.initialContrast = 1.0,
+    this.operations = const DefaultCornerAdjustOperations(),
   });
 
   final Uint8List originalBytes;
@@ -51,6 +124,7 @@ class CornerAdjustScreen extends StatefulWidget {
   final int initialRotationQuarterTurns;
   final double initialBrightness;
   final double initialContrast;
+  final CornerAdjustOperations operations;
 
   @override
   State<CornerAdjustScreen> createState() => _CornerAdjustScreenState();
@@ -63,6 +137,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   String? _error;
 
   _Step _step = _Step.corners;
+  LocalHistoryEntry? _filterHistoryEntry;
   late PageFilter _selectedFilter = widget.initialFilter;
   late int _rotationQuarterTurns = widget.initialRotationQuarterTurns;
   late double _brightness = widget.initialBrightness;
@@ -86,14 +161,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   Future<void> _initialize() async {
     try {
-      final codec = await ui.instantiateImageCodec(widget.originalBytes);
-      final frame = await codec.getNextFrame();
-      final size = Size(
-        frame.image.width.toDouble(),
-        frame.image.height.toDouble(),
-      );
-      frame.image.dispose();
-      codec.dispose();
+      final size = await widget.operations.decodeSize(widget.originalBytes);
 
       final candidateCorners =
           widget.initialCorners ?? detectCorners(widget.originalBytes);
@@ -161,15 +229,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
 
     try {
-      final warped = warpDocument(
+      final previews = await widget.operations.buildPreviews(
         widget.originalBytes,
         corners,
-        maxPixels: maxPreviewWarpPixels,
-        maxEdge: maxPreviewWarpEdge,
       );
-      final previews = <PageFilter, Uint8List>{
-        for (final f in PageFilter.values) f: applyFilter(warped, f),
-      };
       if (!mounted) return;
       setState(() {
         _filterPreviews = previews;
@@ -206,34 +269,35 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
   }
 
-  Future<Uint8List> _processForExport(
-    List<Offset> corners, {
-    required PageFilter filter,
-    required int rotationQuarterTurns,
-    required double brightness,
-    required double contrast,
-  }) {
-    final imageBytes = widget.originalBytes;
-    Uint8List process() => processDocument(
-      imageBytes,
-      corners,
-      filter: filter,
-      rotationQuarterTurns: rotationQuarterTurns,
-      brightness: brightness,
-      contrast: contrast,
-    );
-
-    // Native OpenCV work is CPU/FFI-heavy; yielding it to another isolate lets
-    // the progress indicator paint and keeps pointer/system events responsive.
-    return kIsWeb ? Future.value(process()) : Isolate.run(process);
-  }
-
   Future<void> _goToFilterStep() async {
     if (_filterPreviews == null) {
       await _updatePreviews();
       if (!mounted || _filterPreviews == null) return;
     }
     setState(() => _step = _Step.filter);
+    if (_filterHistoryEntry != null) return;
+    late final LocalHistoryEntry entry;
+    entry = LocalHistoryEntry(
+      onRemove: () {
+        if (identical(_filterHistoryEntry, entry)) {
+          _filterHistoryEntry = null;
+        }
+        if (mounted && _step == _Step.filter) {
+          setState(() => _step = _Step.corners);
+        }
+      },
+    );
+    _filterHistoryEntry = entry;
+    ModalRoute.of(context)?.addLocalHistoryEntry(entry);
+  }
+
+  void _leaveFilterStep() {
+    final entry = _filterHistoryEntry;
+    if (entry != null) {
+      entry.remove();
+    } else if (_step == _Step.filter) {
+      setState(() => _step = _Step.corners);
+    }
   }
 
   Future<void> _confirm() async {
@@ -245,7 +309,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final contrast = _contrast;
     setState(() => _isProcessing = true);
     try {
-      final processed = await _processForExport(
+      final processed = await widget.operations.processForExport(
+        widget.originalBytes,
         corners,
         filter: filter,
         rotationQuarterTurns: rotationQuarterTurns,
@@ -253,17 +318,19 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         contrast: contrast,
       );
       if (!mounted) return;
-      Navigator.of(context).pop(
-        ScannedPage(
-          originalBytes: widget.originalBytes,
-          corners: corners,
-          filter: filter,
-          rotationQuarterTurns: rotationQuarterTurns,
-          brightness: brightness,
-          contrast: contrast,
-          processedBytes: processed,
-        ),
+      final page = ScannedPage(
+        originalBytes: widget.originalBytes,
+        corners: corners,
+        filter: filter,
+        rotationQuarterTurns: rotationQuarterTurns,
+        brightness: brightness,
+        contrast: contrast,
+        processedBytes: processed,
       );
+      // Otherwise Navigator.pop would consume the local filter history entry
+      // instead of completing this route with the scanned page.
+      _filterHistoryEntry?.remove();
+      if (mounted) Navigator.of(context).pop(page);
     } catch (_) {
       if (!mounted) return;
       setState(() => _isProcessing = false);
@@ -284,27 +351,30 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final corners = _corners;
     final ready = imageSize != null && corners != null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_appBarTitle),
-        actions: [
-          if (_step == _Step.filter)
-            IconButton(
-              icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
-              tooltip: 'Rotate',
-              onPressed: _isProcessing ? null : _rotate,
-            ),
-        ],
+    return PopScope(
+      canPop: !_isProcessing,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_appBarTitle),
+          actions: [
+            if (_step == _Step.filter)
+              IconButton(
+                icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
+                tooltip: 'Rotate',
+                onPressed: _isProcessing ? null : _rotate,
+              ),
+          ],
+        ),
+        body: !ready
+            ? Center(
+                child: _error != null
+                    ? _InitErrorView(message: _error!)
+                    : const CircularProgressIndicator(),
+              )
+            : _step == _Step.corners
+            ? _buildCornersStep(context, imageSize, corners)
+            : _buildFilterStep(context),
       ),
-      body: !ready
-          ? Center(
-              child: _error != null
-                  ? _InitErrorView(message: _error!)
-                  : const CircularProgressIndicator(),
-            )
-          : _step == _Step.corners
-          ? _buildCornersStep(context, imageSize, corners)
-          : _buildFilterStep(context),
     );
   }
 
@@ -459,9 +529,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _isProcessing
-                        ? null
-                        : () => setState(() => _step = _Step.corners),
+                    onPressed: _isProcessing ? null : _leaveFilterStep,
                     child: const Text('Back'),
                   ),
                 ),
