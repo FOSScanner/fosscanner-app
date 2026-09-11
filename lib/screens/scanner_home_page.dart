@@ -81,33 +81,117 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       widget.searchablePdfEnabled ??
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
 
-  Future<void> _createAndShareSearchablePdf() async {
+  Future<Uint8List> _createSearchablePdf(
+    List<ScannedPage> pages,
+  ) async {
+    return ocr_service.createSearchablePdf([
+      for (final page in pages) page.processedBytes,
+    ]);
+  }
+
+  Future<bool> _confirmImageOnlyFallback() async {
+    if (!mounted) return false;
+    final fallback = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Searchable export failed'),
+        content: const Text(
+          'OCR could not create a searchable PDF for this document. '
+          'Share an image-only PDF instead?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Share image-only PDF'),
+          ),
+        ],
+      ),
+    );
+    return fallback ?? false;
+  }
+
+  Future<void> _sharePdfBytes(
+    Uint8List pdfBytes, {
+    required String fileName,
+    required String message,
+  }) async {
+    await _sharePlus.share(
+      ShareParams(
+        files: [
+          XFile.fromData(
+            pdfBytes,
+            name: fileName,
+            mimeType: 'application/pdf',
+          ),
+        ],
+        fileNameOverrides: [fileName],
+        text: message,
+        sharePositionOrigin: _shareOrigin,
+        downloadFallbackEnabled: true,
+      ),
+    );
+  }
+
+  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
+    final pdf = pw.Document();
+
+    for (final page in pages) {
+      final image = pw.MemoryImage(page.processedBytes);
+      final pageFormat = PdfPageFormat(
+        image.width! / _scanDpi * PdfPageFormat.inch,
+        image.height! / _scanDpi * PdfPageFormat.inch,
+      );
+      pdf.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.zero,
+          build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
+        ),
+      );
+    }
+
+    return pdf.save();
+  }
+
+  Future<void> _generateAndSharePdf() async {
     if (_isGeneratingPdf || _pages.isEmpty) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
     setState(() => _isGeneratingPdf = true);
     try {
-      final pdfBytes = await ocr_service.createSearchablePdf([
-        for (final page in pages) page.processedBytes,
-      ]);
+      if (_ocrSupported) {
+        Uint8List? searchablePdf;
+        try {
+          searchablePdf = await _createSearchablePdf(pages);
+        } catch (_) {
+          if (!await _confirmImageOnlyFallback()) return;
+        }
+
+        if (searchablePdf != null) {
+          final fileName =
+              'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf';
+          await _sharePdfBytes(
+            searchablePdf,
+            fileName: fileName,
+            message: 'Searchable document scanned with FOSScanner',
+          );
+          return;
+        }
+      }
+
+      final pdfBytes = await _createImageOnlyPdf(pages);
       final fileName =
-          'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      await _sharePlus.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              pdfBytes,
-              name: fileName,
-              mimeType: 'application/pdf',
-            ),
-          ],
-          fileNameOverrides: [fileName],
-          text: 'Searchable document scanned with FOSScanner',
-          sharePositionOrigin: _shareOrigin,
-          downloadFallbackEnabled: true,
-        ),
+          'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      await _sharePdfBytes(
+        pdfBytes,
+        fileName: fileName,
+        message: 'Document scanned with FOSScanner',
       );
     } catch (e) {
-      if (mounted) _showMessage('Could not create a searchable PDF: $e');
+      if (mounted) _showMessage('Could not create a PDF: $e');
     } finally {
       if (mounted) setState(() => _isGeneratingPdf = false);
     }
@@ -502,86 +586,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _clearPages() {
     setState(() => _pages.clear());
-  }
-
-  Future<void> _generateAndSharePdf() async {
-    if (_pages.isEmpty) return;
-
-    if (_ocrSupported) {
-      await _createAndShareSearchablePdf();
-      return;
-    }
-
-    setState(() {
-      _isGeneratingPdf = true;
-    });
-
-    try {
-      // Capture the iPad popover anchor before PDF encoding yields; the page
-      // list can change while encoding, which may remove the share button.
-      final shareOrigin = _shareOrigin;
-      final pdf = pw.Document();
-
-      for (final page in _pages) {
-        final image = pw.MemoryImage(page.processedBytes);
-        // Size the page to the image's own aspect ratio (at an assumed
-        // scan resolution, so the physical page size stays reasonable)
-        // instead of a fixed PdfPageFormat.a4 — that letterboxed the
-        // image inside A4's fixed proportions (plus a built-in ~2cm
-        // margin on top), which is exactly the "extra white border
-        // around the selected document" users were seeing.
-        final pageFormat = PdfPageFormat(
-          image.width! / _scanDpi * PdfPageFormat.inch,
-          image.height! / _scanDpi * PdfPageFormat.inch,
-        );
-        pdf.addPage(
-          pw.Page(
-            pageFormat: pageFormat,
-            margin: pw.EdgeInsets.zero,
-            build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
-          ),
-        );
-      }
-
-      // Start from bytes rather than creating our own persistent document.
-      // share_plus may materialize an OS-managed cache copy for the receiver.
-      final pdfBytes = await pdf.save();
-      final fileName =
-          'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf';
-
-      await _sharePlus.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              pdfBytes,
-              name: fileName,
-              mimeType: 'application/pdf',
-            ),
-          ],
-          fileNameOverrides: [fileName],
-          text: 'Document scanned with FOSScanner',
-          // Required for the popover anchor on iPad; omitting it can make the
-          // share sheet hang or crash instead of appearing.
-          sharePositionOrigin: shareOrigin,
-          // On web, sharing needs a secure context (HTTPS/localhost); when
-          // unavailable, share_plus falls back to a plain browser download
-          // so the user still gets their PDF instead of hitting a dead end.
-          downloadFallbackEnabled: true,
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isGeneratingPdf = false;
-        });
-      }
-    }
   }
 
   @override

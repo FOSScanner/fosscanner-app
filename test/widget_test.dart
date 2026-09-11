@@ -642,4 +642,43 @@ void main() {
       matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
     );
   });
+
+  testWidgets('offers an image-only fallback when searchable export fails', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+
+    final sharePlatform = _FakeSharePlatform();
+    final imageBytes = File('assets/icon/icon.png').readAsBytesSync();
+    final page = ScannedPage(
+      originalBytes: imageBytes,
+      corners: const [],
+      processedBytes: imageBytes,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: [page],
+          sharePlus: SharePlus.custom(sharePlatform),
+          searchablePdfEnabled: true,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.pump();
+    expect(find.text('Searchable export failed'), findsOneWidget);
+    expect(find.text('Share image-only PDF'), findsOneWidget);
+
+    await tester.tap(find.text('Share image-only PDF'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(sharePlatform.lastParams, isNotNull);
+    expect(
+      sharePlatform.lastParams!.fileNameOverrides!.single,
+      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+    );
+  });
 }
