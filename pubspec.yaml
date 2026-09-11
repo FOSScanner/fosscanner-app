@@ -31,6 +31,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icon/
+    - assets/tessdata/Latin.traineddata
+    - assets/tessdata/LICENSE
+    - assets/tessdata/THIRD_PARTY_NOTICES.txt
 
 flutter_launcher_icons:
   image_path: "assets/icon/icon.png"

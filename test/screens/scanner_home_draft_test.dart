@@ -119,6 +119,7 @@ void main() {
         initialPages: pages,
         draftStore: store,
         sharePlus: sharePlus,
+        searchablePdfEnabled: false,
       ),
     ),
   );
