@@ -44,6 +44,8 @@ and this page list.*
 - Import existing photos from your gallery instead of (or alongside)
   capturing new ones
 - Combine captured pages into a single PDF
+- On Android, export a searchable PDF with selectable, copyable text using
+  bundled Latin-script OCR; other platforms export image-only PDFs for now
 - Share the PDF via the OS share sheet (or download it directly on web)
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
@@ -61,6 +63,8 @@ used as-is there.
 ## Privacy
 
 - All image processing and PDF generation happens on-device.
+- Android searchable PDF recognition uses a bundled, offline Latin-script
+  Tesseract model; no OCR text or images are sent over the network.
 - Imported gallery originals are never modified or deleted. App-owned camera
   temp files are removed after the app attempts to copy their bytes into
   memory (including failed reads).

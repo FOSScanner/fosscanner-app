@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/scanned_page.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
+import '../services/ocr_service.dart' as ocr_service;
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -35,6 +36,7 @@ class ScannerHomePage extends StatefulWidget {
     super.key,
     this.initialPages = const [],
     this.sharePlus,
+    this.searchablePdfEnabled,
     this.draftStore = const NoOpDraftStore(),
     this.cornerAdjustOperations = const DefaultCornerAdjustOperations(),
     this.sourceImageSizeReader = readEncodedImageSize,
@@ -42,6 +44,7 @@ class ScannerHomePage extends StatefulWidget {
 
   final List<ScannedPage> initialPages;
   final SharePlus? sharePlus;
+  final bool? searchablePdfEnabled;
   final DraftStore draftStore;
   final CornerAdjustOperations cornerAdjustOperations;
   final SourceImageSizeReader sourceImageSizeReader;
@@ -67,6 +70,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
   bool _isGeneratingPdf = false;
+  bool _isCancellingPdf = false;
+  double? _ocrProgress;
   bool _isPickingImages = false;
   bool _isClearingDraft = false;
   bool _isOpeningEditor = false;
@@ -755,85 +760,158 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     await _clearCurrentDraft();
   }
 
+  bool get _ocrSupported =>
+      widget.searchablePdfEnabled ??
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
+
+  Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
+    return ocr_service.createSearchablePdf([
+      for (final page in pages) page.processedBytes,
+    ], onProgress: (completed, total) {
+      if (!mounted) return;
+      setState(() => _ocrProgress = completed / total);
+    });
+  }
+
+  Future<bool> _confirmImageOnlyFallback() async {
+    if (!mounted) return false;
+    final fallback = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Searchable export failed'),
+        content: const Text(
+          'OCR could not create a searchable PDF for this document. '
+          'Share an image-only PDF instead?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Share image-only PDF'),
+          ),
+        ],
+      ),
+    );
+    return fallback ?? false;
+  }
+
+  Future<ShareResult> _sharePdfBytes(
+    Uint8List pdfBytes, {
+    required String fileName,
+    required String message,
+  }) {
+    return _sharePlus.share(
+      ShareParams(
+        files: [
+          XFile.fromData(
+            pdfBytes,
+            name: fileName,
+            mimeType: 'application/pdf',
+          ),
+        ],
+        fileNameOverrides: [fileName],
+        text: message,
+        sharePositionOrigin: _shareOrigin,
+        downloadFallbackEnabled: true,
+      ),
+    );
+  }
+
+  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
+    final pdf = pw.Document();
+    for (final page in pages) {
+      final image = pw.MemoryImage(page.processedBytes);
+      final pageFormat = PdfPageFormat(
+        image.width! / _scanDpi * PdfPageFormat.inch,
+        image.height! / _scanDpi * PdfPageFormat.inch,
+      );
+      pdf.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.zero,
+          build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
+        ),
+      );
+    }
+    return pdf.save();
+  }
+
+  Rect? get _shareOrigin {
+    final box =
+        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    return box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  Future<void> _cancelPdfGeneration() async {
+    if (!_isGeneratingPdf || _isCancellingPdf || !_ocrSupported) return;
+    setState(() => _isCancellingPdf = true);
+    try {
+      await ocr_service.cancelSearchablePdf();
+    } catch (error) {
+      if (mounted && !ocr_service.isCancellation(error)) {
+        _showMessage('Could not cancel PDF generation.');
+      }
+    }
+  }
+
   Future<void> _generateAndSharePdf() async {
-    if (_pages.isEmpty || _isClearingDraft) return;
+    if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
+    final pages = List<ScannedPage>.of(_pages, growable: false);
 
     setState(() {
       _isGeneratingPdf = true;
+      _isCancellingPdf = false;
+      _ocrProgress = _ocrSupported ? 0 : null;
     });
 
     var shared = false;
+    var needsImageOnlyFallback = !_ocrSupported;
     try {
-      // Capture the iPad popover anchor before PDF encoding yields; the page
-      // list can change while encoding, which may remove the share button.
-      final shareButtonBox =
-          _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
-      final shareOrigin = shareButtonBox == null
-          ? null
-          : shareButtonBox.localToGlobal(Offset.zero) & shareButtonBox.size;
-      final pdf = pw.Document();
-
-      for (final page in _pages) {
-        final image = pw.MemoryImage(page.processedBytes);
-        // Size the page to the image's own aspect ratio (at an assumed
-        // scan resolution, so the physical page size stays reasonable)
-        // instead of a fixed PdfPageFormat.a4 — that letterboxed the
-        // image inside A4's fixed proportions (plus a built-in ~2cm
-        // margin on top), which is exactly the "extra white border
-        // around the selected document" users were seeing.
-        final pageFormat = PdfPageFormat(
-          image.width! / _scanDpi * PdfPageFormat.inch,
-          image.height! / _scanDpi * PdfPageFormat.inch,
-        );
-        pdf.addPage(
-          pw.Page(
-            pageFormat: pageFormat,
-            margin: pw.EdgeInsets.zero,
-            build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
-          ),
-        );
+      if (_ocrSupported) {
+        Uint8List? searchablePdf;
+        try {
+          searchablePdf = await _createSearchablePdf(pages);
+        } catch (error) {
+          if (ocr_service.isCancellation(error)) {
+            if (mounted) _showMessage('PDF generation cancelled.');
+            return;
+          }
+          needsImageOnlyFallback = true;
+          if (!await _confirmImageOnlyFallback()) return;
+        }
+        if (searchablePdf != null) {
+          final result = await _sharePdfBytes(
+            searchablePdf,
+            fileName:
+                'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf',
+            message: 'Searchable document scanned with FOSScanner',
+          );
+          shared = result.status != ShareResultStatus.dismissed;
+        }
       }
 
-      // Start from bytes rather than creating our own persistent document.
-      // share_plus may materialize an OS-managed cache copy for the receiver.
-      final pdfBytes = await pdf.save();
-      final fileName =
-          'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf';
-
-      final shareResult = await _sharePlus.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              pdfBytes,
-              name: fileName,
-              mimeType: 'application/pdf',
-            ),
-          ],
-          fileNameOverrides: [fileName],
-          text: 'Document scanned with FOSScanner',
-          // Required for the popover anchor on iPad; omitting it can make the
-          // share sheet hang or crash instead of appearing.
-          sharePositionOrigin: shareOrigin,
-          // On web, sharing needs a secure context (HTTPS/localhost); when
-          // unavailable, share_plus falls back to a plain browser download
-          // so the user still gets their PDF instead of hitting a dead end.
-          downloadFallbackEnabled: true,
-        ),
-      );
-      // Some platforms cannot report a result and return `unavailable` even
-      // after presenting the share UI. Only an explicit dismissal means the
-      // user definitely did not share or download the PDF.
-      shared = shareResult.status != ShareResultStatus.dismissed;
+      if (needsImageOnlyFallback) {
+        final pdfBytes = await _createImageOnlyPdf(pages);
+        final result = await _sharePdfBytes(
+          pdfBytes,
+          fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
+          message: 'Document scanned with FOSScanner',
+        );
+        shared = result.status != ShareResultStatus.dismissed;
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
+        _showMessage('Could not create a PDF: $e');
       }
     } finally {
       if (mounted) {
         setState(() {
           _isGeneratingPdf = false;
+          _isCancellingPdf = false;
+          _ocrProgress = null;
         });
       }
     }
@@ -1050,8 +1128,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  onPressed: _isGeneratingPdf || _isClearingDraft
+                  onPressed: _isClearingDraft
                       ? null
+                      : _isGeneratingPdf
+                      ? (_ocrSupported ? _cancelPdfGeneration : null)
                       : _generateAndSharePdf,
                   icon: _isGeneratingPdf || _isClearingDraft
                       ? const SizedBox(
@@ -1064,7 +1144,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     _isClearingDraft
                         ? 'Clearing draft...'
                         : _isGeneratingPdf
-                        ? 'Generating PDF...'
+                        ? _isCancellingPdf
+                            ? 'Cancelling PDF...'
+                            : _ocrProgress == null
+                            ? 'Generating PDF...'
+                            : 'Generating PDF '
+                                '${(_ocrProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),
