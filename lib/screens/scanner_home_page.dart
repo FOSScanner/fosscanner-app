@@ -64,6 +64,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   late final SharePlus _sharePlus;
   final ImagePicker _picker = ImagePicker();
   final ImageProcessingQueue _imageProcessingQueue = ImageProcessingQueue();
+  late final Future<void> _initialDraftRestore;
   Future<void> _draftWriteTail = Future<void>.value();
   var _draftRevision = 0;
   var _documentGeneration = 0;
@@ -73,6 +74,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _isCancellingPdf = false;
   double? _ocrProgress;
   bool _isPickingImages = false;
+  bool _isRestoringDraft = false;
   bool _isClearingDraft = false;
   bool _isOpeningEditor = false;
   late bool _cameraSupported;
@@ -83,7 +85,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _pages = [...widget.initialPages];
     _sharePlus = widget.sharePlus ?? SharePlus.instance;
     _cameraSupported = _picker.supportsImageSource(ImageSource.camera);
-    if (_pages.isEmpty) _draftWriteTail = _restoreDraft();
+    _isRestoringDraft = _pages.isEmpty;
+    _initialDraftRestore = _isRestoringDraft
+        ? _restoreDraft()
+        : Future<void>.value();
+    _draftWriteTail = _initialDraftRestore;
     // Android can destroy MainActivity while the system picker/camera is in
     // front. image_picker stores that pending result for the restarted app,
     // but it is lost permanently unless retrieveLostData is called at startup.
@@ -112,6 +118,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (restored.isNotEmpty) setState(() => _pages.addAll(restored));
     } catch (_) {
       if (mounted) _showMessage('Could not restore the saved draft.');
+    } finally {
+      if (mounted) setState(() => _isRestoringDraft = false);
     }
   }
 
@@ -152,11 +160,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   int get _retainedDocumentBytes =>
       _pages.fold(0, (total, page) => total + _pageMemoryBytes(page));
 
-  bool get _canStartImagePick => canRetainDocument(
-    currentBytes: _retainedDocumentBytes,
-    currentPages: _pages.length,
-    incomingBytes: 1,
-  );
+  bool get _canStartImagePick =>
+      !_isRestoringDraft &&
+      canRetainDocument(
+        currentBytes: _retainedDocumentBytes,
+        currentPages: _pages.length,
+        incomingBytes: 1,
+      );
 
   void _showDocumentLimit() {
     _showMessage(
@@ -276,6 +286,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // simultaneous results could otherwise push overlapping adjustment routes.
     _isPickingImages = true;
     try {
+      // Restore the existing pages before admitting a recovered image so its
+      // processing budget and next saved snapshot include the whole document.
+      await _initialDraftRestore;
+      if (!mounted) return;
       final response = await _picker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
       if (response.exception != null) {
@@ -328,7 +342,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       const {'camera-unavailable', 'no_available_camera'}.contains(error.code);
 
   Future<void> _captureImage() async {
-    if (_isPickingImages || _isClearingDraft) return;
+    if (_isRestoringDraft || _isPickingImages || _isClearingDraft) return;
     if (!_canStartImagePick) {
       _showDocumentLimit();
       return;
@@ -359,7 +373,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _importFromGallery() async {
-    if (_isPickingImages || _isClearingDraft) return;
+    if (_isRestoringDraft || _isPickingImages || _isClearingDraft) return;
     if (!_canStartImagePick) {
       _showDocumentLimit();
       return;
@@ -966,24 +980,31 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      _cameraSupported
-                          ? Icons.camera_alt
-                          : Icons.photo_library_outlined,
-                      size: 80,
-                      color: Colors.grey,
-                    ),
+                    if (_isRestoringDraft)
+                      const CircularProgressIndicator()
+                    else
+                      Icon(
+                        _cameraSupported
+                            ? Icons.camera_alt
+                            : Icons.photo_library_outlined,
+                        size: 80,
+                        color: Colors.grey,
+                      ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Ready to Scan',
-                      style: TextStyle(
+                    Text(
+                      _isRestoringDraft
+                          ? 'Restoring draft...'
+                          : 'Ready to Scan',
+                      style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _cameraSupported
+                      _isRestoringDraft
+                          ? 'Your saved pages will appear here.'
+                          : _cameraSupported
                           ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
                           : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
                       textAlign: TextAlign.center,
