@@ -77,6 +77,15 @@ kotlin {
     }
 }
 
+dependencies {
+    // On-device OCR + native searchable-PDF renderer (libtesseract's own
+    // TessPdfRenderer) backing lib/services/ocr_service.dart's MethodChannel
+    // bridge (MainActivity.kt). No off-the-shelf Flutter OCR/PDF plugin is
+    // used — see MainActivity.kt for why.
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
+    testImplementation("junit:junit:4.13.2")
+}
+
 flutter {
     source = "../.."
 }
