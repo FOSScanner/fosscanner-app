@@ -46,7 +46,8 @@ and this page list.*
 - Combine captured pages into a single PDF
 - On Android, export a searchable PDF with selectable, copyable text using
   bundled Latin-script OCR; other platforms export image-only PDFs for now
-- Share the PDF via the OS share sheet (or download it directly on web)
+- Share the PDF via the OS share sheet, save it to a chosen file on Linux,
+  or download it directly on web
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
 - An in-app About screen (the ⓘ icon) shows the exact running version and

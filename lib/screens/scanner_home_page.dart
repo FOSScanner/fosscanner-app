@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
@@ -778,7 +779,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Keep this draft?'),
         content: const Text(
-          'The PDF was shared. You can keep these pages for later or clear the draft now.',
+          'The PDF was exported. You can keep these pages for later or clear the draft now.',
         ),
         actions: [
           TextButton(
@@ -840,7 +841,30 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     required String fileName,
     required String message,
     required Rect? shareOrigin,
-  }) {
+  }) async {
+    // share_plus cannot share files on Linux. Save through the native chooser
+    // so Linux users can export the same PDF bytes as other platforms.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+      final location = await file_selector.getSaveLocation(
+        suggestedName: fileName,
+        acceptedTypeGroups: const [
+          file_selector.XTypeGroup(
+            label: 'PDF',
+            extensions: ['pdf'],
+            mimeTypes: ['application/pdf'],
+          ),
+        ],
+      );
+      if (location == null) {
+        return const ShareResult('', ShareResultStatus.dismissed);
+      }
+      await XFile.fromData(
+        pdfBytes,
+        name: fileName,
+        mimeType: 'application/pdf',
+      ).saveTo(location.path);
+      return const ShareResult('', ShareResultStatus.success);
+    }
     return _sharePlus.share(
       ShareParams(
         files: [

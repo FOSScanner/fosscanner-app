@@ -946,7 +946,7 @@ void main() {
   testWidgets('offers an image-only fallback when searchable export fails', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
 
     final sharePlatform = _FakeSharePlatform();
     final imageBytes = File('assets/icon/icon.png').readAsBytesSync();
