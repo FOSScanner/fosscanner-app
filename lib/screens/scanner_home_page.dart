@@ -765,12 +765,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
 
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
-    return ocr_service.createSearchablePdf([
-      for (final page in pages) page.processedBytes,
-    ], onProgress: (completed, total) {
-      if (!mounted) return;
-      setState(() => _ocrProgress = completed / total);
-    });
+    return ocr_service.createSearchablePdf(
+      [for (final page in pages) page.processedBytes],
+      onProgress: (completed, total) {
+        if (!mounted) return;
+        setState(() => _ocrProgress = completed / total);
+      },
+    );
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -802,19 +803,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     Uint8List pdfBytes, {
     required String fileName,
     required String message,
+    required Rect? shareOrigin,
   }) {
     return _sharePlus.share(
       ShareParams(
         files: [
-          XFile.fromData(
-            pdfBytes,
-            name: fileName,
-            mimeType: 'application/pdf',
-          ),
+          XFile.fromData(pdfBytes, name: fileName, mimeType: 'application/pdf'),
         ],
         fileNameOverrides: [fileName],
         text: message,
-        sharePositionOrigin: _shareOrigin,
+        sharePositionOrigin: shareOrigin,
         downloadFallbackEnabled: true,
       ),
     );
@@ -860,6 +858,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _generateAndSharePdf() async {
     if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
+    // The last page can be removed while encoding, which unmounts the button.
+    // Keep its original rectangle for the required iPad popover anchor.
+    final shareOrigin = _shareOrigin;
 
     setState(() {
       _isGeneratingPdf = true;
@@ -888,6 +889,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             fileName:
                 'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf',
             message: 'Searchable document scanned with FOSScanner',
+            shareOrigin: shareOrigin,
           );
           shared = result.status != ShareResultStatus.dismissed;
         }
@@ -899,6 +901,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           pdfBytes,
           fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
           message: 'Document scanned with FOSScanner',
+          shareOrigin: shareOrigin,
         );
         shared = result.status != ShareResultStatus.dismissed;
       }
@@ -1145,11 +1148,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ? 'Clearing draft...'
                         : _isGeneratingPdf
                         ? _isCancellingPdf
-                            ? 'Cancelling PDF...'
-                            : _ocrProgress == null
-                            ? 'Generating PDF...'
-                            : 'Generating PDF '
-                                '${(_ocrProgress! * 100).round()}%'
+                              ? 'Cancelling PDF...'
+                              : _ocrProgress == null
+                              ? 'Generating PDF...'
+                              : 'Generating PDF '
+                                    '${(_ocrProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),
