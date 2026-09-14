@@ -9,14 +9,13 @@ import 'package:flutter/semantics.dart'
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
+import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
 import '../services/platform_capabilities.dart';
 import '../widgets/transient_message.dart';
@@ -55,12 +54,6 @@ class ScannerHomePage extends StatefulWidget {
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
 }
-
-// Assumed resolution (dots per inch) of a warped page's pixel dimensions,
-// used only to turn pixels into a printable-sized PDF page. It doesn't
-// need to be exact — it just keeps pages roughly letter/A4-scale instead
-// of pixel-count-as-points producing an absurdly large physical page.
-const _scanDpi = 150.0;
 
 class _ScannerHomePageState extends State<ScannerHomePage> {
   late final List<ScannedPage> _pages;
@@ -864,22 +857,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
-    final pdf = pw.Document();
-    for (final page in pages) {
-      final image = pw.MemoryImage(page.processedBytes);
-      final pageFormat = PdfPageFormat(
-        image.width! / _scanDpi * PdfPageFormat.inch,
-        image.height! / _scanDpi * PdfPageFormat.inch,
-      );
-      pdf.addPage(
-        pw.Page(
-          pageFormat: pageFormat,
-          margin: pw.EdgeInsets.zero,
-          build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
-        ),
-      );
-    }
-    return pdf.save();
+    return image_pdf.createImageOnlyPdf([
+      for (final page in pages) page.processedBytes,
+    ]);
   }
 
   Rect? get _shareOrigin {
@@ -946,6 +926,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
       if (needsImageOnlyFallback) {
         final pdfBytes = await _createImageOnlyPdf(pages);
+        if (!mounted) return;
         final result = await _sharePdfBytes(
           pdfBytes,
           fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
