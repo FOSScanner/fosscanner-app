@@ -65,6 +65,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   final ImagePicker _picker = ImagePicker();
   final ImageProcessingQueue _imageProcessingQueue = ImageProcessingQueue();
   Future<void> _draftWriteTail = Future<void>.value();
+  List<ScannedPage>? _pendingDraftSnapshot;
+  bool _isDraftSaveScheduled = false;
   var _draftRevision = 0;
   var _documentGeneration = 0;
   var _undoGeneration = 0;
@@ -117,13 +119,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _queueDraftSave() {
     if (_isClearingDraft) return;
-    final snapshot = List<ScannedPage>.of(_pages);
+    _pendingDraftSnapshot = List<ScannedPage>.of(_pages);
     _draftRevision++;
+    if (_isDraftSaveScheduled) return;
+    _isDraftSaveScheduled = true;
     _draftWriteTail = _draftWriteTail.then((_) async {
       try {
-        await widget.draftStore.save(snapshot);
-      } catch (_) {
-        if (mounted) _showMessage('Could not save the draft.');
+        // Retain only the active write and the newest pending revision when
+        // edits arrive faster than storage can commit a complete document.
+        while (_pendingDraftSnapshot != null) {
+          final snapshot = _pendingDraftSnapshot!;
+          _pendingDraftSnapshot = null;
+          try {
+            await widget.draftStore.save(snapshot);
+          } catch (_) {
+            if (mounted) _showMessage('Could not save the draft.');
+          }
+        }
+      } finally {
+        _isDraftSaveScheduled = false;
       }
     });
   }
@@ -765,12 +779,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
 
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
-    return ocr_service.createSearchablePdf([
-      for (final page in pages) page.processedBytes,
-    ], onProgress: (completed, total) {
-      if (!mounted) return;
-      setState(() => _ocrProgress = completed / total);
-    });
+    return ocr_service.createSearchablePdf(
+      [for (final page in pages) page.processedBytes],
+      onProgress: (completed, total) {
+        if (!mounted) return;
+        setState(() => _ocrProgress = completed / total);
+      },
+    );
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -806,11 +821,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return _sharePlus.share(
       ShareParams(
         files: [
-          XFile.fromData(
-            pdfBytes,
-            name: fileName,
-            mimeType: 'application/pdf',
-          ),
+          XFile.fromData(pdfBytes, name: fileName, mimeType: 'application/pdf'),
         ],
         fileNameOverrides: [fileName],
         text: message,
@@ -1145,11 +1156,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ? 'Clearing draft...'
                         : _isGeneratingPdf
                         ? _isCancellingPdf
-                            ? 'Cancelling PDF...'
-                            : _ocrProgress == null
-                            ? 'Generating PDF...'
-                            : 'Generating PDF '
-                                '${(_ocrProgress! * 100).round()}%'
+                              ? 'Cancelling PDF...'
+                              : _ocrProgress == null
+                              ? 'Generating PDF...'
+                              : 'Generating PDF '
+                                    '${(_ocrProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),
