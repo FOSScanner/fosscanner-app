@@ -765,12 +765,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
 
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
-    return ocr_service.createSearchablePdf([
-      for (final page in pages) page.processedBytes,
-    ], onProgress: (completed, total) {
-      if (!mounted) return;
-      setState(() => _ocrProgress = completed / total);
-    });
+    return ocr_service.createSearchablePdf(
+      [for (final page in pages) page.processedBytes],
+      onProgress: (completed, total) {
+        if (!mounted) return;
+        setState(() => _ocrProgress = completed / total);
+      },
+    );
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -806,11 +807,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return _sharePlus.share(
       ShareParams(
         files: [
-          XFile.fromData(
-            pdfBytes,
-            name: fileName,
-            mimeType: 'application/pdf',
-          ),
+          XFile.fromData(pdfBytes, name: fileName, mimeType: 'application/pdf'),
         ],
         fileNameOverrides: [fileName],
         text: message,
@@ -846,7 +843,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _cancelPdfGeneration() async {
-    if (!_isGeneratingPdf || _isCancellingPdf || !_ocrSupported) return;
+    if (!_isGeneratingPdf || _isCancellingPdf || _ocrProgress == null) return;
     setState(() => _isCancellingPdf = true);
     try {
       await ocr_service.cancelSearchablePdf();
@@ -879,10 +876,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             if (mounted) _showMessage('PDF generation cancelled.');
             return;
           }
+          if (mounted) setState(() => _ocrProgress = null);
           needsImageOnlyFallback = true;
           if (!await _confirmImageOnlyFallback()) return;
         }
         if (searchablePdf != null) {
+          if (!mounted || _isCancellingPdf) return;
+          setState(() => _ocrProgress = null);
           final result = await _sharePdfBytes(
             searchablePdf,
             fileName:
@@ -1131,7 +1131,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   onPressed: _isClearingDraft
                       ? null
                       : _isGeneratingPdf
-                      ? (_ocrSupported ? _cancelPdfGeneration : null)
+                      ? (_ocrProgress != null && !_isCancellingPdf
+                            ? _cancelPdfGeneration
+                            : null)
                       : _generateAndSharePdf,
                   icon: _isGeneratingPdf || _isClearingDraft
                       ? const SizedBox(
@@ -1145,11 +1147,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ? 'Clearing draft...'
                         : _isGeneratingPdf
                         ? _isCancellingPdf
-                            ? 'Cancelling PDF...'
-                            : _ocrProgress == null
-                            ? 'Generating PDF...'
-                            : 'Generating PDF '
-                                '${(_ocrProgress! * 100).round()}%'
+                              ? 'Cancelling PDF...'
+                              : _ocrProgress == null
+                              ? 'Generating PDF...'
+                              : 'Generating PDF '
+                                    '${(_ocrProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),

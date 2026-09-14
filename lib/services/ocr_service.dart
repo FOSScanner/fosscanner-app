@@ -10,6 +10,8 @@ import 'image_metadata.dart';
 // Android's Tesseract renderer preserves page images and adds selectable text.
 const _channel = MethodChannel('com.fosscanner.app/ocr');
 bool _isCreatingPdf = false;
+bool _cancellationRequested = false;
+bool _nativeRendering = false;
 void Function(int completed, int total)? _progressCallback;
 
 bool get isSupported =>
@@ -35,7 +37,19 @@ bool isCancellation(Object error) =>
 
 Future<void> cancelSearchablePdf() async {
   if (!_isCreatingPdf) return;
-  await _channel.invokeMethod<void>('cancelSearchablePdf');
+  _cancellationRequested = true;
+  if (_nativeRendering) {
+    await _channel.invokeMethod<void>('cancelSearchablePdf');
+  }
+}
+
+void _checkCancellation() {
+  if (_cancellationRequested) {
+    throw PlatformException(
+      code: 'ocr_cancelled',
+      message: 'OCR export cancelled',
+    );
+  }
 }
 
 // Renders a multi-page searchable PDF (each page's image with an invisible,
@@ -64,49 +78,73 @@ Future<Uint8List> createSearchablePdf(
     }
   }
   _isCreatingPdf = true;
+  _cancellationRequested = false;
   _progressCallback = onProgress;
   _channel.setMethodCallHandler(_handleNativeCall);
   Directory? jobDirectory;
   try {
-    await _ensureTessdata();
-    final tempDir = await getTemporaryDirectory();
-    jobDirectory = await tempDir.createTemp('fosscanner_ocr_');
-    final imageFiles = <File>[];
-    for (var i = 0; i < images.length; i++) {
-      final file = File('${jobDirectory.path}/page_$i.jpg');
-      await file.writeAsBytes(images[i]);
-      imageFiles.add(file);
-    }
-    final outputPathNoExtension = '${jobDirectory.path}/document';
-    final pdfFile = File('$outputPathNoExtension.pdf');
-    final pdfPath = await _channel.invokeMethod<String>('createSearchablePdf', {
-      'imagePaths': [for (final file in imageFiles) file.path],
-      'outputPath': outputPathNoExtension,
-    });
-    if (pdfPath != pdfFile.path) {
-      throw StateError(
-        'Native searchable-PDF renderer returned an invalid path',
-      );
-    }
-    final length = await pdfFile.length();
-    if (length == 0 || length > maxRetainedDocumentBytes) {
-      throw StateError('Searchable PDF exceeds the supported output size');
-    }
-    return await readBoundedBytes(
-      pdfFile.openRead(),
-      maxBytes: maxRetainedDocumentBytes,
-    );
-  } finally {
+    late Uint8List pdfBytes;
     try {
+      await _ensureTessdata();
+      _checkCancellation();
+      final tempDir = await getTemporaryDirectory();
+      _checkCancellation();
+      jobDirectory = await tempDir.createTemp('fosscanner_ocr_');
+      _checkCancellation();
+      final imageFiles = <File>[];
+      for (var i = 0; i < images.length; i++) {
+        final file = File('${jobDirectory.path}/page_$i.jpg');
+        await file.writeAsBytes(images[i]);
+        _checkCancellation();
+        imageFiles.add(file);
+      }
+      final outputPathNoExtension = '${jobDirectory.path}/document';
+      final pdfFile = File('$outputPathNoExtension.pdf');
+      final String? pdfPath;
+      _nativeRendering = true;
+      try {
+        pdfPath = await _channel.invokeMethod<String>('createSearchablePdf', {
+          'imagePaths': [for (final file in imageFiles) file.path],
+          'outputPath': outputPathNoExtension,
+        });
+      } finally {
+        _nativeRendering = false;
+      }
+      _checkCancellation();
+      if (pdfPath != pdfFile.path) {
+        throw StateError(
+          'Native searchable-PDF renderer returned an invalid path',
+        );
+      }
+      final length = await pdfFile.length();
+      _checkCancellation();
+      if (length == 0 || length > maxRetainedDocumentBytes) {
+        throw StateError('Searchable PDF exceeds the supported output size');
+      }
+      pdfBytes = await readBoundedBytes(
+        pdfFile.openRead(),
+        maxBytes: maxRetainedDocumentBytes,
+      );
+    } finally {
       // Includes partially written inputs and PDFs even when native rendering
       // fails before it returns a path. Native resources are already closed.
-      if (jobDirectory != null) await jobDirectory.delete(recursive: true);
-    } on FileSystemException {
-      // Best effort; app/OS cache copies can persist if deletion fails.
-    } finally {
-      _isCreatingPdf = false;
-      _progressCallback = null;
-      _channel.setMethodCallHandler(null);
+      try {
+        if (jobDirectory != null) await jobDirectory.delete(recursive: true);
+      } on FileSystemException {
+        // Best effort; app/OS cache copies can persist if deletion fails.
+      }
     }
+    _checkCancellation();
+    return pdfBytes;
+  } catch (_) {
+    // Cancellation wins over a late preparation/rendering failure, so the UI
+    // does not offer a fallback for an export the user already cancelled.
+    _checkCancellation();
+    rethrow;
+  } finally {
+    _isCreatingPdf = false;
+    _cancellationRequested = false;
+    _progressCallback = null;
+    _channel.setMethodCallHandler(null);
   }
 }
