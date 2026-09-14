@@ -4,6 +4,8 @@
 # storePassword/keyPassword are the same value here: PKCS12 keystores
 # (keytool's default since JDK 8u) don't support separate store/key
 # passwords. keyAlias is hardcoded as "upload" to match release.yml.
+# CI supplies the password via ANDROID_KEYSTORE_PASSWORD instead, preserving
+# it verbatim. That environment variable overrides both password fields here.
 storePassword=REPLACE_ME
 keyPassword=REPLACE_ME
 keyAlias=upload
