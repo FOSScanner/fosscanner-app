@@ -1,13 +1,14 @@
-# Secrets and signing material
-.env
-.env.*
-*.jks
-*.keystore
-*.p12
-*.pfx
-*.pem
-*.key
-secrets/
+# Secrets and signing material at every directory depth, including Android's
+# app/upload-keystore.jks. Docker's plain filename globs match only the root.
+**/.env
+**/.env.*
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pfx
+**/*.pem
+**/*.key
+**/secrets/
 android/key.properties
 
 # Generated output and dependency metadata
