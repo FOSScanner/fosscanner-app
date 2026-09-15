@@ -130,6 +130,41 @@ void main() {
     expect(() => validateSourceImageSize(const Size(3, 3)), returnsNormally);
   });
 
+  test('processed crops can have two pixels per edge', () {
+    for (final size in [
+      const Size(2, 80),
+      const Size(80, 2),
+      const Size(2, 2),
+    ]) {
+      expect(() => validateProcessedImageSize(size), returnsNormally);
+    }
+  });
+
+  test('processed image validation retains dimension safety bounds', () {
+    for (final size in [
+      Size.zero,
+      const Size(2.5, 80),
+      const Size(double.infinity, 80),
+      const Size(double.nan, 80),
+    ]) {
+      expect(
+        () => validateProcessedImageSize(size),
+        throwsA(isA<FormatException>()),
+      );
+    }
+    for (final size in [
+      const Size(1, 80),
+      const Size(80, 1),
+      Size((maxSourceImageEdge + 1).toDouble(), 3),
+      const Size(4001, 5000),
+    ]) {
+      expect(
+        () => validateProcessedImageSize(size),
+        throwsA(isA<UnsupportedError>()),
+      );
+    }
+  });
+
   test('accepts a compressed 20MP image when processing headroom remains', () {
     const encodedBytes = 64 * 1024;
 

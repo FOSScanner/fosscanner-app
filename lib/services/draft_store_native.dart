@@ -164,7 +164,7 @@ class FileDraftStore implements DraftStore {
       final originalBytes = await files.original.readAsBytes();
       final processedBytes = await files.processed.readAsBytes();
       validateSourceImageSize(await readEncodedImageSize(originalBytes));
-      validateSourceImageSize(await readEncodedImageSize(processedBytes));
+      validateProcessedImageSize(await readEncodedImageSize(processedBytes));
       await _decodeFirstFrame(originalBytes);
       await _decodeFirstFrame(processedBytes);
       pages.add(
