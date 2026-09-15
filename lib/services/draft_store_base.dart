@@ -1,5 +1,7 @@
 import '../models/scanned_page.dart';
 
+export 'draft_session.dart';
+
 /// Persistence boundary for an in-progress scan.
 abstract interface class DraftStore {
   Future<List<ScannedPage>> load();
