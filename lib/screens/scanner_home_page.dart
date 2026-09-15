@@ -31,6 +31,11 @@ class _DocumentCapacityException implements Exception {
 
 enum _PhotoIntakeResult { added, skipped, capacityReached }
 
+/// Which exporter owns the running PDF generation, and therefore how a
+/// cancellation has to reach it: the native renderer needs a channel message,
+/// the Dart image-only exporter only polls the flag this screen already sets.
+enum _PdfExporter { searchable, imageOnly }
+
 typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
 
 class ScannerHomePage extends StatefulWidget {
@@ -70,7 +75,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   final GlobalKey _shareButtonKey = GlobalKey();
   bool _isGeneratingPdf = false;
   bool _isCancellingPdf = false;
-  double? _ocrProgress;
+  double? _pdfProgress;
+  _PdfExporter? _pdfExporter;
   bool _isPickingImages = false;
   bool _isRestoringDraft = false;
   bool _isClearingDraft = false;
@@ -807,7 +813,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       [for (final page in pages) page.processedBytes],
       onProgress: (completed, total) {
         if (!mounted) return;
-        setState(() => _ocrProgress = completed / total);
+        setState(() => _pdfProgress = completed / total);
       },
     );
   }
@@ -856,10 +862,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
-    return image_pdf.createImageOnlyPdf([
-      for (final page in pages) page.processedBytes,
-    ]);
+  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) {
+    return image_pdf.createImageOnlyPdf(
+      [for (final page in pages) page.processedBytes],
+      onProgress: (completed, total) {
+        if (!mounted) return;
+        setState(() => _pdfProgress = completed / total);
+      },
+      isCancelled: () => _isCancellingPdf,
+    );
   }
 
   Rect? get _shareOrigin {
@@ -869,8 +880,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _cancelPdfGeneration() async {
-    if (!_isGeneratingPdf || _isCancellingPdf || _ocrProgress == null) return;
+    if (!_isGeneratingPdf || _isCancellingPdf || _pdfProgress == null) return;
     setState(() => _isCancellingPdf = true);
+    // The image-only exporter polls the flag set above between pages; only the
+    // native renderer has to be told over the channel.
+    if (_pdfExporter != _PdfExporter.searchable) return;
     try {
       await ocr_service.cancelSearchablePdf();
     } catch (error) {
@@ -891,7 +905,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     setState(() {
       _isGeneratingPdf = true;
       _isCancellingPdf = false;
-      _ocrProgress = _ocrSupported ? 0 : null;
+      _pdfExporter = _ocrSupported
+          ? _PdfExporter.searchable
+          : _PdfExporter.imageOnly;
+      _pdfProgress = 0;
     });
 
     var shared = false;
@@ -906,13 +923,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             if (mounted) _showMessage('PDF generation cancelled.');
             return;
           }
-          if (mounted) setState(() => _ocrProgress = null);
+          if (mounted) setState(() => _pdfProgress = null);
           needsImageOnlyFallback = true;
           if (!await _confirmImageOnlyFallback()) return;
         }
         if (searchablePdf != null) {
           if (!mounted || _isCancellingPdf) return;
-          setState(() => _ocrProgress = null);
+          setState(() => _pdfProgress = null);
           final result = await _sharePdfBytes(
             searchablePdf,
             fileName:
@@ -925,8 +942,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       }
 
       if (needsImageOnlyFallback) {
-        final pdfBytes = await _createImageOnlyPdf(pages);
         if (!mounted) return;
+        setState(() {
+          // A cancel requested from the searchable stage does not carry over:
+          // the user has just confirmed they want this export instead.
+          _isCancellingPdf = false;
+          _pdfExporter = _PdfExporter.imageOnly;
+          _pdfProgress = 0;
+        });
+        final Uint8List pdfBytes;
+        try {
+          pdfBytes = await _createImageOnlyPdf(pages);
+        } on image_pdf.ImagePdfCancelledException {
+          if (mounted) _showMessage('PDF generation cancelled.');
+          return;
+        }
+        if (!mounted) return;
+        setState(() => _pdfProgress = null);
         final result = await _sharePdfBytes(
           pdfBytes,
           fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
@@ -945,7 +977,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         setState(() {
           _isGeneratingPdf = false;
           _isCancellingPdf = false;
-          _ocrProgress = null;
+          _pdfExporter = null;
+          _pdfProgress = null;
         });
       }
     }
@@ -1189,7 +1222,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   onPressed: _isClearingDraft
                       ? null
                       : _isGeneratingPdf
-                      ? (_ocrProgress != null && !_isCancellingPdf
+                      ? (_pdfProgress != null && !_isCancellingPdf
                             ? _cancelPdfGeneration
                             : null)
                       : _generateAndSharePdf,
@@ -1206,10 +1239,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         : _isGeneratingPdf
                         ? _isCancellingPdf
                               ? 'Cancelling PDF...'
-                              : _ocrProgress == null
+                              : _pdfProgress == null
                               ? 'Generating PDF...'
                               : 'Generating PDF '
-                                    '${(_ocrProgress! * 100).round()}%'
+                                    '${(_pdfProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),

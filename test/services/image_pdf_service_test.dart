@@ -87,4 +87,41 @@ void main() {
       throwsA(anything),
     );
   });
+
+  test('reports one progress update per converted page', () async {
+    final page = im.encodePng(im.Image(width: 20, height: 10, numChannels: 3));
+    final updates = <List<int>>[];
+    await createImageOnlyPdf([
+      page,
+      page,
+    ], onProgress: (completed, total) => updates.add([completed, total]));
+    expect(updates, [
+      [1, 2],
+      [2, 2],
+    ]);
+  });
+
+  test('cancelling leaves the remaining pages unconverted', () async {
+    final page = im.encodePng(im.Image(width: 20, height: 10, numChannels: 3));
+    var converted = 0;
+    await expectLater(
+      createImageOnlyPdf(
+        [page, page, page],
+        onProgress: (completed, _) => converted = completed,
+        isCancelled: () => converted >= 1,
+      ),
+      throwsA(isA<ImagePdfCancelledException>()),
+    );
+    expect(converted, 1);
+  });
+
+  test('an export cancelled up front decodes nothing at all', () async {
+    // Page data no decoder accepts: reaching it would throw something else.
+    await expectLater(
+      createImageOnlyPdf([
+        Uint8List.fromList([1, 2, 3]),
+      ], isCancelled: () => true),
+      throwsA(isA<ImagePdfCancelledException>()),
+    );
+  });
 }

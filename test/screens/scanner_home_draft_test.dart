@@ -10,6 +10,8 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 
+import '../support/worker_isolates.dart';
+
 class _DraftStore implements DraftStore {
   _DraftStore({
     Future<List<ScannedPage>>? loaded,
@@ -432,7 +434,10 @@ void main() {
     );
 
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(
+      tester,
+      find.text('Could not generate or share the PDF.'),
+    );
 
     expect(find.text('Could not generate or share the PDF.'), findsOneWidget);
     expect(find.textContaining('private share provider details'), findsNothing);
@@ -509,7 +514,7 @@ void main() {
     );
 
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Keep this draft?'));
     expect(find.text('Keep this draft?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
     await tester.pumpAndSettle();
@@ -525,7 +530,7 @@ void main() {
       sharePlus: SharePlus.custom(sharePlatform),
     );
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Keep this draft?'));
     await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
     await tester.pump();
     await tester.pump();
