@@ -226,6 +226,58 @@ void main() {
     expect(store.saves.last, orderedEquals([third]));
   });
 
+  testWidgets('slow storage keeps only the newest pending draft snapshot', (
+    tester,
+  ) async {
+    final store = _SerialStore();
+    addTearDown(() {
+      if (!store.firstSave.isCompleted) store.firstSave.complete();
+    });
+    final first = page(1);
+    final second = page(2);
+    await pumpHome(tester, store, pages: [page(3), first, second]);
+    await tapDelete(tester, 1);
+    expect(store.saves, hasLength(1));
+
+    // A blocked disk write must not retain one snapshot and schedule another
+    // complete document write for every subsequent edit.
+    for (var i = 0; i < 101; i++) {
+      final reorder = tester
+          .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
+          .onAcceptWithDetails!;
+      reorder(DragTargetDetails<int>(data: 0, offset: Offset.zero));
+      await tester.pump();
+    }
+    expect(store.saves, hasLength(1));
+    store.firstSave.complete();
+    await tester.pumpAndSettle();
+
+    expect(store.saves, hasLength(2));
+    expect(store.saves.last, orderedEquals([second, first]));
+  });
+
+  testWidgets('a failed active save still commits the newest queued revision', (
+    tester,
+  ) async {
+    final store = _SerialStore();
+    addTearDown(() {
+      if (!store.firstSave.isCompleted) store.firstSave.complete();
+    });
+    final last = page(3);
+    await pumpHome(tester, store, pages: [page(1), page(2), last]);
+    await tapDelete(tester, 1);
+    await tapDelete(tester, 1);
+    store.firstSave.completeError(StateError('injected write failure'));
+    await tester.pumpAndSettle();
+
+    expect(store.saves, hasLength(2));
+    expect(store.saves.last, orderedEquals([last]));
+    expect(tester.takeException(), isNull);
+    iconButton(tester, 'Delete page 1').onPressed!();
+    await tester.pumpAndSettle();
+    expect(store.saves.last, isEmpty);
+  });
+
   testWidgets('Clear all requires confirmation and clears persisted data', (
     tester,
   ) async {

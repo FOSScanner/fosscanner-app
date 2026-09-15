@@ -68,6 +68,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   final ImagePicker _picker = ImagePicker();
   final ImageProcessingQueue _imageProcessingQueue = ImageProcessingQueue();
   Future<void> _draftWriteTail = Future<void>.value();
+  List<ScannedPage>? _pendingDraftSnapshot;
+  bool _isDraftSaveScheduled = false;
   var _draftRevision = 0;
   var _documentGeneration = 0;
   var _undoGeneration = 0;
@@ -120,13 +122,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _queueDraftSave() {
     if (_isClearingDraft) return;
-    final snapshot = List<ScannedPage>.of(_pages);
+    _pendingDraftSnapshot = List<ScannedPage>.of(_pages);
     _draftRevision++;
+    if (_isDraftSaveScheduled) return;
+    _isDraftSaveScheduled = true;
     _draftWriteTail = _draftWriteTail.then((_) async {
       try {
-        await widget.draftStore.save(snapshot);
-      } catch (_) {
-        if (mounted) _showMessage('Could not save the draft.');
+        // Retain only the active write and the newest pending revision when
+        // edits arrive faster than storage can commit a complete document.
+        while (_pendingDraftSnapshot != null) {
+          final snapshot = _pendingDraftSnapshot!;
+          _pendingDraftSnapshot = null;
+          try {
+            await widget.draftStore.save(snapshot);
+          } catch (_) {
+            if (mounted) _showMessage('Could not save the draft.');
+          }
+        }
+      } finally {
+        _isDraftSaveScheduled = false;
       }
     });
   }
