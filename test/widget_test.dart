@@ -882,6 +882,11 @@ void main() {
     await tester.pump();
     expect(find.text('Searchable export failed'), findsOneWidget);
     expect(find.text('Share image-only PDF'), findsOneWidget);
+    // The OCR job has ended; the fallback cannot cancel a native OCR job.
+    final exportButton = tester.widget<ElevatedButton>(
+      find.byType(ElevatedButton, skipOffstage: false).first,
+    );
+    expect(exportButton.onPressed, isNull);
 
     await tester.tap(find.text('Share image-only PDF'));
     await tester.pump();

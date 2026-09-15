@@ -851,7 +851,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _cancelPdfGeneration() async {
-    if (!_isGeneratingPdf || _isCancellingPdf || !_ocrSupported) return;
+    if (!_isGeneratingPdf || _isCancellingPdf || _ocrProgress == null) return;
     setState(() => _isCancellingPdf = true);
     try {
       await ocr_service.cancelSearchablePdf();
@@ -884,10 +884,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             if (mounted) _showMessage('PDF generation cancelled.');
             return;
           }
+          if (mounted) setState(() => _ocrProgress = null);
           needsImageOnlyFallback = true;
           if (!await _confirmImageOnlyFallback()) return;
         }
         if (searchablePdf != null) {
+          if (!mounted || _isCancellingPdf) return;
+          setState(() => _ocrProgress = null);
           final result = await _sharePdfBytes(
             searchablePdf,
             fileName:
@@ -1154,7 +1157,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   onPressed: _isClearingDraft
                       ? null
                       : _isGeneratingPdf
-                      ? (_ocrSupported ? _cancelPdfGeneration : null)
+                      ? (_ocrProgress != null && !_isCancellingPdf
+                            ? _cancelPdfGeneration
+                            : null)
                       : _generateAndSharePdf,
                   icon: _isGeneratingPdf || _isClearingDraft
                       ? const SizedBox(
