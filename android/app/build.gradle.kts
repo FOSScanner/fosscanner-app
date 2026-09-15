@@ -49,6 +49,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -84,6 +85,7 @@ dependencies {
     // used — see MainActivity.kt for why.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
 
 flutter {

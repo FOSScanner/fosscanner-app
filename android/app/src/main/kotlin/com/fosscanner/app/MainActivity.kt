@@ -150,6 +150,7 @@ class MainActivity : FlutterActivity() {
         val baseApi = TessBaseAPI()
         try {
             check(baseApi.init(filesDir.absolutePath, OcrModelStore.language, TessBaseAPI.OEM_LSTM_ONLY))
+            check(baseApi.setVariable("user_defined_dpi", OCR_DPI.toString()))
             val renderer = TessPdfRenderer(baseApi, outputPath)
             try {
                 check(baseApi.beginDocument(renderer, "FOSScanner"))
@@ -207,6 +208,7 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val OCR_DPI = 150
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
     }
