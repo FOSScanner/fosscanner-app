@@ -14,6 +14,7 @@ const _cornerLabels = [
 ];
 const _moveLabels = ['left', 'right', 'up', 'down'];
 const _moveOffsets = [Offset(-1, 0), Offset(1, 0), Offset(0, -1), Offset(0, 1)];
+const _previewDecodeSize = 2048;
 
 /// Shows a captured photo with a draggable quad overlay over the document
 /// corners. [corners] and [onChanged] are in the *image's* pixel space
@@ -197,7 +198,15 @@ class _CornerOverlayState extends State<CornerOverlay> {
                 // Isolates the (potentially large) photo's paint layer from
                 // the quad/handles repainting every drag frame.
                 child: RepaintBoundary(
-                  child: Image.memory(widget.imageBytes, fit: BoxFit.fill),
+                  child: Image(
+                    image: ResizeImage(
+                      MemoryImage(widget.imageBytes),
+                      width: _previewDecodeSize,
+                      height: _previewDecodeSize,
+                      policy: ResizeImagePolicy.fit,
+                    ),
+                    fit: BoxFit.fill,
+                  ),
                 ),
               ),
               Positioned.fill(
