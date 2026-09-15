@@ -84,6 +84,16 @@ class _FakeSharePlatform implements SharePlatform {
   }
 }
 
+class _ObservedSharePlatform implements SharePlatform {
+  final shared = Completer<ShareParams>();
+
+  @override
+  Future<ShareResult> share(ShareParams params) async {
+    shared.complete(params);
+    return const ShareResult('', ShareResultStatus.dismissed);
+  }
+}
+
 class _ImmediateCornerOperations implements CornerAdjustOperations {
   const _ImmediateCornerOperations();
 
@@ -855,6 +865,81 @@ void main() {
       matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
     );
   });
+
+  testWidgets(
+    'keeps the share anchor when the last page is removed during export',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform();
+      const channel = MethodChannel('com.fosscanner.app/ocr');
+      const paths = MethodChannel('plugins.flutter.io/path_provider');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final temporary = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('share_anchor_test_'),
+      ))!;
+      final (started, finish, sharePlatform) = (await tester.runAsync(
+        () async =>
+            (Completer<void>(), Completer<void>(), _ObservedSharePlatform()),
+      ))!;
+      messenger.setMockMethodCallHandler(paths, (_) async => temporary.path);
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'ensureTessdata') return null;
+        started.complete();
+        await finish.future;
+        final output = File('${(call.arguments as Map)['outputPath']}.pdf');
+        await output.writeAsString('%PDF-1.5\nfixture\n%%EOF');
+        return output.path;
+      });
+      addTearDown(() async {
+        messenger.setMockMethodCallHandler(channel, null);
+        messenger.setMockMethodCallHandler(paths, null);
+        await temporary.delete(recursive: true);
+      });
+
+      final imageBytes = File('assets/icon/icon.png').readAsBytesSync();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            initialPages: [
+              ScannedPage(
+                originalBytes: imageBytes,
+                corners: const [],
+                processedBytes: imageBytes,
+              ),
+            ],
+            sharePlus: SharePlus.custom(sharePlatform),
+          ),
+        ),
+      );
+      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Save as PDF (1 pages)'));
+        await started.future.timeout(const Duration(seconds: 5));
+      });
+      await tester.pump();
+      tester
+          .widget<IconButton>(
+            find.ancestor(
+              of: find.byTooltip('Delete page 1'),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .onPressed!();
+      await tester.pump();
+      expect(find.byType(ElevatedButton), findsNothing);
+
+      final params = await tester.runAsync(() async {
+        finish.complete();
+        return sharePlatform.shared.future.timeout(const Duration(seconds: 5));
+      });
+      await tester.pumpAndSettle();
+      debugDefaultTargetPlatformOverride = null;
+      expect(params, isNotNull);
+      expect(params!.sharePositionOrigin, expectedAnchor);
+    },
+  );
 
   testWidgets('offers an image-only fallback when searchable export fails', (
     tester,

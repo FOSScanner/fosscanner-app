@@ -811,6 +811,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     Uint8List pdfBytes, {
     required String fileName,
     required String message,
+    required Rect? shareOrigin,
   }) {
     return _sharePlus.share(
       ShareParams(
@@ -819,7 +820,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         ],
         fileNameOverrides: [fileName],
         text: message,
-        sharePositionOrigin: _shareOrigin,
+        sharePositionOrigin: shareOrigin,
         downloadFallbackEnabled: true,
       ),
     );
@@ -865,6 +866,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _generateAndSharePdf() async {
     if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
+    // The last page can be removed while encoding, which unmounts the button.
+    // Keep its original rectangle for the required iPad popover anchor.
+    final shareOrigin = _shareOrigin;
 
     setState(() {
       _isGeneratingPdf = true;
@@ -896,6 +900,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             fileName:
                 'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf',
             message: 'Searchable document scanned with FOSScanner',
+            shareOrigin: shareOrigin,
           );
           shared = result.status != ShareResultStatus.dismissed;
         }
@@ -907,6 +912,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           pdfBytes,
           fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
           message: 'Document scanned with FOSScanner',
+          shareOrigin: shareOrigin,
         );
         shared = result.status != ShareResultStatus.dismissed;
       }
