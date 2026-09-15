@@ -223,6 +223,7 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const FOSScannerApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('FOSScanner'), findsOneWidget);
     expect(find.text('Ready to Scan'), findsOneWidget);
@@ -241,6 +242,7 @@ void main() {
       );
 
       await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
+      await tester.pumpAndSettle();
 
       expect(find.byTooltip('Capture Image'), findsNothing);
       expect(find.textContaining('Import from your gallery'), findsOneWidget);
