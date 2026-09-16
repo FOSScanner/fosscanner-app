@@ -1,3 +1,4 @@
+import 'package:camera/camera.dart' show CameraException;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_zxing/flutter_zxing.dart';
@@ -22,8 +23,12 @@ typedef BarcodeUriLauncher = Future<bool> Function(Uri uri);
 
 Widget _defaultScanView(
   BuildContext context,
-  ValueChanged<BarcodeScanResult> onScan,
-) => ReaderWidget(
+  ValueChanged<BarcodeScanResult> onScan, {
+  required int attempt,
+  required ValueChanged<Exception?> onCameraCreated,
+}) => ReaderWidget(
+  key: ValueKey(attempt),
+  onControllerCreated: (_, error) => onCameraCreated(error),
   onScan: (code) =>
       onScan(BarcodeScanResult(isValid: code.isValid, text: code.text)),
   showGallery: true,
@@ -48,12 +53,12 @@ Future<bool> _launchBarcodeUri(Uri uri) =>
 class BarcodeScanScreen extends StatefulWidget {
   const BarcodeScanScreen({
     super.key,
-    this.scanViewBuilder = _defaultScanView,
+    this.scanViewBuilder,
     this.clipboardWriter = _writeClipboard,
     this.uriLauncher = _launchBarcodeUri,
   });
 
-  final BarcodeScanViewBuilder scanViewBuilder;
+  final BarcodeScanViewBuilder? scanViewBuilder;
   final BarcodeClipboardWriter clipboardWriter;
   final BarcodeUriLauncher uriLauncher;
 
@@ -63,6 +68,59 @@ class BarcodeScanScreen extends StatefulWidget {
 
 class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   String? _latchedResult;
+  String? _cameraError;
+  int _cameraAttempt = 0;
+
+  void _handleCameraCreated(Exception? error, int attempt) {
+    if (!mounted || attempt != _cameraAttempt || error == null) return;
+    final message = switch (error) {
+      CameraException(code: 'CameraAccessDenied') ||
+      CameraException(
+        code: 'CameraAccessDeniedWithoutPrompt',
+      ) => 'Allow camera access in your device settings, then retry.',
+      CameraException(code: 'CameraAccessRestricted') =>
+        'Camera access is restricted on this device. Check your device settings.',
+      _ => 'Could not start the camera. Check camera access and retry.',
+    };
+    setState(() => _cameraError = message);
+  }
+
+  void _retryCamera() {
+    setState(() {
+      _cameraError = null;
+      _cameraAttempt++;
+    });
+  }
+
+  Widget _buildCameraError(String message) => SafeArea(
+    child: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.no_photography_outlined, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              'Camera unavailable',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Semantics(
+              liveRegion: true,
+              child: Text(message, textAlign: TextAlign.center),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _retryCamera,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   Uri? get _resultUri {
     final result = _latchedResult;
@@ -117,12 +175,22 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   @override
   Widget build(BuildContext context) {
     final result = _latchedResult;
+    final cameraError = _cameraError;
+    final cameraAttempt = _cameraAttempt;
     return Scaffold(
       appBar: AppBar(title: const Text('Scan QR / Barcode')),
       body: Stack(
         children: [
-          widget.scanViewBuilder(context, _handleScan),
-          if (result == null)
+          if (cameraError == null)
+            widget.scanViewBuilder?.call(context, _handleScan) ??
+                _defaultScanView(
+                  context,
+                  _handleScan,
+                  attempt: cameraAttempt,
+                  onCameraCreated: (error) =>
+                      _handleCameraCreated(error, cameraAttempt),
+                ),
+          if (result == null && cameraError == null)
             IgnorePointer(
               child: Center(
                 child: Container(
@@ -138,7 +206,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                 ),
               ),
             ),
-          if (result != null)
+          if (result != null && cameraError == null)
             Positioned(
               left: 0,
               right: 0,
@@ -224,6 +292,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                 ),
               ),
             ),
+          if (cameraError != null)
+            Positioned.fill(child: _buildCameraError(cameraError)),
         ],
       ),
     );
