@@ -70,15 +70,17 @@ class _ImagePickerPlatform extends ImagePickerPlatform {
 }
 
 class _SharePlatform implements SharePlatform {
-  _SharePlatform({this.error});
+  _SharePlatform({this.error, this.completer});
 
   final Object? error;
+  final Completer<ShareResult>? completer;
   var calls = 0;
 
   @override
   Future<ShareResult> share(ShareParams params) async {
     calls++;
     if (error case final value?) throw value;
+    if (completer case final pending?) return pending.future;
     return const ShareResult('shared', ShareResultStatus.success);
   }
 }
@@ -434,6 +436,64 @@ void main() {
 
     expect(find.text('Could not generate or share the PDF.'), findsOneWidget);
     expect(find.textContaining('private share provider details'), findsNothing);
+  });
+
+  testWidgets('sharing an older revision never offers to clear newer edits', (
+    tester,
+  ) async {
+    final store = _DraftStore();
+    final share = Completer<ShareResult>();
+    final platform = _SharePlatform(completer: share);
+    addTearDown(() {
+      if (!share.isCompleted) {
+        share.complete(const ShareResult('', ShareResultStatus.dismissed));
+      }
+    });
+    final first = page(1);
+    await pumpHome(
+      tester,
+      store,
+      pages: [first, page(2)],
+      sharePlus: SharePlus.custom(platform),
+    );
+    await tester.tap(find.text('Save as PDF (2 pages)'));
+    for (var i = 0; i < 20 && platform.calls == 0; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(platform.calls, 1);
+    await tapDelete(tester, 2);
+    expect(store.saves.last, orderedEquals([first]));
+    share.complete(const ShareResult('shared', ShareResultStatus.success));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Keep this draft?'), findsNothing);
+    expect(store.clearCalls, 0);
+    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+  });
+
+  testWidgets('clear confirmation cannot delete a later draft revision', (
+    tester,
+  ) async {
+    final store = _DraftStore();
+    await pumpHome(
+      tester,
+      store,
+      pages: [page(1), page(2)],
+      sharePlus: SharePlus.custom(_SharePlatform()),
+    );
+    final pendingDelete = iconButton(tester, 'Delete page 2').onPressed!;
+    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Keep this draft?'), findsOneWidget);
+
+    // Exercise a mutation delivered after the confirmation was created.
+    pendingDelete();
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
+    await tester.pumpAndSettle();
+
+    expect(store.clearCalls, 0);
+    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
   });
 
   testWidgets('successful share keeps the draft unless clear is chosen', (
