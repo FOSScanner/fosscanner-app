@@ -15,6 +15,12 @@ val keystoreProperties = Properties()
 val hasReleaseKeystore = keystorePropertiesFile.exists()
 if (hasReleaseKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    // CI passes the password directly: .properties parsing would otherwise
+    // interpret backslashes and strip leading whitespace from the secret.
+    System.getenv("ANDROID_KEYSTORE_PASSWORD")?.let { password ->
+        keystoreProperties.setProperty("storePassword", password)
+        keystoreProperties.setProperty("keyPassword", password)
+    }
 }
 
 gradle.taskGraph.whenReady {
