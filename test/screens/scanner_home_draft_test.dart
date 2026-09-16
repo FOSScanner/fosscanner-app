@@ -462,10 +462,9 @@ void main() {
       sharePlus: SharePlus.custom(platform),
     );
     await tester.tap(find.text('Save as PDF (2 pages)'));
-    for (var i = 0; i < 20 && platform.calls == 0; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(platform.calls, 1);
+    // The share is still parked on its Completer here, so the export spinner
+    // keeps scheduling frames and nothing can settle yet.
+    await pumpUntil(tester, () => platform.calls == 1, settle: false);
     await tapDelete(tester, 2);
     expect(store.saves.last, orderedEquals([first]));
     share.complete(const ShareResult('shared', ShareResultStatus.success));
@@ -488,7 +487,7 @@ void main() {
     );
     final pendingDelete = iconButton(tester, 'Delete page 2').onPressed!;
     await tester.tap(find.text('Save as PDF (2 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Keep this draft?'));
     expect(find.text('Keep this draft?'), findsOneWidget);
 
     // Exercise a mutation delivered after the confirmation was created.
