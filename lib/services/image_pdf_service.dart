@@ -14,11 +14,12 @@ class ImagePdfCancelledException implements Exception {
 
 /// Assembles an image-only PDF, keeping only compressed page images.
 ///
-/// [onProgress] reports finished pages; [isCancelled] is polled between them
-/// and before assembly, so a cancelled export stops without encoding the rest
-/// of the document. Page conversion and assembly run through [compute], which
-/// uses a worker isolate on every platform that has one and falls back to the
-/// calling isolate on web.
+/// [onProgress] reports finished pages; [isCancelled] is polled between them,
+/// before assembly and once more after it, so a cancelled export stops without
+/// encoding the rest of the document and never hands back one it finished
+/// after the caller gave up. Page conversion and assembly run through
+/// [compute], which uses a worker isolate on every platform that has one and
+/// falls back to the calling isolate on web.
 Future<Uint8List> createImageOnlyPdf(
   List<Uint8List> pages, {
   void Function(int completed, int total)? onProgress,
@@ -43,7 +44,12 @@ Future<Uint8List> createImageOnlyPdf(
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
   // Assembly is the one step that holds every page at once and deflates the
   // document around them, so it does not belong on the UI isolate either.
-  return compute(_assembleDocument, jpegPages);
+  final document = await compute(_assembleDocument, jpegPages);
+  // Assembly cannot be interrupted once handed to the worker, so a cancel
+  // arriving while it runs is only observable here. Report it rather than
+  // returning a document the caller would go on to share.
+  if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
+  return document;
 }
 
 // Re-encodes one page as an opaque JPEG. Top-level so compute can run it.

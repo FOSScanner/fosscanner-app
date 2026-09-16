@@ -115,6 +115,23 @@ void main() {
     expect(converted, 1);
   });
 
+  test('a cancel arriving during assembly still yields no document', () async {
+    final page = im.encodePng(im.Image(width: 20, height: 10, numChannels: 3));
+    // One poll per page plus one before assembly. Staying false for those
+    // makes this cancel observable only on the poll that runs once the worker
+    // has already produced the document.
+    const pollsBeforeAssemblyEnds = 2;
+    var polls = 0;
+    await expectLater(
+      createImageOnlyPdf(
+        [page],
+        isCancelled: () => polls++ >= pollsBeforeAssemblyEnds,
+      ),
+      throwsA(isA<ImagePdfCancelledException>()),
+    );
+    expect(polls, pollsBeforeAssemblyEnds + 1);
+  });
+
   test('an export cancelled up front decodes nothing at all', () async {
     // Page data no decoder accepts: reaching it would throw something else.
     await expectLater(

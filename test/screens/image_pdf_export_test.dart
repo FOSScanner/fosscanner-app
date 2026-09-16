@@ -97,4 +97,28 @@ void main() {
     expect(find.text('Keep this draft?'), findsNothing);
     expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
   });
+
+  testWidgets('cancelling while the document assembles never shares it', (
+    tester,
+  ) async {
+    final platform = await pumpHome(tester, 1);
+    await tester.tap(find.text('Save as PDF (1 pages)'));
+
+    // 100% means every page is converted and the pre-assembly check has
+    // already passed, so the worker is assembling the document right now.
+    await pumpUntilFound(
+      tester,
+      find.text('Generating PDF 100%'),
+      settle: false,
+    );
+    await tester.tap(find.byType(ElevatedButton));
+    await tester.pump();
+    expect(find.text('Cancelling PDF...'), findsOneWidget);
+
+    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    expect(platform.calls, 0);
+    expect(platform.output, isNull);
+    expect(find.text('Keep this draft?'), findsNothing);
+    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+  });
 }
