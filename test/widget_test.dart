@@ -15,6 +15,8 @@ import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
+import 'support/worker_isolates.dart';
+
 class _FakeImagePickerPlatform extends ImagePickerPlatform {
   _FakeImagePickerPlatform({
     this.cameraSupported = true,
@@ -857,7 +859,7 @@ void main() {
       ),
     );
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
     final params = sharePlatform.lastParams;
     expect(params, isNotNull);
@@ -976,8 +978,7 @@ void main() {
     expect(exportButton.onPressed, isNull);
 
     await tester.tap(find.text('Share image-only PDF'));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
+    await pumpUntil(tester, () => sharePlatform.lastParams != null);
     debugDefaultTargetPlatformOverride = null;
 
     expect(sharePlatform.lastParams, isNotNull);
