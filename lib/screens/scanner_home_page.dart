@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -87,7 +87,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // Android can destroy MainActivity while the system picker/camera is in
     // front. image_picker stores that pending result for the restarted app,
     // but it is lost permanently unless retrieveLostData is called at startup.
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
       unawaited(_recoverLostImages());
     }
   }
@@ -503,22 +503,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
-    if (kIsWeb) {
-      // opencv_dart doesn't support web; use the photo as-is rather than
-      // offering a detect/adjust flow we can't actually run.
-      final added = _tryAddPage(
-        ScannedPage(
-          originalBytes: bytes,
-          corners: const [],
-          processedBytes: bytes,
-        ),
-        documentGeneration: documentGeneration,
-      );
-      return added
-          ? _PhotoIntakeResult.added
-          : _PhotoIntakeResult.capacityReached;
-    }
-
     if (!canProcessSourceImage(
       currentRetainedBytes: _retainedDocumentBytes,
       encodedBytes: bytes.length,
@@ -546,9 +530,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _editPage(int index) async {
-    // No detect/adjust flow on web (see _addCapturedPhoto) — nothing to edit.
-    if (kIsWeb ||
-        _isClearingDraft ||
+    if (_isClearingDraft ||
         _isOpeningEditor ||
         index < 0 ||
         index >= _pages.length) {
@@ -762,7 +744,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   bool get _ocrSupported =>
       widget.searchablePdfEnabled ??
-      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
+      defaultTargetPlatform == TargetPlatform.android;
 
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
     return ocr_service.createSearchablePdf([
@@ -926,18 +908,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
-          // flutter_zxing has no web decoding backend (its web implementation
-          // throws UnimplementedError on every frame) — same platform gap as
-          // opencv_dart, so this follows the same kIsWeb convention used for
-          // the detect/adjust flow elsewhere in this screen.
-          if (!kIsWeb)
-            IconButton(
-              icon: const Icon(Icons.qr_code_scanner),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
-              ),
-              tooltip: 'Scan QR/barcode',
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
             ),
+            tooltip: 'Scan QR/barcode',
+          ),
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
             onPressed:

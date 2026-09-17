@@ -410,19 +410,6 @@ void main() {
     expect(plist, contains('<key>NSPhotoLibraryUsageDescription</key>'));
   });
 
-  test('sandboxed macOS builds can read user-selected gallery files', () {
-    for (final path in [
-      'macos/Runner/DebugProfile.entitlements',
-      'macos/Runner/Release.entitlements',
-    ]) {
-      expect(
-        File(path).readAsStringSync(),
-        contains('<key>com.apple.security.files.user-selected.read-only</key>'),
-        reason: path,
-      );
-    }
-  });
-
   test('gallery-only Android devices are allowed to install the app', () {
     final manifest = File(
       'android/app/src/main/AndroidManifest.xml',
@@ -859,7 +846,7 @@ void main() {
   testWidgets('offers an image-only fallback when searchable export fails', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
 
     final sharePlatform = _FakeSharePlatform();
     final imageBytes = File('assets/icon/icon.png').readAsBytesSync();

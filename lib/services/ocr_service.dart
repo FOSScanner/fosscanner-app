@@ -1,6 +1,7 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'
+    show Uint8List, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart'
     show MethodCall, MethodChannel, PlatformException;
 import 'package:path_provider/path_provider.dart';
@@ -12,8 +13,7 @@ const _channel = MethodChannel('com.fosscanner.app/ocr');
 bool _isCreatingPdf = false;
 void Function(int completed, int total)? _progressCallback;
 
-bool get isSupported =>
-    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+bool get isSupported => defaultTargetPlatform == TargetPlatform.android;
 
 Future<void> _ensureTessdata() async {
   await _channel.invokeMethod<void>('ensureTessdata');

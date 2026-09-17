@@ -194,7 +194,7 @@ void main() {
   test(
     'rejects unsupported platforms and invalid inputs before the channel',
     () async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       await expectLater(
         ocr.createSearchablePdf([page]),
         throwsUnsupportedError,

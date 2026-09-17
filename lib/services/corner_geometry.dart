@@ -11,7 +11,7 @@ import 'dart:ui';
 /// point farther left than the real top-left point.
 ///
 /// Pure geometry, no native/OpenCV dependency, so it's cheap to unit test
-/// directly and safe to use from the web fallback too.
+/// directly and safe to use from mobile code too.
 List<Offset> orderCorners(List<Offset> pts) {
   if (pts.length != 4) {
     throw ArgumentError.value(pts, 'pts', 'Exactly four corners are required');
