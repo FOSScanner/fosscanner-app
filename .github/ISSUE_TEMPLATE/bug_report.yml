@@ -7,15 +7,10 @@ body:
     attributes:
       label: Platform
       description: >-
-        Scanning (edge detection/filters) is native-only — web falls back
-        to the raw photo. This matters a lot for triage.
+        Please include enough detail to reproduce the issue.
       options:
         - Android
         - iOS
-        - Web
-        - Linux
-        - macOS
-        - Windows
         - Other (specify below)
     validations:
       required: true

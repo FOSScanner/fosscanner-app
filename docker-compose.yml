@@ -1,20 +1,4 @@
 services:
-  # Service for running the web preview of the app
-  flutter-web:
-    build: .
-    container_name: fosscanner_web
-    ports:
-      - "127.0.0.1:8080:8080"
-    # Uses the source baked into the image and a real release build (minified,
-    # tree-shaken) rather than
-    # `flutter run -d web-server`: the debug dev-server ships an unoptimized,
-    # multi-megabyte JS bundle intended for desktop hot-reload, which can be
-    # slow or fail to render at all on a phone's browser.
-    command: >
-      bash -c "flutter build web &&
-               cd build/web &&
-               python3 -m http.server 8080 --bind 0.0.0.0"
-
   # Service for building the Android APK
   build-apk:
     build: .

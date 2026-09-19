@@ -257,47 +257,7 @@ void main() {
         targetSetting: 'TEST_HOST =',
         bundleId: testApplicationId,
       );
-      _expectXcodeBundleIds(
-        path: 'macos/Runner.xcodeproj/project.pbxproj',
-        targetSetting: 'TEST_HOST =',
-        bundleId: testApplicationId,
-      );
-
-      final macosConfig = File(
-        'macos/Runner/Configs/AppInfo.xcconfig',
-      ).readAsStringSync();
-      expect(
-        _assignmentValues(macosConfig, 'PRODUCT_BUNDLE_IDENTIFIER'),
-        equals({applicationId}),
-      );
-
-      final linuxCmake = File('linux/CMakeLists.txt').readAsStringSync();
-      expect(
-        RegExp(
-          r'^\s*set\(APPLICATION_ID\s+"([^"]+)"\)\s*$',
-          multiLine: true,
-        ).firstMatch(_activeSource(linuxCmake))?.group(1),
-        applicationId,
-      );
-
-      final windowsResources = File(
-        'windows/runner/Runner.rc',
-      ).readAsStringSync();
-      expect(
-        RegExp(
-          r'^\s*VALUE "CompanyName",\s*"([^"]+)"\s*"\\0"\s*$',
-          multiLine: true,
-        ).firstMatch(_activeSource(windowsResources))?.group(1),
-        'FOSScanner',
-      );
-
-      for (final path in [
-        'ios/Runner.xcodeproj/project.pbxproj',
-        'macos/Runner.xcodeproj/project.pbxproj',
-        'macos/Runner/Configs/AppInfo.xcconfig',
-        'linux/CMakeLists.txt',
-        'windows/runner/Runner.rc',
-      ]) {
+      for (final path in ['ios/Runner.xcodeproj/project.pbxproj']) {
         expect(
           File(path).readAsStringSync(),
           isNot(contains('com.example')),
@@ -411,7 +371,7 @@ void main() {
     },
   );
 
-  test('Docker context is private and services use narrow exposure', () {
+  test('Docker context is private and builds only the Android app', () {
     final dockerfile = File('Dockerfile').readAsStringSync();
     expect(
       _hasActiveLine(
@@ -476,13 +436,7 @@ void main() {
     final compose = File('docker-compose.yml').readAsStringSync();
     final activeCompose = _activeSource(compose);
     expect(compose, isNot(contains('flutter create .')));
-    final publishedPorts = _yamlListValues(compose, 'ports');
-    expect(publishedPorts, contains('127.0.0.1:8080:8080'));
-    expect(
-      publishedPorts,
-      everyElement(startsWith('127.0.0.1:')),
-      reason: 'Every Docker host port must bind only to loopback',
-    );
+    expect(activeCompose, isNot(contains('flutter build web')));
     final volumes = _yamlListValues(compose, 'volumes');
     expect(volumes, equals(['./docker-output:/app/docker-output']));
     expect(
@@ -703,7 +657,7 @@ void main() {
     }
   });
 
-  test('CI builds every supported platform and runs quality once', () {
+  test('CI builds both mobile platforms and runs quality once', () {
     final source = File('.github/workflows/ci.yml').readAsStringSync();
     final jobs = _workflowJobs(source);
 
@@ -714,12 +668,12 @@ void main() {
     );
 
     expect(_runner(jobWith('flutter analyze')), 'ubuntu-latest');
-    expect(_runner(jobWith('flutter build web')), 'ubuntu-latest');
-    expect(_runner(jobWith('flutter build linux')), 'ubuntu-latest');
     expect(_runner(jobWith('flutter build apk --debug')), 'ubuntu-latest');
     expect(_runner(jobWith('flutter build ios --no-codesign')), 'macos-latest');
-    expect(_runner(jobWith('flutter build macos')), 'macos-latest');
-    expect(_runner(jobWith('flutter build windows')), 'windows-latest');
+    expect(source, isNot(contains('flutter build web')));
+    expect(source, isNot(contains('flutter build linux')));
+    expect(source, isNot(contains('flutter build macos')));
+    expect(source, isNot(contains('flutter build windows')));
 
     final commands = _workflowRunCommands(source).toList();
     expect(commands.where((run) => run.contains('flutter test')), hasLength(1));
@@ -744,14 +698,7 @@ void main() {
     final contributing = File(
       'CONTRIBUTING.md',
     ).readAsStringSync().toLowerCase();
-    for (final platform in [
-      'android',
-      'ios',
-      'web',
-      'linux',
-      'macos',
-      'windows',
-    ]) {
+    for (final platform in ['android', 'ios']) {
       expect(
         contributing,
         contains(platform),
@@ -763,9 +710,10 @@ void main() {
       '.github/ISSUE_TEMPLATE/bug_report.yml',
     ).readAsStringSync();
     final platforms = _yamlListValues(issueTemplate, 'options').toSet();
+    expect(platforms, containsAll({'Android', 'iOS'}));
     expect(
-      platforms,
-      containsAll({'Android', 'iOS', 'Web', 'Linux', 'macOS', 'Windows'}),
+      platforms.where((platform) => platform != 'Other (specify below)'),
+      unorderedEquals({'Android', 'iOS'}),
     );
 
     final fastlane = File(

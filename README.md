@@ -23,10 +23,7 @@ right build for virtually every phone from the last ~7 years. Prefer a
 
 <img src="docs/screenshots/home-empty.png" width="45%" alt="Empty home screen, ready to scan"> <img src="docs/screenshots/home-pages.png" width="45%" alt="Home screen with three captured pages, ready to export as PDF">
 
-*Captured from the web build, which skips straight to the raw photo (web
-has no OpenCV support, see below) — native builds additionally show the
-edge-detection/corner-adjustment and filter screens in between capture
-and this page list.*
+*Captured from the Android build.*
 
 </div>
 
@@ -45,20 +42,15 @@ and this page list.*
   capturing new ones
 - Combine captured pages into a single PDF
 - On Android, export a searchable PDF with selectable, copyable text using
-  bundled Latin-script OCR; other platforms export image-only PDFs for now
-- Share the PDF via the OS share sheet (or download it directly on web)
+  bundled Latin-script OCR; iOS exports image-only PDFs
+- Share the PDF via the OS share sheet
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
 - An in-app About screen (the ⓘ icon) shows the exact running version and
   links straight to this source repo
 
-Edge detection, perspective correction, and filters run on real OpenCV
-(`opencv_dart`) on Android/iOS/desktop. Desktop builds support importing
-images, but `image_picker` has no built-in desktop camera UI, so camera capture
-is only offered where the platform plugin reports it as supported. The web
-build doesn't support OpenCV (the bindings are native/FFI-only) — web is a
-quick preview/testing target, not the primary one; the raw captured photo is
-used as-is there.
+FOSScanner supports Android and iOS. Edge detection, perspective correction,
+and filters run on real OpenCV (`opencv_dart`) on both mobile platforms.
 
 ## Privacy
 
@@ -68,7 +60,7 @@ used as-is there.
 - Imported gallery originals are never modified or deleted. App-owned camera
   temp files are removed after the app attempts to copy their bytes into
   memory (including failed reads).
-- On native platforms, unfinished drafts are saved automatically in the app's
+- Unfinished drafts are saved automatically in the app's
   private, OS-managed application cache. They survive normal process death and
   app restarts, but caches are transient and can be purged by the OS under
   storage pressure; they are not durable storage or included in Android OS
@@ -78,15 +70,11 @@ used as-is there.
   also removed when you confirm **Clear all**, choose **Clear draft** after
   sharing, clear the app's storage, or uninstall the app. Sharing does not
   delete a draft unless you explicitly choose that option.
-- The web build does not persist drafts; its in-progress pages remain only in
-  memory and disappear when the page is closed or reloaded.
 - PDF sharing starts from in-memory bytes. Depending on the platform,
   `share_plus` may materialize a copy in the app/OS cache for the receiving app;
   that cache is OS-managed and is not guaranteed to disappear immediately
   after the share sheet closes.
-- The app makes no network requests of its own. (The web build's rendering
-  engine, CanvasKit, is fetched from Google's CDN by the Flutter web
-  framework itself — this doesn't apply to the native Android/iOS builds.)
+- The app makes no network requests of its own.
 
 ## Getting started
 
@@ -105,28 +93,25 @@ flutter run
 | `flutter analyze` | Static analysis / lint |
 | `flutter test` | Run the test suite |
 | `flutter build apk --release --split-per-abi` | Build signed, per-ABI release APKs (requires `android/key.properties`) |
-| `flutter build web` | Build a release web bundle |
+| `flutter build ios --no-codesign` | Build the iOS app (on macOS) |
 
 ### Running with Docker
 
-`docker-compose.yml` provides two services built from the pinned Flutter
-3.44.0 container image, so you don't need the Flutter/Android SDKs installed
-locally. The APK service uses the image's x86_64 Android SDK/NDK toolchain;
+`docker-compose.yml` provides an Android APK build service using the pinned
+Flutter 3.44.0 container image, so you don't need the Flutter/Android SDKs
+installed locally. The APK service uses the image's x86_64 Android SDK/NDK toolchain;
 Docker Desktop uses emulation automatically on Apple Silicon, so that build is
 slower there. Native arm64 Linux Docker engines need amd64 emulation (for
 example, binfmt/QEMU) for the APK service:
 
 ```bash
-# Web preview, bound to this machine and served on http://localhost:8080
-docker compose up flutter-web
-
 # Debug Android APKs (one per ABI), output to ./docker-output/
 docker compose run --rm build-apk
 ```
 
 ## Contributing
 
-Issues and pull requests are welcome — see
+Issues and pull requests for Android and iOS are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow and commit message
 conventions.
 
