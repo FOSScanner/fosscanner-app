@@ -8,20 +8,24 @@ environment:
   sdk: '>=3.12.0 <4.0.0'
 
 dependencies:
+  camera: ^0.12.0+2
   flutter:
     sdk: flutter
   image_picker: ^1.0.7
+  image: ^4.9.1
   pdf: ^3.10.7
   share_plus: ^13.3.0
   opencv_dart: ^2.2.1
   package_info_plus: ^10.2.1
+  path_provider: ^2.1.6
   url_launcher: ^6.3.2
   flutter_zxing: ^3.0.1
 
 dev_dependencies:
+  camera_platform_interface: ^2.13.1
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.1
+  flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
   image_picker_platform_interface: ^2.11.1
   share_plus_platform_interface: ^7.2.0
@@ -30,6 +34,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icon/
+    - assets/tessdata/Latin.traineddata
+    - assets/tessdata/LICENSE
+    - assets/tessdata/THIRD_PARTY_NOTICES.txt
 
 flutter_launcher_icons:
   image_path: "assets/icon/icon.png"
@@ -38,14 +45,3 @@ flutter_launcher_icons:
   remove_alpha_ios: true
   adaptive_icon_background: "#673AB7"
   adaptive_icon_foreground: "assets/icon/icon_foreground.png"
-  web:
-    generate: true
-    image_path: "assets/icon/icon.png"
-    background_color: "#673AB7"
-    theme_color: "#673AB7"
-  windows:
-    generate: true
-    image_path: "assets/icon/icon.png"
-  macos:
-    generate: true
-    image_path: "assets/icon/icon.png"

@@ -8,13 +8,33 @@ plugins {
 }
 
 // Release signing lives outside version control (android/key.properties, gitignored;
-// see android/key.properties.example). Falls back to debug signing when it's absent
-// so `flutter run --release` and local/CI analyze-and-test still work without secrets.
+// see android/key.properties.example). Debug and release verification tasks do not need
+// this file, but release artifact tasks must never fall back to the debug key.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 val hasReleaseKeystore = keystorePropertiesFile.exists()
 if (hasReleaseKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    // CI passes the password directly: .properties parsing would otherwise
+    // interpret backslashes and strip leading whitespace from the secret.
+    System.getenv("ANDROID_KEYSTORE_PASSWORD")?.let { password ->
+        keystoreProperties.setProperty("storePassword", password)
+        keystoreProperties.setProperty("keyPassword", password)
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val releaseArtifactTask =
+        Regex("^(assemble|bundle|package).*Release(?:Bundle|UniversalApk)?\$")
+    val requestsReleaseArtifact = allTasks.any { task ->
+        releaseArtifactTask.matches(task.name)
+    }
+    if (requestsReleaseArtifact && !hasReleaseKeystore) {
+        throw GradleException(
+            "Release signing is required: copy android/key.properties.example " +
+                "to android/key.properties and configure a release keystore.",
+        )
+    }
 }
 
 android {
@@ -35,6 +55,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -50,10 +71,8 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (hasReleaseKeystore) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }
@@ -63,6 +82,16 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    // On-device OCR + native searchable-PDF renderer (libtesseract's own
+    // TessPdfRenderer) backing lib/services/ocr_service.dart's MethodChannel
+    // bridge (MainActivity.kt). No off-the-shelf Flutter OCR/PDF plugin is
+    // used — see MainActivity.kt for why.
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
 
 flutter {

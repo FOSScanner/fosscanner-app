@@ -36,6 +36,8 @@ CLAUDE.md
 .pub/
 /build/
 /coverage/
+/docker-output/
+/.clean-check-tmp/
 
 # Symbolication related
 app.*.symbols

@@ -23,10 +23,7 @@ right build for virtually every phone from the last ~7 years. Prefer a
 
 <img src="docs/screenshots/home-empty.png" width="45%" alt="Empty home screen, ready to scan"> <img src="docs/screenshots/home-pages.png" width="45%" alt="Home screen with three captured pages, ready to export as PDF">
 
-*Captured from the web build, which skips straight to the raw photo (web
-has no OpenCV support, see below) — native builds additionally show the
-edge-detection/corner-adjustment and filter screens in between capture
-and this page list.*
+*Captured from the Android build.*
 
 </div>
 
@@ -40,37 +37,44 @@ and this page list.*
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
   and contrast) without re-scanning
 - Capture multiple pages in sequence and reorder them with drag-and-drop
+- Automatically restore an unfinished draft after a native app restart
 - Import existing photos from your gallery instead of (or alongside)
   capturing new ones
 - Combine captured pages into a single PDF
-- Share the PDF via the OS share sheet (or download it directly on web)
+- On Android, export a searchable PDF with selectable, copyable text using
+  bundled Latin-script OCR; iOS exports image-only PDFs
+- Share the PDF via the OS share sheet
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
 - An in-app About screen (the ⓘ icon) shows the exact running version and
   links straight to this source repo
 
-Edge detection, perspective correction, and filters run on real OpenCV
-(`opencv_dart`) on Android/iOS/desktop. Desktop builds support importing
-images, but `image_picker` has no built-in desktop camera UI, so camera capture
-is only offered where the platform plugin reports it as supported. The web
-build doesn't support OpenCV (the bindings are native/FFI-only) — web is a
-quick preview/testing target, not the primary one; the raw captured photo is
-used as-is there.
+FOSScanner supports Android and iOS. Edge detection, perspective correction,
+and filters run on real OpenCV (`opencv_dart`) on both mobile platforms.
 
 ## Privacy
 
 - All image processing and PDF generation happens on-device.
+- Android searchable PDF recognition uses a bundled, offline Latin-script
+  Tesseract model; no OCR text or images are sent over the network.
 - Imported gallery originals are never modified or deleted. App-owned camera
   temp files are removed after the app attempts to copy their bytes into
-  memory (including failed reads), and in-progress pages remain only in memory
-  until the app is closed.
+  memory (including failed reads).
+- Unfinished drafts are saved automatically in the app's
+  private, OS-managed application cache. They survive normal process death and
+  app restarts, but caches are transient and can be purged by the OS under
+  storage pressure; they are not durable storage or included in Android OS
+  backups. A draft includes both original and processed page images plus
+  crop/filter/edit settings. Atomic staging plus one backup generation can
+  retain the current and immediately previous draft contents. Draft data is
+  also removed when you confirm **Clear all**, choose **Clear draft** after
+  sharing, clear the app's storage, or uninstall the app. Sharing does not
+  delete a draft unless you explicitly choose that option.
 - PDF sharing starts from in-memory bytes. Depending on the platform,
   `share_plus` may materialize a copy in the app/OS cache for the receiving app;
   that cache is OS-managed and is not guaranteed to disappear immediately
   after the share sheet closes.
-- The app makes no network requests of its own. (The web build's rendering
-  engine, CanvasKit, is fetched from Google's CDN by the Flutter web
-  framework itself — this doesn't apply to the native Android/iOS builds.)
+- The app makes no network requests of its own.
 
 ## Getting started
 
@@ -88,29 +92,26 @@ flutter run
 |---|---|
 | `flutter analyze` | Static analysis / lint |
 | `flutter test` | Run the test suite |
-| `flutter build apk --split-per-abi` | Build signed, per-ABI release APKs |
-| `flutter build web` | Build a release web bundle |
+| `flutter build apk --release --split-per-abi` | Build signed, per-ABI release APKs (requires `android/key.properties`) |
+| `flutter build ios --no-codesign` | Build the iOS app (on macOS) |
 
 ### Running with Docker
 
-`docker-compose.yml` provides two services that build against
-`ghcr.io/cirruslabs/flutter:stable`, so you don't need the Flutter/Android
-SDKs installed locally. The APK service uses the image's x86_64 Android
-SDK/NDK toolchain; Docker Desktop uses emulation automatically on Apple
-Silicon, so that build is slower there. Native arm64 Linux Docker engines need
-amd64 emulation (for example, binfmt/QEMU) for the APK service:
+`docker-compose.yml` provides an Android APK build service using the pinned
+Flutter 3.44.0 container image, so you don't need the Flutter/Android SDKs
+installed locally. The APK service uses the image's x86_64 Android SDK/NDK toolchain;
+Docker Desktop uses emulation automatically on Apple Silicon, so that build is
+slower there. Native arm64 Linux Docker engines need amd64 emulation (for
+example, binfmt/QEMU) for the APK service:
 
 ```bash
-# Web preview, served on http://localhost:8080
-docker compose up flutter-web
-
-# Release Android APKs (one per ABI), output to build/app/outputs/flutter-apk/
+# Debug Android APKs (one per ABI), output to ./docker-output/
 docker compose run --rm build-apk
 ```
 
 ## Contributing
 
-Issues and pull requests are welcome — see
+Issues and pull requests for Android and iOS are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow and commit message
 conventions.
 

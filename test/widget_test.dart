@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -13,6 +14,8 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
+
+import 'support/worker_isolates.dart';
 
 class _FakeImagePickerPlatform extends ImagePickerPlatform {
   _FakeImagePickerPlatform({
@@ -83,6 +86,50 @@ class _FakeSharePlatform implements SharePlatform {
   }
 }
 
+class _ObservedSharePlatform implements SharePlatform {
+  final shared = Completer<ShareParams>();
+
+  @override
+  Future<ShareResult> share(ShareParams params) async {
+    shared.complete(params);
+    return const ShareResult('', ShareResultStatus.dismissed);
+  }
+}
+
+class _ImmediateCornerOperations implements CornerAdjustOperations {
+  const _ImmediateCornerOperations();
+
+  @override
+  Future<Size> decodeSize(Uint8List imageBytes) async => const Size(1024, 1024);
+
+  @override
+  Future<List<Offset>?> detectCorners(Uint8List imageBytes) async => null;
+
+  @override
+  Future<Map<PageFilter, Uint8List>> buildPreviews(
+    Uint8List imageBytes,
+    List<Offset> corners,
+  ) async => {for (final filter in PageFilter.values) filter: imageBytes};
+
+  @override
+  Future<Uint8List> buildFinalPreview(
+    Uint8List imageBytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => imageBytes;
+
+  @override
+  Future<Uint8List> processForExport(
+    Uint8List imageBytes,
+    List<Offset> corners, {
+    required PageFilter filter,
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => imageBytes;
+}
+
 class _TrackingXFile extends XFile {
   _TrackingXFile(super.path);
 
@@ -128,6 +175,16 @@ class _UnsupportedStreamXFile extends _SizedXFile {
       Stream.error(UnsupportedError('backend cannot stream'));
 }
 
+class _TrackingNavigatorObserver extends NavigatorObserver {
+  var pushCount = 0;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushCount++;
+    super.didPush(route, previousRoute);
+  }
+}
+
 class _ThrowingXFile extends XFile {
   _ThrowingXFile(super.path);
 
@@ -168,6 +225,7 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const FOSScannerApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('FOSScanner'), findsOneWidget);
     expect(find.text('Ready to Scan'), findsOneWidget);
@@ -186,6 +244,7 @@ void main() {
       );
 
       await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
+      await tester.pumpAndSettle();
 
       expect(find.byTooltip('Capture Image'), findsNothing);
       expect(find.textContaining('Import from your gallery'), findsOneWidget);
@@ -365,19 +424,6 @@ void main() {
     expect(plist, contains('<key>NSPhotoLibraryUsageDescription</key>'));
   });
 
-  test('sandboxed macOS builds can read user-selected gallery files', () {
-    for (final path in [
-      'macos/Runner/DebugProfile.entitlements',
-      'macos/Runner/Release.entitlements',
-    ]) {
-      expect(
-        File(path).readAsStringSync(),
-        contains('<key>com.apple.security.files.user-selected.read-only</key>'),
-        reason: path,
-      );
-    }
-  });
-
   test('gallery-only Android devices are allowed to install the app', () {
     final manifest = File(
       'android/app/src/main/AndroidManifest.xml',
@@ -493,12 +539,184 @@ void main() {
     );
   });
 
+  testWidgets('gallery reports a distinct transient processing-budget error', (
+    tester,
+  ) async {
+    final icon = File('assets/icon/icon.png').readAsBytesSync();
+    final retainedBytes = Uint8List(5 * 1024 * 1024)
+      ..setRange(0, icon.length, icon);
+    final page = ScannedPage(
+      originalBytes: retainedBytes,
+      corners: const [],
+      processedBytes: retainedBytes,
+    );
+    ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+      images: [_SizedXFile('selection.png', icon)],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: ScannerHomePage(initialPages: List.filled(50, page))),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
+        )
+        .onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'This image needs too much temporary memory to process safely. '
+        'Remove pages or choose a smaller image.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expect(find.textContaining('Document memory limit reached'), findsNothing);
+  });
+
+  testWidgets(
+    'initial 20MP-metadata page near the cap cannot open the editor',
+    (tester) async {
+      final icon = File('assets/icon/icon.png').readAsBytesSync();
+      final sharedRetainedBytes = Uint8List(2 * 1024 * 1024)
+        ..setRange(0, icon.length, icon);
+      final page = ScannedPage(
+        originalBytes: sharedRetainedBytes,
+        corners: const [
+          Offset(0, 0),
+          Offset(3999, 0),
+          Offset(3999, 4999),
+          Offset(0, 4999),
+        ],
+        processedBytes: sharedRetainedBytes,
+      );
+      Uint8List? inspectedBytes;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            initialPages: List.filled(52, page),
+            sourceImageSizeReader: (bytes) async {
+              inspectedBytes = bytes;
+              return const Size(4000, 5000);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(Card).first);
+      await tester.pumpAndSettle();
+
+      expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
+      expect(
+        find.text(
+          'This image needs too much temporary memory to process safely. '
+          'Remove pages or choose a smaller image.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'rapid page taps perform one metadata read and open one editor route',
+    (tester) async {
+      final icon = File('assets/icon/icon.png').readAsBytesSync();
+      final page = ScannedPage(
+        originalBytes: icon,
+        corners: const [],
+        processedBytes: icon,
+      );
+      final metadata = Completer<Size>();
+      final observer = _TrackingNavigatorObserver();
+      var metadataReads = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [observer],
+          home: ScannerHomePage(
+            initialPages: [page],
+            cornerAdjustOperations: const _ImmediateCornerOperations(),
+            sourceImageSizeReader: (_) {
+              metadataReads++;
+              return metadata.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final card = find.byType(Card).first;
+
+      await tester.tap(card);
+      await tester.tap(card);
+      expect(metadataReads, 1);
+
+      await tester.pump();
+      expect(
+        tester
+            .widget<InkWell>(
+              find.descendant(of: card, matching: find.byType(InkWell)).first,
+            )
+            .onTap,
+        isNull,
+      );
+
+      metadata.complete(const Size(1024, 1024));
+      await tester.pumpAndSettle();
+
+      expect(observer.pushCount, 2);
+      expect(find.byType(CornerAdjustScreen), findsOneWidget);
+      final offstageHomeCard = find
+          .descendant(
+            of: find.byType(ScannerHomePage, skipOffstage: false),
+            matching: find.byType(Card, skipOffstage: false),
+            skipOffstage: false,
+          )
+          .first;
+      expect(
+        tester
+            .widget<InkWell>(
+              find
+                  .descendant(
+                    of: offstageHomeCard,
+                    matching: find.byType(InkWell, skipOffstage: false),
+                    skipOffstage: false,
+                  )
+                  .first,
+            )
+            .onTap,
+        isNull,
+      );
+
+      Navigator.of(tester.element(find.byType(CornerAdjustScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<InkWell>(
+              find
+                  .descendant(
+                    of: find.byType(Card).first,
+                    matching: find.byType(InkWell),
+                  )
+                  .first,
+            )
+            .onTap,
+        isNotNull,
+      );
+    },
+  );
+
   testWidgets('gallery reports capacity when a prior selection fills it', (
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
     const pageCount = 90;
-    final targetRetainedBytes = maxRetainedDocumentBytes - icon.length;
+    const additionalProcessedBytes = 24 * 1024 * 1024;
+    final targetRetainedBytes =
+        maxRetainedDocumentBytes - icon.length - additionalProcessedBytes;
     final sharedLength = targetRetainedBytes ~/ pageCount;
     final sharedBytes = Uint8List(sharedLength);
     final remainderBytes = Uint8List(
@@ -519,7 +737,12 @@ void main() {
     ImagePickerPlatform.instance = platform;
 
     await tester.pumpWidget(
-      MaterialApp(home: ScannerHomePage(initialPages: pages)),
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: pages,
+          cornerAdjustOperations: const _ImmediateCornerOperations(),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
     tester
@@ -527,16 +750,7 @@ void main() {
           find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
         )
         .onPressed!();
-    for (
-      var i = 0;
-      i < 20 && find.byType(CornerAdjustScreen).evaluate().isEmpty;
-      i++
-    ) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 10)),
-      );
-      await tester.pump();
-    }
+    await tester.pumpAndSettle();
     final editor = tester.widget<CornerAdjustScreen>(
       find.byType(CornerAdjustScreen),
     );
@@ -544,7 +758,7 @@ void main() {
       ScannedPage(
         originalBytes: editor.originalBytes,
         corners: const [],
-        processedBytes: editor.originalBytes,
+        processedBytes: Uint8List(additionalProcessedBytes),
       ),
     );
     await tester.pumpAndSettle();
@@ -627,17 +841,136 @@ void main() {
         home: ScannerHomePage(
           initialPages: [page],
           sharePlus: SharePlus.custom(sharePlatform),
+          searchablePdfEnabled: false,
         ),
       ),
     );
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
     final params = sharePlatform.lastParams;
     expect(params, isNotNull);
     expect(params!.fileNameOverrides, hasLength(1));
     expect(
       params.fileNameOverrides!.single,
+      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+    );
+  });
+
+  testWidgets(
+    'keeps the share anchor when the last page is removed during export',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform();
+      const channel = MethodChannel('com.fosscanner.app/ocr');
+      const paths = MethodChannel('plugins.flutter.io/path_provider');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final temporary = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('share_anchor_test_'),
+      ))!;
+      final (started, finish, sharePlatform) = (await tester.runAsync(
+        () async =>
+            (Completer<void>(), Completer<void>(), _ObservedSharePlatform()),
+      ))!;
+      messenger.setMockMethodCallHandler(paths, (_) async => temporary.path);
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'ensureTessdata') return null;
+        started.complete();
+        await finish.future;
+        final output = File('${(call.arguments as Map)['outputPath']}.pdf');
+        await output.writeAsString('%PDF-1.5\nfixture\n%%EOF');
+        return output.path;
+      });
+      addTearDown(() async {
+        messenger.setMockMethodCallHandler(channel, null);
+        messenger.setMockMethodCallHandler(paths, null);
+        await temporary.delete(recursive: true);
+      });
+
+      final imageBytes = File('assets/icon/icon.png').readAsBytesSync();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            initialPages: [
+              ScannedPage(
+                originalBytes: imageBytes,
+                corners: const [],
+                processedBytes: imageBytes,
+              ),
+            ],
+            sharePlus: SharePlus.custom(sharePlatform),
+          ),
+        ),
+      );
+      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Save as PDF (1 pages)'));
+        await started.future.timeout(const Duration(seconds: 5));
+      });
+      await tester.pump();
+      tester
+          .widget<IconButton>(
+            find.ancestor(
+              of: find.byTooltip('Delete page 1'),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .onPressed!();
+      await tester.pump();
+      expect(find.byType(ElevatedButton), findsNothing);
+
+      final params = await tester.runAsync(() async {
+        finish.complete();
+        return sharePlatform.shared.future.timeout(const Duration(seconds: 5));
+      });
+      await tester.pumpAndSettle();
+      debugDefaultTargetPlatformOverride = null;
+      expect(params, isNotNull);
+      expect(params!.sharePositionOrigin, expectedAnchor);
+    },
+  );
+
+  testWidgets('offers an image-only fallback when searchable export fails', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+    final sharePlatform = _FakeSharePlatform();
+    final imageBytes = File('assets/icon/icon.png').readAsBytesSync();
+    final page = ScannedPage(
+      originalBytes: imageBytes,
+      corners: const [],
+      processedBytes: imageBytes,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: [page],
+          sharePlus: SharePlus.custom(sharePlatform),
+          searchablePdfEnabled: true,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.pump();
+    expect(find.text('Searchable export failed'), findsOneWidget);
+    expect(find.text('Share image-only PDF'), findsOneWidget);
+    // The OCR job has ended; the fallback cannot cancel a native OCR job.
+    final exportButton = tester.widget<ElevatedButton>(
+      find.byType(ElevatedButton, skipOffstage: false).first,
+    );
+    expect(exportButton.onPressed, isNull);
+
+    await tester.tap(find.text('Share image-only PDF'));
+    await pumpUntil(tester, () => sharePlatform.lastParams != null);
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(sharePlatform.lastParams, isNotNull);
+    expect(
+      sharePlatform.lastParams!.fileNameOverrides!.single,
       matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
     );
   });
