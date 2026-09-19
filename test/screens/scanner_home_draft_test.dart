@@ -10,6 +10,8 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 
+import '../support/worker_isolates.dart';
+
 class _DraftStore implements DraftStore {
   _DraftStore({
     Future<List<ScannedPage>>? loaded,
@@ -70,11 +72,17 @@ class _ImagePickerPlatform extends ImagePickerPlatform {
 }
 
 class _SharePlatform implements SharePlatform {
+  _SharePlatform({this.error, this.completer});
+
+  final Object? error;
+  final Completer<ShareResult>? completer;
   var calls = 0;
 
   @override
   Future<ShareResult> share(ShareParams params) async {
     calls++;
+    if (error case final value?) throw value;
+    if (completer case final pending?) return pending.future;
     return const ShareResult('shared', ShareResultStatus.success);
   }
 }
@@ -148,7 +156,7 @@ void main() {
     final restored = [page(1), page(2)];
 
     await pumpHome(tester, store);
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Restoring draft...'), findsOneWidget);
 
     completer.complete(restored);
     await tester.pump();
@@ -220,6 +228,58 @@ void main() {
     await tester.pump();
     expect(store.saves, hasLength(2));
     expect(store.saves.last, orderedEquals([third]));
+  });
+
+  testWidgets('slow storage keeps only the newest pending draft snapshot', (
+    tester,
+  ) async {
+    final store = _SerialStore();
+    addTearDown(() {
+      if (!store.firstSave.isCompleted) store.firstSave.complete();
+    });
+    final first = page(1);
+    final second = page(2);
+    await pumpHome(tester, store, pages: [page(3), first, second]);
+    await tapDelete(tester, 1);
+    expect(store.saves, hasLength(1));
+
+    // A blocked disk write must not retain one snapshot and schedule another
+    // complete document write for every subsequent edit.
+    for (var i = 0; i < 101; i++) {
+      final reorder = tester
+          .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
+          .onAcceptWithDetails!;
+      reorder(DragTargetDetails<int>(data: 0, offset: Offset.zero));
+      await tester.pump();
+    }
+    expect(store.saves, hasLength(1));
+    store.firstSave.complete();
+    await tester.pumpAndSettle();
+
+    expect(store.saves, hasLength(2));
+    expect(store.saves.last, orderedEquals([second, first]));
+  });
+
+  testWidgets('a failed active save still commits the newest queued revision', (
+    tester,
+  ) async {
+    final store = _SerialStore();
+    addTearDown(() {
+      if (!store.firstSave.isCompleted) store.firstSave.complete();
+    });
+    final last = page(3);
+    await pumpHome(tester, store, pages: [page(1), page(2), last]);
+    await tapDelete(tester, 1);
+    await tapDelete(tester, 1);
+    store.firstSave.completeError(StateError('injected write failure'));
+    await tester.pumpAndSettle();
+
+    expect(store.saves, hasLength(2));
+    expect(store.saves.last, orderedEquals([last]));
+    expect(tester.takeException(), isNull);
+    iconButton(tester, 'Delete page 1').onPressed!();
+    await tester.pumpAndSettle();
+    expect(store.saves.last, isEmpty);
   });
 
   testWidgets('Clear all requires confirmation and clears persisted data', (
@@ -361,6 +421,85 @@ void main() {
     expect(iconButton(tester, 'Clear all').onPressed, isNotNull);
   });
 
+  testWidgets('PDF failures hide raw exception details', (tester) async {
+    final store = _DraftStore();
+    final sharePlatform = _SharePlatform(
+      error: StateError('private share provider details'),
+    );
+    await pumpHome(
+      tester,
+      store,
+      pages: [page(1)],
+      sharePlus: SharePlus.custom(sharePlatform),
+    );
+
+    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await pumpUntilFound(
+      tester,
+      find.text('Could not generate or share the PDF.'),
+    );
+
+    expect(find.text('Could not generate or share the PDF.'), findsOneWidget);
+    expect(find.textContaining('private share provider details'), findsNothing);
+  });
+
+  testWidgets('sharing an older revision never offers to clear newer edits', (
+    tester,
+  ) async {
+    final store = _DraftStore();
+    final share = Completer<ShareResult>();
+    final platform = _SharePlatform(completer: share);
+    addTearDown(() {
+      if (!share.isCompleted) {
+        share.complete(const ShareResult('', ShareResultStatus.dismissed));
+      }
+    });
+    final first = page(1);
+    await pumpHome(
+      tester,
+      store,
+      pages: [first, page(2)],
+      sharePlus: SharePlus.custom(platform),
+    );
+    await tester.tap(find.text('Save as PDF (2 pages)'));
+    // The share is still parked on its Completer here, so the export spinner
+    // keeps scheduling frames and nothing can settle yet.
+    await pumpUntil(tester, () => platform.calls == 1, settle: false);
+    await tapDelete(tester, 2);
+    expect(store.saves.last, orderedEquals([first]));
+    share.complete(const ShareResult('shared', ShareResultStatus.success));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Keep this draft?'), findsNothing);
+    expect(store.clearCalls, 0);
+    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+  });
+
+  testWidgets('clear confirmation cannot delete a later draft revision', (
+    tester,
+  ) async {
+    final store = _DraftStore();
+    await pumpHome(
+      tester,
+      store,
+      pages: [page(1), page(2)],
+      sharePlus: SharePlus.custom(_SharePlatform()),
+    );
+    final pendingDelete = iconButton(tester, 'Delete page 2').onPressed!;
+    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await pumpUntilFound(tester, find.text('Keep this draft?'));
+    expect(find.text('Keep this draft?'), findsOneWidget);
+
+    // Exercise a mutation delivered after the confirmation was created.
+    pendingDelete();
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
+    await tester.pumpAndSettle();
+
+    expect(store.clearCalls, 0);
+    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+  });
+
   testWidgets('successful share keeps the draft unless clear is chosen', (
     tester,
   ) async {
@@ -374,7 +513,7 @@ void main() {
     );
 
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Keep this draft?'));
     expect(find.text('Keep this draft?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
     await tester.pumpAndSettle();
@@ -390,7 +529,7 @@ void main() {
       sharePlus: SharePlus.custom(sharePlatform),
     );
     await tester.tap(find.text('Save as PDF (1 pages)'));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Keep this draft?'));
     await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
     await tester.pump();
     await tester.pump();

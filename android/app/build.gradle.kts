@@ -15,6 +15,12 @@ val keystoreProperties = Properties()
 val hasReleaseKeystore = keystorePropertiesFile.exists()
 if (hasReleaseKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    // CI passes the password directly: .properties parsing would otherwise
+    // interpret backslashes and strip leading whitespace from the secret.
+    System.getenv("ANDROID_KEYSTORE_PASSWORD")?.let { password ->
+        keystoreProperties.setProperty("storePassword", password)
+        keystoreProperties.setProperty("keyPassword", password)
+    }
 }
 
 gradle.taskGraph.whenReady {
@@ -49,6 +55,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -84,6 +91,7 @@ dependencies {
     // used — see MainActivity.kt for why.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
 
 flutter {

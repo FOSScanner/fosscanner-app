@@ -2,6 +2,7 @@ package com.fosscanner.app
 
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -28,6 +29,11 @@ class MainActivity : FlutterActivity() {
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        orphanCacheCleanup.schedule(applicationContext.cacheDir, executor::execute)
+        super.onCreate(savedInstanceState)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -113,7 +119,10 @@ class MainActivity : FlutterActivity() {
             try {
                 val output = File(outputPath).canonicalFile
                 val directory = requireNotNull(output.parentFile)
-                require(directory.parentFile == cacheDir.canonicalFile && directory.name.startsWith("fosscanner_ocr_"))
+                require(
+                    directory.parentFile == cacheDir.canonicalFile &&
+                        directory.name.startsWith(OcrCacheCleanupCoordinator.JOB_PREFIX),
+                )
                 require(output.name == "document" && directory.isDirectory)
                 jobDirectory = directory
                 val images = imagePaths.map { File(it).canonicalFile }
@@ -150,6 +159,7 @@ class MainActivity : FlutterActivity() {
         val baseApi = TessBaseAPI()
         try {
             check(baseApi.init(filesDir.absolutePath, OcrModelStore.language, TessBaseAPI.OEM_LSTM_ONLY))
+            check(baseApi.setVariable("user_defined_dpi", OCR_DPI.toString()))
             val renderer = TessPdfRenderer(baseApi, outputPath)
             try {
                 check(baseApi.beginDocument(renderer, "FOSScanner"))
@@ -207,6 +217,8 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val OCR_DPI = 150
+        private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
     }

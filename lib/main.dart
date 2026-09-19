@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'screens/scanner_home_page.dart';
 import 'services/draft_store.dart';
+import 'widgets/draft_session_gate.dart';
 
 void main() {
   LicenseRegistry.addLicense(() async* {
@@ -24,6 +25,8 @@ class FOSScannerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = draftStore ?? const NoOpDraftStore();
+    final scanner = ScannerHomePage(draftStore: store);
     return MaterialApp(
       title: 'FOSScanner',
       theme: ThemeData(
@@ -41,7 +44,13 @@ class FOSScannerApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.system,
-      home: ScannerHomePage(draftStore: draftStore ?? const NoOpDraftStore()),
+      home: store is DraftSessionStore
+          ? DraftSessionGate(
+              key: ObjectKey(store),
+              session: store as DraftSessionStore,
+              child: scanner,
+            )
+          : scanner,
     );
   }
 }

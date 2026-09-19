@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/models/scanned_page.dart';
+import 'package:fosscanner/services/document_processor_native.dart';
 import 'package:fosscanner/services/draft_store_native.dart';
+import 'package:fosscanner/services/image_metadata.dart';
 
 void main() {
   late Directory directory;
@@ -93,6 +96,41 @@ void main() {
     final restored = await FileDraftStore(directory: directory).load();
 
     expect(restored, isEmpty);
+  });
+
+  test('round-trips native crops with a two-pixel edge', () async {
+    final store = FileDraftStore(directory: directory);
+    final first = page(1, PageFilter.original);
+    const corners = [Offset.zero, Offset(2, 0), Offset(2, 80), Offset(0, 80)];
+
+    for (final turns in [0, 1]) {
+      final processed = processDocument(
+        tinyPng,
+        corners,
+        filter: PageFilter.original,
+        rotationQuarterTurns: turns,
+        brightness: 0,
+        contrast: 1,
+      );
+      expect(
+        await readEncodedImageSize(processed),
+        turns == 0 ? const Size(2, 80) : const Size(80, 2),
+      );
+      final narrow = ScannedPage(
+        originalBytes: tinyPng,
+        processedBytes: processed,
+        corners: corners,
+        rotationQuarterTurns: turns,
+      );
+      await store.save([first]);
+      await store.save([first, narrow]);
+
+      final restored = await FileDraftStore(directory: directory).load();
+
+      expect(restored, hasLength(2));
+      expectPage(restored[0], first);
+      expectPage(restored[1], narrow);
+    }
   });
 
   test('a failed replacement preserves the previous valid draft', () async {

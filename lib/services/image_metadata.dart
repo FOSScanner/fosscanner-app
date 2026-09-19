@@ -107,7 +107,15 @@ Future<ui.Size> readEncodedImageSize(Uint8List bytes) async {
   }
 }
 
-void validateSourceImageSize(ui.Size size) {
+void validateSourceImageSize(ui.Size size) =>
+    _validateImageSize(size, minimumEdge: 3);
+
+/// Perspective correction can produce an edge as small as two pixels.
+/// Retain the same upper allocation bounds used for source images.
+void validateProcessedImageSize(ui.Size size) =>
+    _validateImageSize(size, minimumEdge: 2);
+
+void _validateImageSize(ui.Size size, {required int minimumEdge}) {
   if (!size.width.isFinite ||
       !size.height.isFinite ||
       size.width <= 0 ||
@@ -120,8 +128,10 @@ void validateSourceImageSize(ui.Size size) {
     throw const FormatException('Image dimensions must be whole pixels');
   }
 
-  if (size.width < 3 || size.height < 3) {
-    throw UnsupportedError('Image dimensions must be at least 3x3 pixels');
+  if (size.width < minimumEdge || size.height < minimumEdge) {
+    throw UnsupportedError(
+      'Image dimensions must be at least ${minimumEdge}x$minimumEdge pixels',
+    );
   }
 
   if (size.width > maxSourceImageEdge ||

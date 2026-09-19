@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, debugPrint, kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../models/scanned_page.dart';
@@ -312,10 +312,13 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _corners = corners;
       });
       unawaited(_updatePreviews());
-    } catch (e) {
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Corner initialization failed (${error.runtimeType}).');
+      }
       if (!mounted) return;
       setState(() {
-        _error = 'Could not read this photo: $e';
+        _error = 'Could not read this photo.';
       });
     }
   }
@@ -648,109 +651,162 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Widget _buildFilterStep(BuildContext context) {
     final previewBytes =
         _finalPreviewBytes ?? _filterPreviews?[_selectedFilter];
-    return Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useScrollableLayout =
+            constraints.maxHeight < 480 ||
+            MediaQuery.textScalerOf(context).scale(16) > 20;
+        if (!useScrollableLayout) {
+          return Column(
+            children: [
+              Expanded(child: _filterPreview(previewBytes)),
+              _adjustmentSlider(
+                label: 'Brightness',
+                value: _brightness,
+                min: -100,
+                max: 100,
+                onChanged: (value) => _brightness = value,
+              ),
+              _adjustmentSlider(
+                label: 'Contrast',
+                value: _contrast,
+                min: 0.5,
+                max: 2.0,
+                onChanged: (value) => _contrast = value,
+              ),
+              _filterStrip(context, height: 92),
+              _filterActions(scrollable: false),
+            ],
+          );
+        }
+
+        final previewHeight = (constraints.maxHeight * 0.45).clamp(
+          120.0,
+          280.0,
+        );
+        final stripHeight =
+            72 + MediaQuery.textScalerOf(context).scale(12) * 1.4;
+        return SingleChildScrollView(
+          key: const Key('filter_step_scroll_view'),
+          child: Column(
+            children: [
+              SizedBox(
+                height: previewHeight,
+                child: _filterPreview(previewBytes),
+              ),
+              _adjustmentSlider(
+                label: 'Brightness',
+                value: _brightness,
+                min: -100,
+                max: 100,
+                onChanged: (value) => _brightness = value,
+              ),
+              _adjustmentSlider(
+                label: 'Contrast',
+                value: _contrast,
+                min: 0.5,
+                max: 2.0,
+                onChanged: (value) => _contrast = value,
+              ),
+              _filterStrip(context, height: stripHeight),
+              _filterActions(scrollable: true),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _filterPreview(Uint8List? previewBytes) => Padding(
+    padding: const EdgeInsets.all(16),
+    child: Stack(
+      fit: StackFit.expand,
       children: [
+        if (previewBytes != null)
+          _boundedPreviewImage(
+            previewBytes,
+            fit: BoxFit.contain,
+            maxDimension: _fullPreviewDecodeSize,
+          ),
+        if (previewBytes == null || _isGeneratingFinalPreview)
+          const Center(child: CircularProgressIndicator()),
+      ],
+    ),
+  );
+
+  Widget _adjustmentSlider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Row(
+      children: [
+        SizedBox(width: 88, child: Text(label)),
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (previewBytes != null)
-                  _boundedPreviewImage(
-                    previewBytes,
-                    fit: BoxFit.contain,
-                    maxDimension: _fullPreviewDecodeSize,
-                  ),
-                if (previewBytes == null || _isGeneratingFinalPreview)
-                  const Center(child: CircularProgressIndicator()),
-              ],
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const SizedBox(width: 72, child: Text('Brightness')),
-              Expanded(
-                child: Slider(
-                  value: _brightness,
-                  min: -100,
-                  max: 100,
-                  onChanged: _isProcessing
-                      ? null
-                      : (v) => setState(() => _brightness = v),
-                  onChangeEnd: _isProcessing
-                      ? null
-                      : (_) => unawaited(_updateFinalPreview()),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const SizedBox(width: 72, child: Text('Contrast')),
-              Expanded(
-                child: Slider(
-                  value: _contrast,
-                  min: 0.5,
-                  max: 2.0,
-                  onChanged: _isProcessing
-                      ? null
-                      : (v) => setState(() => _contrast = v),
-                  onChangeEnd: _isProcessing
-                      ? null
-                      : (_) => unawaited(_updateFinalPreview()),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 92,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              for (final filter in PageFilter.values)
-                _filterChip(context, filter),
-            ],
-          ),
-        ),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isProcessing ? null : _leaveFilterStep,
-                    child: const Text('Back'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _isProcessing ? null : _confirm,
-                    child: _isProcessing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Confirm'),
-                  ),
-                ),
-              ],
-            ),
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            onChanged: _isProcessing
+                ? null
+                : (newValue) => setState(() => onChanged(newValue)),
+            onChangeEnd: _isProcessing
+                ? null
+                : (_) => unawaited(_updateFinalPreview()),
           ),
         ),
       ],
+    ),
+  );
+
+  Widget _filterStrip(BuildContext context, {required double height}) =>
+      SizedBox(
+        height: height,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          children: [
+            for (final filter in PageFilter.values)
+              _filterChip(context, filter),
+          ],
+        ),
+      );
+
+  Widget _filterActions({required bool scrollable}) {
+    final back = OutlinedButton(
+      onPressed: _isProcessing ? null : _leaveFilterStep,
+      child: const Text('Back'),
+    );
+    final confirm = FilledButton(
+      onPressed: _isProcessing ? null : _confirm,
+      child: _isProcessing
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Text('Confirm'),
+    );
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: scrollable
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [back, const SizedBox(height: 8), confirm],
+              )
+            : Row(
+                children: [
+                  Expanded(child: back),
+                  const SizedBox(width: 16),
+                  Expanded(child: confirm),
+                ],
+              ),
+      ),
     );
   }
 
@@ -758,61 +814,68 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final selected = _selectedFilter == filter;
     final previewBytes = _filterPreviews?[filter];
     final primary = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.only(right: 12),
-      child: GestureDetector(
-        onTap: _isProcessing
-            ? null
-            : () {
-                setState(() => _selectedFilter = filter);
-                unawaited(_updateFinalPreview());
-              },
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: selected ? primary : Colors.transparent,
-                  width: 2,
+    return Semantics(
+      key: ValueKey('filter_${filter.name}'),
+      button: true,
+      enabled: !_isProcessing,
+      selected: selected,
+      label: '${_filterLabels[filter]} filter',
+      child: Padding(
+        padding: const EdgeInsets.only(right: 12),
+        child: GestureDetector(
+          onTap: _isProcessing
+              ? null
+              : () {
+                  setState(() => _selectedFilter = filter);
+                  unawaited(_updateFinalPreview());
+                },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: selected ? primary : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                child: previewBytes != null
+                    ? _boundedPreviewImage(
+                        previewBytes,
+                        fit: BoxFit.cover,
+                        maxDimension: _filterChipDecodeSize,
+                      )
+                    : ColoredBox(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
+                        child: _isGeneratingPreviews
+                            ? const Center(
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : null,
+                      ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _filterLabels[filter]!,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: selected ? primary : null,
+                  fontWeight: selected ? FontWeight.bold : null,
                 ),
               ),
-              child: previewBytes != null
-                  ? _boundedPreviewImage(
-                      previewBytes,
-                      fit: BoxFit.cover,
-                      maxDimension: _filterChipDecodeSize,
-                    )
-                  : ColoredBox(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      child: _isGeneratingPreviews
-                          ? const Center(
-                              child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            )
-                          : null,
-                    ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _filterLabels[filter]!,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: selected ? primary : null,
-                fontWeight: selected ? FontWeight.bold : null,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

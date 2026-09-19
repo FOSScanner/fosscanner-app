@@ -159,7 +159,7 @@ void main() {
     },
   );
 
-  test('forwards cancellation while an export is active', () async {
+  test('discards native success after cancellation and cleans up', () async {
     final started = Completer<void>();
     final finish = Completer<void>();
     render = (call) async {
@@ -171,11 +171,83 @@ void main() {
     };
 
     final first = ocr.createSearchablePdf([page]);
+    final cancelled = expectLater(
+      first,
+      throwsA(predicate(ocr.isCancellation)),
+    );
     await started.future;
     await ocr.cancelSearchablePdf();
     expect(calls.last.method, 'cancelSearchablePdf');
     finish.complete();
-    expect(await first, pdf);
+    await cancelled;
+    expect(await temporary.list().toList(), isEmpty);
+  });
+
+  for (final failInstallation in [false, true]) {
+    test(
+      'cancels during model installation (failure: $failInstallation)',
+      () async {
+        final started = Completer<void>();
+        final finish = Completer<void>();
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          if (call.method == 'ensureTessdata') {
+            started.complete();
+            await finish.future;
+            if (failInstallation) {
+              throw PlatformException(code: 'invalid_model');
+            }
+            return null;
+          }
+          if (call.method == 'cancelSearchablePdf') return null;
+          return render(call);
+        });
+        final export = ocr.createSearchablePdf([page]);
+        final cancelled = expectLater(
+          export,
+          throwsA(predicate(ocr.isCancellation)),
+        );
+        await started.future;
+        await ocr.cancelSearchablePdf();
+        finish.complete();
+        await cancelled;
+        expect(
+          calls.where((call) => call.method == 'createSearchablePdf'),
+          isEmpty,
+        );
+        expect(await temporary.list().toList(), isEmpty);
+
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'ensureTessdata') return null;
+          return render(call);
+        });
+        expect(await ocr.createSearchablePdf([page]), pdf);
+      },
+    );
+  }
+
+  test('cancels while waiting for the staging directory', () async {
+    final started = Completer<void>();
+    final finish = Completer<void>();
+    messenger.setMockMethodCallHandler(paths, (_) async {
+      started.complete();
+      await finish.future;
+      return temporary.path;
+    });
+    final export = ocr.createSearchablePdf([page]);
+    final cancelled = expectLater(
+      export,
+      throwsA(predicate(ocr.isCancellation)),
+    );
+    await started.future;
+    await ocr.cancelSearchablePdf();
+    finish.complete();
+    await cancelled;
+    expect(
+      calls.where((call) => call.method == 'createSearchablePdf'),
+      isEmpty,
+    );
+    expect(await temporary.list().toList(), isEmpty);
   });
 
   test('model installation failure releases the busy guard', () async {

@@ -2,20 +2,22 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
+    show TargetPlatform, debugPrint, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart'
+    show CustomSemanticsAction, OrdinalSortKey, SemanticsService;
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
+import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
+import '../services/platform_capabilities.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -28,6 +30,11 @@ class _DocumentCapacityException implements Exception {
 }
 
 enum _PhotoIntakeResult { added, skipped, capacityReached }
+
+/// Which exporter owns the running PDF generation, and therefore how a
+/// cancellation has to reach it: the native renderer needs a channel message,
+/// the Dart image-only exporter only polls the flag this screen already sets.
+enum _PdfExporter { searchable, imageOnly }
 
 typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
 
@@ -53,26 +60,25 @@ class ScannerHomePage extends StatefulWidget {
   State<ScannerHomePage> createState() => _ScannerHomePageState();
 }
 
-// Assumed resolution (dots per inch) of a warped page's pixel dimensions,
-// used only to turn pixels into a printable-sized PDF page. It doesn't
-// need to be exact — it just keeps pages roughly letter/A4-scale instead
-// of pixel-count-as-points producing an absurdly large physical page.
-const _scanDpi = 150.0;
-
 class _ScannerHomePageState extends State<ScannerHomePage> {
   late final List<ScannedPage> _pages;
   late final SharePlus _sharePlus;
   final ImagePicker _picker = ImagePicker();
   final ImageProcessingQueue _imageProcessingQueue = ImageProcessingQueue();
+  late final Future<void> _initialDraftRestore;
   Future<void> _draftWriteTail = Future<void>.value();
+  List<ScannedPage>? _pendingDraftSnapshot;
+  bool _isDraftSaveScheduled = false;
   var _draftRevision = 0;
   var _documentGeneration = 0;
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
   bool _isGeneratingPdf = false;
   bool _isCancellingPdf = false;
-  double? _ocrProgress;
+  double? _pdfProgress;
+  _PdfExporter? _pdfExporter;
   bool _isPickingImages = false;
+  bool _isRestoringDraft = false;
   bool _isClearingDraft = false;
   bool _isOpeningEditor = false;
   late bool _cameraSupported;
@@ -83,7 +89,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _pages = [...widget.initialPages];
     _sharePlus = widget.sharePlus ?? SharePlus.instance;
     _cameraSupported = _picker.supportsImageSource(ImageSource.camera);
-    if (_pages.isEmpty) _draftWriteTail = _restoreDraft();
+    _isRestoringDraft = _pages.isEmpty;
+    _initialDraftRestore = _isRestoringDraft
+        ? _restoreDraft()
+        : Future<void>.value();
+    _draftWriteTail = _initialDraftRestore;
     // Android can destroy MainActivity while the system picker/camera is in
     // front. image_picker stores that pending result for the restarted app,
     // but it is lost permanently unless retrieveLostData is called at startup.
@@ -112,18 +122,32 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (restored.isNotEmpty) setState(() => _pages.addAll(restored));
     } catch (_) {
       if (mounted) _showMessage('Could not restore the saved draft.');
+    } finally {
+      if (mounted) setState(() => _isRestoringDraft = false);
     }
   }
 
   void _queueDraftSave() {
     if (_isClearingDraft) return;
-    final snapshot = List<ScannedPage>.of(_pages);
+    _pendingDraftSnapshot = List<ScannedPage>.of(_pages);
     _draftRevision++;
+    if (_isDraftSaveScheduled) return;
+    _isDraftSaveScheduled = true;
     _draftWriteTail = _draftWriteTail.then((_) async {
       try {
-        await widget.draftStore.save(snapshot);
-      } catch (_) {
-        if (mounted) _showMessage('Could not save the draft.');
+        // Retain only the active write and the newest pending revision when
+        // edits arrive faster than storage can commit a complete document.
+        while (_pendingDraftSnapshot != null) {
+          final snapshot = _pendingDraftSnapshot!;
+          _pendingDraftSnapshot = null;
+          try {
+            await widget.draftStore.save(snapshot);
+          } catch (_) {
+            if (mounted) _showMessage('Could not save the draft.');
+          }
+        }
+      } finally {
+        _isDraftSaveScheduled = false;
       }
     });
   }
@@ -152,11 +176,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   int get _retainedDocumentBytes =>
       _pages.fold(0, (total, page) => total + _pageMemoryBytes(page));
 
-  bool get _canStartImagePick => canRetainDocument(
-    currentBytes: _retainedDocumentBytes,
-    currentPages: _pages.length,
-    incomingBytes: 1,
-  );
+  bool get _canStartImagePick =>
+      !_isRestoringDraft &&
+      canRetainDocument(
+        currentBytes: _retainedDocumentBytes,
+        currentPages: _pages.length,
+        incomingBytes: 1,
+      );
 
   void _showDocumentLimit() {
     _showMessage(
@@ -276,6 +302,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // simultaneous results could otherwise push overlapping adjustment routes.
     _isPickingImages = true;
     try {
+      // Restore the existing pages before admitting a recovered image so its
+      // processing budget and next saved snapshot include the whole document.
+      await _initialDraftRestore;
+      if (!mounted) return;
       final response = await _picker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
       if (response.exception != null) {
@@ -328,7 +358,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       const {'camera-unavailable', 'no_available_camera'}.contains(error.code);
 
   Future<void> _captureImage() async {
-    if (_isPickingImages || _isClearingDraft) return;
+    if (_isRestoringDraft || _isPickingImages || _isClearingDraft) return;
     if (!_canStartImagePick) {
       _showDocumentLimit();
       return;
@@ -359,7 +389,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _importFromGallery() async {
-    if (_isPickingImages || _isClearingDraft) return;
+    if (_isRestoringDraft || _isPickingImages || _isClearingDraft) return;
     if (!_canStartImagePick) {
       _showDocumentLimit();
       return;
@@ -669,6 +699,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pages.insert(toIndex, page);
     });
     _queueDraftSave();
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Page moved to position ${toIndex + 1} of ${_pages.length}.',
+      Directionality.of(context),
+    );
   }
 
   Future<void> _clearPages() async {
@@ -717,8 +752,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     });
   }
 
-  Future<void> _askWhetherToKeepDraft() async {
-    if (_isClearingDraft || _pages.isEmpty) return;
+  Future<void> _askWhetherToKeepDraft(int exportedRevision) async {
+    if (_isClearingDraft ||
+        _pages.isEmpty ||
+        exportedRevision != _draftRevision) {
+      return;
+    }
     final clear = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -738,7 +777,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         ],
       ),
     );
-    if (clear != true || !mounted || _isClearingDraft) return;
+    if (clear != true ||
+        !mounted ||
+        _isClearingDraft ||
+        exportedRevision != _draftRevision) {
+      return;
+    }
     await _clearCurrentDraft();
   }
 
@@ -747,12 +791,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       defaultTargetPlatform == TargetPlatform.android;
 
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
-    return ocr_service.createSearchablePdf([
-      for (final page in pages) page.processedBytes,
-    ], onProgress: (completed, total) {
-      if (!mounted) return;
-      setState(() => _ocrProgress = completed / total);
-    });
+    return ocr_service.createSearchablePdf(
+      [for (final page in pages) page.processedBytes],
+      onProgress: (completed, total) {
+        if (!mounted) return;
+        setState(() => _pdfProgress = completed / total);
+      },
+    );
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -784,41 +829,30 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     Uint8List pdfBytes, {
     required String fileName,
     required String message,
+    required Rect? shareOrigin,
   }) {
     return _sharePlus.share(
       ShareParams(
         files: [
-          XFile.fromData(
-            pdfBytes,
-            name: fileName,
-            mimeType: 'application/pdf',
-          ),
+          XFile.fromData(pdfBytes, name: fileName, mimeType: 'application/pdf'),
         ],
         fileNameOverrides: [fileName],
         text: message,
-        sharePositionOrigin: _shareOrigin,
+        sharePositionOrigin: shareOrigin,
         downloadFallbackEnabled: true,
       ),
     );
   }
 
-  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) async {
-    final pdf = pw.Document();
-    for (final page in pages) {
-      final image = pw.MemoryImage(page.processedBytes);
-      final pageFormat = PdfPageFormat(
-        image.width! / _scanDpi * PdfPageFormat.inch,
-        image.height! / _scanDpi * PdfPageFormat.inch,
-      );
-      pdf.addPage(
-        pw.Page(
-          pageFormat: pageFormat,
-          margin: pw.EdgeInsets.zero,
-          build: (pw.Context context) => pw.Image(image, fit: pw.BoxFit.fill),
-        ),
-      );
-    }
-    return pdf.save();
+  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) {
+    return image_pdf.createImageOnlyPdf(
+      [for (final page in pages) page.processedBytes],
+      onProgress: (completed, total) {
+        if (!mounted) return;
+        setState(() => _pdfProgress = completed / total);
+      },
+      isCancelled: () => _isCancellingPdf,
+    );
   }
 
   Rect? get _shareOrigin {
@@ -828,8 +862,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _cancelPdfGeneration() async {
-    if (!_isGeneratingPdf || _isCancellingPdf || !_ocrSupported) return;
+    if (!_isGeneratingPdf || _isCancellingPdf || _pdfProgress == null) return;
     setState(() => _isCancellingPdf = true);
+    // The image-only exporter polls the flag set above between pages; only the
+    // native renderer has to be told over the channel.
+    if (_pdfExporter != _PdfExporter.searchable) return;
     try {
       await ocr_service.cancelSearchablePdf();
     } catch (error) {
@@ -842,11 +879,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _generateAndSharePdf() async {
     if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
+    final exportedRevision = _draftRevision;
+    // The last page can be removed while encoding, which unmounts the button.
+    // Keep its original rectangle for the required iPad popover anchor.
+    final shareOrigin = _shareOrigin;
 
     setState(() {
       _isGeneratingPdf = true;
       _isCancellingPdf = false;
-      _ocrProgress = _ocrSupported ? 0 : null;
+      _pdfExporter = _ocrSupported
+          ? _PdfExporter.searchable
+          : _PdfExporter.imageOnly;
+      _pdfProgress = 0;
     });
 
     var shared = false;
@@ -861,44 +905,67 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             if (mounted) _showMessage('PDF generation cancelled.');
             return;
           }
+          if (mounted) setState(() => _pdfProgress = null);
           needsImageOnlyFallback = true;
           if (!await _confirmImageOnlyFallback()) return;
         }
         if (searchablePdf != null) {
+          if (!mounted || _isCancellingPdf) return;
+          setState(() => _pdfProgress = null);
           final result = await _sharePdfBytes(
             searchablePdf,
             fileName:
                 'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf',
             message: 'Searchable document scanned with FOSScanner',
+            shareOrigin: shareOrigin,
           );
           shared = result.status != ShareResultStatus.dismissed;
         }
       }
 
       if (needsImageOnlyFallback) {
-        final pdfBytes = await _createImageOnlyPdf(pages);
+        if (!mounted) return;
+        setState(() {
+          // A cancel requested from the searchable stage does not carry over:
+          // the user has just confirmed they want this export instead.
+          _isCancellingPdf = false;
+          _pdfExporter = _PdfExporter.imageOnly;
+          _pdfProgress = 0;
+        });
+        final Uint8List pdfBytes;
+        try {
+          pdfBytes = await _createImageOnlyPdf(pages);
+        } on image_pdf.ImagePdfCancelledException {
+          if (mounted) _showMessage('PDF generation cancelled.');
+          return;
+        }
+        if (!mounted) return;
+        setState(() => _pdfProgress = null);
         final result = await _sharePdfBytes(
           pdfBytes,
           fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
           message: 'Document scanned with FOSScanner',
+          shareOrigin: shareOrigin,
         );
         shared = result.status != ShareResultStatus.dismissed;
       }
-    } catch (e) {
-      if (mounted) {
-        _showMessage('Could not create a PDF: $e');
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('PDF generation failed (${error.runtimeType}).');
       }
+      if (mounted) _showMessage('Could not generate or share the PDF.');
     } finally {
       if (mounted) {
         setState(() {
           _isGeneratingPdf = false;
           _isCancellingPdf = false;
-          _ocrProgress = null;
+          _pdfExporter = null;
+          _pdfProgress = null;
         });
       }
     }
     if (shared && mounted && !_isClearingDraft && _pages.isNotEmpty) {
-      await _askWhetherToKeepDraft();
+      await _askWhetherToKeepDraft(exportedRevision);
     }
   }
 
@@ -943,24 +1010,31 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      _cameraSupported
-                          ? Icons.camera_alt
-                          : Icons.photo_library_outlined,
-                      size: 80,
-                      color: Colors.grey,
-                    ),
+                    if (_isRestoringDraft)
+                      const CircularProgressIndicator()
+                    else
+                      Icon(
+                        _cameraSupported
+                            ? Icons.camera_alt
+                            : Icons.photo_library_outlined,
+                        size: 80,
+                        color: Colors.grey,
+                      ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Ready to Scan',
-                      style: TextStyle(
+                    Text(
+                      _isRestoringDraft
+                          ? 'Restoring draft...'
+                          : 'Ready to Scan',
+                      style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _cameraSupported
+                      _isRestoringDraft
+                          ? 'Your saved pages will appear here.'
+                          : _cameraSupported
                           ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
                           : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
                       textAlign: TextAlign.center,
@@ -1041,45 +1115,63 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   ),
                 );
 
-                // Drag-to-reorder: long-press a page to pick it up, drop it
-                // on another page's slot to swap it into that position.
-                return DragTarget<int>(
-                  onWillAcceptWithDetails: (details) =>
-                      !_isClearingDraft &&
+                // Drag-to-reorder remains available alongside equivalent
+                // semantic actions for switch and screen-reader users.
+                final reorderActions = <CustomSemanticsAction, VoidCallback>{
+                  if (!_isClearingDraft && !_isOpeningEditor && index > 0)
+                    const CustomSemanticsAction(label: 'Move earlier'): () =>
+                        _reorderPage(index, index - 1),
+                  if (!_isClearingDraft &&
                       !_isOpeningEditor &&
-                      details.data != index,
-                  onAcceptWithDetails: (details) =>
-                      _reorderPage(details.data, index),
-                  builder: (context, candidateData, rejectedData) {
-                    final isDropTarget = candidateData.isNotEmpty;
-                    return LongPressDraggable<int>(
-                      data: index,
-                      maxSimultaneousDrags: _isClearingDraft || _isOpeningEditor
-                          ? 0
-                          : 1,
-                      feedback: SizedBox(
-                        width: 140,
-                        height: 200,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: Opacity(opacity: 0.85, child: card),
+                      index < _pages.length - 1)
+                    const CustomSemanticsAction(label: 'Move later'): () =>
+                        _reorderPage(index, index + 1),
+                };
+                return Semantics(
+                  key: ValueKey('page_semantics_$index'),
+                  label: 'Page ${index + 1} of ${_pages.length}',
+                  sortKey: OrdinalSortKey(index.toDouble()),
+                  container: true,
+                  customSemanticsActions: reorderActions,
+                  child: DragTarget<int>(
+                    onWillAcceptWithDetails: (details) =>
+                        !_isClearingDraft &&
+                        !_isOpeningEditor &&
+                        details.data != index,
+                    onAcceptWithDetails: (details) =>
+                        _reorderPage(details.data, index),
+                    builder: (context, candidateData, rejectedData) {
+                      final isDropTarget = candidateData.isNotEmpty;
+                      return LongPressDraggable<int>(
+                        data: index,
+                        maxSimultaneousDrags:
+                            _isClearingDraft || _isOpeningEditor ? 0 : 1,
+                        feedback: SizedBox(
+                          width: 140,
+                          height: 200,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: Opacity(opacity: 0.85, child: card),
+                          ),
                         ),
-                      ),
-                      childWhenDragging: Opacity(opacity: 0.3, child: card),
-                      child: isDropTarget
-                          ? Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  width: 3,
+                        childWhenDragging: Opacity(opacity: 0.3, child: card),
+                        child: isDropTarget
+                            ? Container(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    width: 3,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
                                 ),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: card,
-                            )
-                          : card,
-                    );
-                  },
+                                child: card,
+                              )
+                            : card,
+                      );
+                    },
+                  ),
                 );
               },
             ),
@@ -1108,7 +1200,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   onPressed: _isClearingDraft
                       ? null
                       : _isGeneratingPdf
-                      ? (_ocrSupported ? _cancelPdfGeneration : null)
+                      ? (_pdfProgress != null && !_isCancellingPdf
+                            ? _cancelPdfGeneration
+                            : null)
                       : _generateAndSharePdf,
                   icon: _isGeneratingPdf || _isClearingDraft
                       ? const SizedBox(
@@ -1122,11 +1216,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ? 'Clearing draft...'
                         : _isGeneratingPdf
                         ? _isCancellingPdf
-                            ? 'Cancelling PDF...'
-                            : _ocrProgress == null
-                            ? 'Generating PDF...'
-                            : 'Generating PDF '
-                                '${(_ocrProgress! * 100).round()}%'
+                              ? 'Cancelling PDF...'
+                              : _pdfProgress == null
+                              ? 'Generating PDF...'
+                              : 'Generating PDF '
+                                    '${(_pdfProgress! * 100).round()}%'
                         : 'Save as PDF (${_pages.length} pages)',
                     style: const TextStyle(fontSize: 16),
                   ),

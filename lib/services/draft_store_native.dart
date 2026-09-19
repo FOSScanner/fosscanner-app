@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/scanned_page.dart';
+import 'draft_session_lock.dart';
 import 'draft_store_base.dart';
 import 'image_metadata.dart';
 
@@ -42,13 +43,23 @@ DraftStore createDraftStore() => FileDraftStore();
 
 /// Native, app-private cache for the current in-progress document.
 ///
+/// Acquire [acquireSession] before using the store in an app session.
+///
 /// [directory] is the draft root itself when supplied. It exists so tests can
 /// exercise the real filesystem protocol without invoking path_provider.
-class FileDraftStore implements DraftStore {
+class FileDraftStore implements DraftStore, DraftSessionStore {
   FileDraftStore({this.directory, this.beforeCommit});
 
   final Directory? directory;
   final DraftSaveHook? beforeCommit;
+  DraftSessionLock? _sessionLock;
+
+  @override
+  Future<void> acquireSession() async {
+    final root = await _root();
+    _sessionLock ??= DraftSessionLock(root);
+    await _sessionLock!.acquire();
+  }
 
   Future<Directory> _root() async {
     final supplied = directory;
@@ -164,7 +175,7 @@ class FileDraftStore implements DraftStore {
       final originalBytes = await files.original.readAsBytes();
       final processedBytes = await files.processed.readAsBytes();
       validateSourceImageSize(await readEncodedImageSize(originalBytes));
-      validateSourceImageSize(await readEncodedImageSize(processedBytes));
+      validateProcessedImageSize(await readEncodedImageSize(processedBytes));
       await _decodeFirstFrame(originalBytes);
       await _decodeFirstFrame(processedBytes);
       pages.add(
