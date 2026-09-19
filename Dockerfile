@@ -1,5 +1,5 @@
 # Flutter 3.44.0; pin the multi-platform image index, not a mutable tag.
-FROM ghcr.io/cirruslabs/flutter@sha256:46691e311715845de03a3ba4753a475476936805b29431b1f00f1816981033f8
+FROM ghcr.io/cirruslabs/flutter@sha256:217a3d81b124f3fab82b24633bf66b256cc74528b894e7f17103f70150232077
 
 # Android native assets need CMake and Ninja. The base digest is pinned, while
 # apt security package versions intentionally resolve from the archive at build time.
