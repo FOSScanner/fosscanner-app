@@ -2,7 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode;
+    show TargetPlatform,
+    debugPrint,
+    defaultTargetPlatform,
+    kDebugMode,
+    kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart'
     show CustomSemanticsAction, OrdinalSortKey, SemanticsService;
@@ -17,6 +21,7 @@ import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
 import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
+import '../services/platform_capabilities.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -974,13 +979,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
+          if (supportsBarcodeCamera(
+            platform: defaultTargetPlatform,
+            isWeb: kIsWeb,
+          ))
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
+              ),
+              tooltip: 'Scan QR/barcode',
             ),
-            tooltip: 'Scan QR/barcode',
-          ),
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
             onPressed:
