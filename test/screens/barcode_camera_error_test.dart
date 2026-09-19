@@ -153,6 +153,7 @@ void main() {
       expect(find.byKey(const Key('camera-preview')), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
     });
   }
@@ -166,6 +167,7 @@ void main() {
     expect(find.textContaining('private native details'), findsNothing);
     expect(find.text('Retry'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
   });
 }
