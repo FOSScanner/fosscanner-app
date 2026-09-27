@@ -13,7 +13,7 @@ dependencies:
     sdk: flutter
   image_picker: ^1.0.7
   image: ^4.9.1
-  pdf: ^3.10.7
+  pdf: ^3.13.1
   share_plus: ^13.3.0
   opencv_dart: ^2.2.1
   package_info_plus: ^10.2.1
