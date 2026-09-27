@@ -22,7 +22,7 @@ dependencies:
   flutter_zxing: ^3.0.1
 
 dev_dependencies:
-  camera_platform_interface: ^2.13.1
+  camera_platform_interface: ^2.14.0
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
