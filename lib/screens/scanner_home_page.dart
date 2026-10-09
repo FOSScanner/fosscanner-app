@@ -563,6 +563,32 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         : _PhotoIntakeResult.capacityReached;
   }
 
+  Future<void> _previewPage(int index) async {
+    if (_isClearingDraft ||
+        _isOpeningEditor ||
+        index < 0 ||
+        index >= _pages.length) {
+      return;
+    }
+
+    final page = _pages[index];
+    final shouldEdit = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => _ScannedPagePreviewScreen(
+          page: page,
+          pageNumber: index + 1,
+        ),
+      ),
+    );
+    if (shouldEdit == true &&
+        mounted &&
+        !_isClearingDraft &&
+        index < _pages.length &&
+        identical(_pages[index], page)) {
+      await _editPage(index);
+    }
+  }
+
   Future<void> _editPage(int index) async {
     if (_isClearingDraft ||
         _isOpeningEditor ||
@@ -1068,7 +1094,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   child: InkWell(
                     onTap: _isClearingDraft || _isOpeningEditor
                         ? null
-                        : () => _editPage(index),
+                        : () => _previewPage(index),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -1242,6 +1268,58 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScannedPagePreviewScreen extends StatelessWidget {
+  const _ScannedPagePreviewScreen({
+    required this.page,
+    required this.pageNumber,
+  });
+
+  final ScannedPage page;
+  final int pageNumber;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Page $pageNumber')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: InteractiveViewer(
+                    child: Image.memory(
+                      page.processedBytes,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  icon: const Icon(Icons.edit),
+                  label: const Text('Edit page'),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Done'),
                 ),
               ),
             ],
