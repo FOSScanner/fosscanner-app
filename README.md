@@ -42,7 +42,8 @@ right build for virtually every phone from the last ~7 years. Prefer a
   capturing new ones
 - Combine captured pages into a single PDF
 - On Android, export a searchable PDF with selectable, copyable text using
-  bundled Latin-script OCR; iOS exports image-only PDFs
+  bundled Latin-script OCR, enabled by default. Turn off **Searchable text (OCR)**
+  before exporting for an image-only PDF; iOS exports image-only PDFs
 - Share the PDF via the OS share sheet
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking

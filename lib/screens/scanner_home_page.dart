@@ -2,11 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform,
-    debugPrint,
-    defaultTargetPlatform,
-    kDebugMode,
-    kIsWeb;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart'
     show CustomSemanticsAction, OrdinalSortKey, SemanticsService;
@@ -78,6 +74,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
   bool _isGeneratingPdf = false;
+  bool _useOcr = true;
   bool _isCancellingPdf = false;
   double? _pdfProgress;
   _PdfExporter? _pdfExporter;
@@ -574,10 +571,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final page = _pages[index];
     final shouldEdit = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => _ScannedPagePreviewScreen(
-          page: page,
-          pageNumber: index + 1,
-        ),
+        builder: (_) =>
+            _ScannedPagePreviewScreen(page: page, pageNumber: index + 1),
       ),
     );
     if (shouldEdit == true &&
@@ -910,6 +905,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
     final exportedRevision = _draftRevision;
+    final useOcr = _ocrSupported && _useOcr;
     // The last page can be removed while encoding, which unmounts the button.
     // Keep its original rectangle for the required iPad popover anchor.
     final shareOrigin = _shareOrigin;
@@ -917,16 +913,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     setState(() {
       _isGeneratingPdf = true;
       _isCancellingPdf = false;
-      _pdfExporter = _ocrSupported
-          ? _PdfExporter.searchable
-          : _PdfExporter.imageOnly;
+      _pdfExporter = useOcr ? _PdfExporter.searchable : _PdfExporter.imageOnly;
       _pdfProgress = 0;
     });
 
     var shared = false;
-    var needsImageOnlyFallback = !_ocrSupported;
+    var needsImageOnlyFallback = !useOcr;
     try {
-      if (_ocrSupported) {
+      if (useOcr) {
         Uint8List? searchablePdf;
         try {
           searchablePdf = await _createSearchablePdf(pages);
@@ -1226,6 +1220,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (_pages.isNotEmpty) ...[
+                if (_ocrSupported)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Searchable text (OCR)'),
+                    subtitle: const Text(
+                      'Add selectable text to the PDF. Turn off for images only.',
+                    ),
+                    value: _useOcr,
+                    onChanged: _isGeneratingPdf || _isClearingDraft
+                        ? null
+                        : (value) => setState(() => _useOcr = value),
+                  ),
                 ElevatedButton.icon(
                   key: _shareButtonKey,
                   style: ElevatedButton.styleFrom(

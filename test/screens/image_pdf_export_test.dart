@@ -30,7 +30,11 @@ void main() {
     input = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   });
 
-  Future<_Share> pumpHome(WidgetTester tester, int pageCount) async {
+  Future<_Share> pumpHome(
+    WidgetTester tester,
+    int pageCount, {
+    bool ocrSupported = false,
+  }) async {
     final platform = _Share();
     await tester.pumpWidget(
       MaterialApp(
@@ -43,13 +47,50 @@ void main() {
                 corners: const [],
               ),
           ],
-          searchablePdfEnabled: false,
+          searchablePdfEnabled: ocrSupported,
           sharePlus: SharePlus.custom(platform),
         ),
       ),
     );
     return platform;
   }
+
+  testWidgets('OCR defaults on and opting out exports an image-only PDF', (
+    tester,
+  ) async {
+    const channel = MethodChannel('com.fosscanner.app/ocr');
+    var ocrCalls = 0;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      ocrCalls++;
+      throw PlatformException(code: 'unexpected_ocr');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    final platform = await pumpHome(tester, 1, ocrSupported: true);
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isTrue,
+    );
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pump();
+    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.pump();
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged,
+      isNull,
+    );
+
+    await pumpUntil(tester, () => platform.output != null);
+    expect(latin1.decode(platform.output!), contains('/DCTDecode'));
+    expect(ocrCalls, 0);
+    expect(find.text('Searchable export failed'), findsNothing);
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isFalse,
+    );
+  });
 
   testWidgets('PNG pages use compressed image data inside the exported PDF', (
     tester,
