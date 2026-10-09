@@ -272,8 +272,8 @@ void main() {
     () {
       const approvedActions = {
         'actions/checkout': (
-          sha: '11d5960a326750d5838078e36cf38b85af677262',
-          version: 'v4',
+          sha: '3d3c42e5aac5ba805825da76410c181273ba90b1',
+          version: 'v7.0.1',
         ),
         'subosito/flutter-action': (
           sha: '1a449444c387b1966244ae4d4f8c696479add0b2',
@@ -301,7 +301,7 @@ void main() {
         ),
       };
       final actionPattern = RegExp(
-        r'^\s*(?:-\s+)?uses:\s*([^@\s]+)@([^\s#]+)\s+#\s*(v\d+)\s*$',
+        r'^\s*(?:-\s+)?uses:\s*([^@\s]+)@([^\s#]+)\s+#\s*(v\d+(?:\.\d+)*)\s*$',
         multiLine: true,
       );
 

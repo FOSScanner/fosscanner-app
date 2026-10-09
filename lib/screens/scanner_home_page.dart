@@ -82,6 +82,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _isRestoringDraft = false;
   bool _isClearingDraft = false;
   bool _isOpeningEditor = false;
+  bool _isPreviewOpen = false;
   late bool _cameraSupported;
 
   @override
@@ -563,24 +564,33 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<void> _previewPage(int index) async {
     if (_isClearingDraft ||
         _isOpeningEditor ||
+        _isPreviewOpen ||
         index < 0 ||
         index >= _pages.length) {
       return;
     }
 
-    final page = _pages[index];
-    final shouldEdit = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) =>
-            _ScannedPagePreviewScreen(page: page, pageNumber: index + 1),
-      ),
-    );
-    if (shouldEdit == true &&
+    final pages = List<ScannedPage>.of(_pages, growable: false);
+    final generation = _documentGeneration;
+    _isPreviewOpen = true;
+    int? selectedIndex;
+    try {
+      selectedIndex = await Navigator.of(context).push<int>(
+        MaterialPageRoute(
+          builder: (_) =>
+              _ScannedPagePreviewScreen(pages: pages, initialIndex: index),
+        ),
+      );
+    } finally {
+      _isPreviewOpen = false;
+    }
+    if (selectedIndex != null &&
         mounted &&
         !_isClearingDraft &&
-        index < _pages.length &&
-        identical(_pages[index], page)) {
-      await _editPage(index);
+        generation == _documentGeneration &&
+        selectedIndex < _pages.length &&
+        identical(_pages[selectedIndex], pages[selectedIndex])) {
+      await _editPage(selectedIndex);
     }
   }
 
@@ -1284,30 +1294,79 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 }
 
-class _ScannedPagePreviewScreen extends StatelessWidget {
+class _ScannedPagePreviewScreen extends StatefulWidget {
   const _ScannedPagePreviewScreen({
-    required this.page,
-    required this.pageNumber,
+    required this.pages,
+    required this.initialIndex,
   });
 
-  final ScannedPage page;
-  final int pageNumber;
+  final List<ScannedPage> pages;
+  final int initialIndex;
+
+  @override
+  State<_ScannedPagePreviewScreen> createState() =>
+      _ScannedPagePreviewScreenState();
+}
+
+class _ScannedPagePreviewScreenState extends State<_ScannedPagePreviewScreen> {
+  late final PageController _pageController;
+  final TransformationController _transformation = TransformationController();
+  late int _index;
+  bool _zoomed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _pageController = PageController(initialPage: _index);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _transformation.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Page $pageNumber')),
+      appBar: AppBar(
+        title: Text('Page ${_index + 1} of ${widget.pages.length}'),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
               Expanded(
-                child: Center(
-                  child: InteractiveViewer(
-                    child: Image.memory(
-                      page.processedBytes,
-                      fit: BoxFit.contain,
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: widget.pages.length,
+                  physics: _zoomed
+                      ? const NeverScrollableScrollPhysics()
+                      : null,
+                  onPageChanged: (index) {
+                    _transformation.value = Matrix4.identity();
+                    setState(() {
+                      _index = index;
+                      _zoomed = false;
+                    });
+                  },
+                  itemBuilder: (context, index) => Center(
+                    child: InteractiveViewer(
+                      transformationController: _transformation,
+                      panEnabled: _zoomed,
+                      onInteractionUpdate: (_) {
+                        final zoomed =
+                            _transformation.value.getMaxScaleOnAxis() > 1.01;
+                        if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+                      },
+                      child: Image.memory(
+                        widget.pages[index].processedBytes,
+                        fit: BoxFit.contain,
+                        semanticLabel: 'Scanned page ${index + 1}',
+                      ),
                     ),
                   ),
                 ),
@@ -1316,7 +1375,7 @@ class _ScannedPagePreviewScreen extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: () => Navigator.of(context).pop(true),
+                  onPressed: () => Navigator.of(context).pop(_index),
                   icon: const Icon(Icons.edit),
                   label: const Text('Edit page'),
                 ),
@@ -1324,7 +1383,7 @@ class _ScannedPagePreviewScreen extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
+                  onPressed: () => Navigator.of(context).pop(),
                   child: const Text('Done'),
                 ),
               ),

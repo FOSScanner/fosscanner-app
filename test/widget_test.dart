@@ -609,6 +609,10 @@ void main() {
       await tester.tap(find.byType(Card).first);
       await tester.pumpAndSettle();
 
+      expect(inspectedBytes, isNull);
+      await tester.tap(find.text('Edit page'));
+      await tester.pumpAndSettle();
+
       expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
       expect(
         find.text(
@@ -621,93 +625,153 @@ void main() {
     },
   );
 
-  testWidgets(
-    'rapid page taps perform one metadata read and open one editor route',
-    (tester) async {
-      final icon = File('assets/icon/icon.png').readAsBytesSync();
-      final page = ScannedPage(
-        originalBytes: icon,
+  testWidgets('swiping the preview edits the displayed page', (tester) async {
+    final icon = File('assets/icon/icon.png').readAsBytesSync();
+    final pages = List.generate(3, (_) {
+      final bytes = Uint8List.fromList(icon);
+      return ScannedPage(
+        originalBytes: bytes,
+        processedBytes: bytes,
         corners: const [],
-        processedBytes: icon,
       );
-      final metadata = Completer<Size>();
-      final observer = _TrackingNavigatorObserver();
-      var metadataReads = 0;
-
-      await tester.pumpWidget(
-        MaterialApp(
-          navigatorObservers: [observer],
-          home: ScannerHomePage(
-            initialPages: [page],
-            cornerAdjustOperations: const _ImmediateCornerOperations(),
-            sourceImageSizeReader: (_) {
-              metadataReads++;
-              return metadata.future;
-            },
-          ),
+    });
+    Uint8List? editedBytes;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: pages,
+          cornerAdjustOperations: const _ImmediateCornerOperations(),
+          sourceImageSizeReader: (bytes) async {
+            editedBytes = bytes;
+            return const Size(1024, 1024);
+          },
         ),
-      );
-      await tester.pumpAndSettle();
-      final card = find.byType(Card).first;
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Card).at(1));
+    await tester.pumpAndSettle();
+    expect(find.text('Page 2 of 3'), findsOneWidget);
+    expect(editedBytes, isNull);
 
-      await tester.tap(card);
-      await tester.tap(card);
-      expect(metadataReads, 1);
+    await tester.drag(find.byType(PageView), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('Page 3 of 3'), findsOneWidget);
+    await tester.tap(find.text('Edit page'));
+    await tester.pumpAndSettle();
+    expect(identical(editedBytes, pages[2].originalBytes), isTrue);
+    expect(find.byType(CornerAdjustScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
-      await tester.pump();
-      expect(
-        tester
-            .widget<InkWell>(
-              find.descendant(of: card, matching: find.byType(InkWell)).first,
-            )
-            .onTap,
-        isNull,
-      );
+    await tester.tap(find.byType(Card).at(1));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(600, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('Page 1 of 3'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PageView), findsNothing);
+    expect(find.text('Save as PDF (3 pages)'), findsOneWidget);
+  });
 
-      metadata.complete(const Size(1024, 1024));
-      await tester.pumpAndSettle();
+  testWidgets('preview opens once and editing performs one metadata read', (
+    tester,
+  ) async {
+    final icon = File('assets/icon/icon.png').readAsBytesSync();
+    final page = ScannedPage(
+      originalBytes: icon,
+      corners: const [],
+      processedBytes: icon,
+    );
+    final metadata = Completer<Size>();
+    final observer = _TrackingNavigatorObserver();
+    var metadataReads = 0;
 
-      expect(observer.pushCount, 2);
-      expect(find.byType(CornerAdjustScreen), findsOneWidget);
-      final offstageHomeCard = find
-          .descendant(
-            of: find.byType(ScannerHomePage, skipOffstage: false),
-            matching: find.byType(Card, skipOffstage: false),
-            skipOffstage: false,
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorObservers: [observer],
+        home: ScannerHomePage(
+          initialPages: [page],
+          cornerAdjustOperations: const _ImmediateCornerOperations(),
+          sourceImageSizeReader: (_) {
+            metadataReads++;
+            return metadata.future;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final card = find.byType(Card).first;
+
+    final openPreview = tester
+        .widget<InkWell>(
+          find.descendant(of: card, matching: find.byType(InkWell)).first,
+        )
+        .onTap!;
+    openPreview();
+    openPreview();
+    await tester.pumpAndSettle();
+    expect(metadataReads, 0);
+    expect(observer.pushCount, 2);
+    await tester.tap(find.text('Edit page'));
+    await tester.pumpAndSettle();
+    await tester.tap(card);
+    expect(metadataReads, 1);
+
+    await tester.pump();
+    expect(
+      tester
+          .widget<InkWell>(
+            find.descendant(of: card, matching: find.byType(InkWell)).first,
           )
-          .first;
-      expect(
-        tester
-            .widget<InkWell>(
-              find
-                  .descendant(
-                    of: offstageHomeCard,
-                    matching: find.byType(InkWell, skipOffstage: false),
-                    skipOffstage: false,
-                  )
-                  .first,
-            )
-            .onTap,
-        isNull,
-      );
+          .onTap,
+      isNull,
+    );
 
-      Navigator.of(tester.element(find.byType(CornerAdjustScreen))).pop();
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<InkWell>(
-              find
-                  .descendant(
-                    of: find.byType(Card).first,
-                    matching: find.byType(InkWell),
-                  )
-                  .first,
-            )
-            .onTap,
-        isNotNull,
-      );
-    },
-  );
+    metadata.complete(const Size(1024, 1024));
+    await tester.pumpAndSettle();
+
+    expect(observer.pushCount, 3);
+    expect(find.byType(CornerAdjustScreen), findsOneWidget);
+    final offstageHomeCard = find
+        .descendant(
+          of: find.byType(ScannerHomePage, skipOffstage: false),
+          matching: find.byType(Card, skipOffstage: false),
+          skipOffstage: false,
+        )
+        .first;
+    expect(
+      tester
+          .widget<InkWell>(
+            find
+                .descendant(
+                  of: offstageHomeCard,
+                  matching: find.byType(InkWell, skipOffstage: false),
+                  skipOffstage: false,
+                )
+                .first,
+          )
+          .onTap,
+      isNull,
+    );
+
+    Navigator.of(tester.element(find.byType(CornerAdjustScreen))).pop();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<InkWell>(
+            find
+                .descendant(
+                  of: find.byType(Card).first,
+                  matching: find.byType(InkWell),
+                )
+                .first,
+          )
+          .onTap,
+      isNotNull,
+    );
+  });
 
   testWidgets('gallery reports capacity when a prior selection fills it', (
     tester,

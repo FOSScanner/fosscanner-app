@@ -36,6 +36,7 @@ right build for virtually every phone from the last ~7 years. Prefer a
   with live thumbnail previews before you confirm
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
   and contrast) without re-scanning
+- Preview scanned pages, swipe through the document, and choose a page to edit
 - Capture multiple pages in sequence and reorder them with drag-and-drop
 - Automatically restore an unfinished draft after a native app restart
 - Import existing photos from your gallery instead of (or alongside)
