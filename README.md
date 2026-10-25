@@ -16,8 +16,8 @@ PDF — all on-device. No accounts, no cloud, no tracking.
 </a>
 
 Grab `app-arm64-v8a-release.apk` from the release's assets — that's the
-right build for virtually every phone from the last ~7 years. Prefer a
-32-bit or x86 device? Use `armeabi-v7a` or `x86_64` instead.
+right build for virtually every phone from the last ~7 years.
+For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 
 <br>
 
@@ -92,7 +92,7 @@ flutter run
 |---|---|
 | `flutter analyze` | Static analysis / lint |
 | `flutter test` | Run the test suite |
-| `flutter build apk --release --split-per-abi` | Build signed, per-ABI release APKs (requires `android/key.properties`) |
+| `flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64` | Build signed ARMv7 and ARM64 release APKs (requires `android/key.properties`) |
 | `flutter build ios --no-codesign` | Build the iOS app (on macOS) |
 
 ### Running with Docker
@@ -105,7 +105,7 @@ slower there. Native arm64 Linux Docker engines need amd64 emulation (for
 example, binfmt/QEMU) for the APK service:
 
 ```bash
-# Debug Android APKs (one per ABI), output to ./docker-output/
+# Debug Android APKs (ARMv7 and ARM64), output to ./docker-output/
 docker compose run --rm build-apk
 ```
 

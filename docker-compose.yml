@@ -14,5 +14,5 @@ services:
     volumes:
       - ./docker-output:/app/docker-output
     command: >
-      bash -c "flutter build apk --debug --split-per-abi &&
+      bash -c "flutter build apk --debug --split-per-abi --target-platform android-arm,android-arm64 &&
                cp build/app/outputs/flutter-apk/app-*-debug.apk /app/docker-output/"
