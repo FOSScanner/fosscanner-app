@@ -30,6 +30,12 @@ dev_dependencies:
   image_picker_platform_interface: ^2.11.1
   share_plus_platform_interface: ^7.2.0
 
+hooks:
+  user_defines:
+    dartcv4:
+      # The native hook otherwise starts one compiler per host CPU.
+      parallel_jobs: 2
+
 flutter:
   uses-material-design: true
   assets:

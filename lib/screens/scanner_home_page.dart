@@ -2,11 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform,
-    debugPrint,
-    defaultTargetPlatform,
-    kDebugMode,
-    kIsWeb;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart'
     show CustomSemanticsAction, OrdinalSortKey, SemanticsService;
@@ -191,6 +187,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   void _showDocumentLimit() {
     _showMessage(
       'Document memory limit reached. Remove pages before adding more.',
+    );
+  }
+
+  void _showUnsupportedImageDimensions() {
+    _showMessage(
+      'This image has unsupported dimensions. Choose an image from 3x3 '
+      'up to ${maxSourceImageEdge}px per edge and '
+      '$maxSourceImagePixels pixels.',
+    );
+  }
+
+  void _showImageProcessingMemoryLimit() {
+    _showMessage(
+      'This image needs too much temporary memory to process safely. '
+      'Remove pages or choose a smaller image.',
     );
   }
 
@@ -521,11 +532,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       imageSize = await readEncodedImageSize(bytes);
       validateSourceImageSize(imageSize);
     } on UnsupportedError {
-      _showMessage(
-        'This image has unsupported dimensions. Choose an image from 3x3 '
-        'up to ${maxSourceImageEdge}px per edge and '
-        '$maxSourceImagePixels pixels.',
-      );
+      _showUnsupportedImageDimensions();
       return _PhotoIntakeResult.skipped;
     } catch (_) {
       _showMessage('Could not read this photo.');
@@ -542,10 +549,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       encodedBytes: bytes.length,
       size: imageSize,
     )) {
-      _showMessage(
-        'This image needs too much temporary memory to process safely. '
-        'Remove pages or choose a smaller image.',
-      );
+      _showImageProcessingMemoryLimit();
       return _PhotoIntakeResult.skipped;
     }
 
@@ -590,11 +594,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         validateSourceImageSize(imageSize);
       } on UnsupportedError {
         if (!requestIsCurrent()) return;
-        _showMessage(
-          'This image has unsupported dimensions. Choose an image from 3x3 '
-          'up to ${maxSourceImageEdge}px per edge and '
-          '$maxSourceImagePixels pixels.',
-        );
+        _showUnsupportedImageDimensions();
         return;
       } catch (_) {
         if (requestIsCurrent()) _showMessage('Could not read this photo.');
@@ -607,25 +607,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         encodedBytes: 0,
         size: imageSize,
       )) {
-        _showMessage(
-          'This image needs too much temporary memory to process safely. '
-          'Remove pages or choose a smaller image.',
-        );
+        _showImageProcessingMemoryLimit();
         return;
       }
-      if (!mounted) return;
 
+      if (!mounted) return;
       final result = await Navigator.of(context).push<ScannedPage>(
         MaterialPageRoute(
           builder: (_) => _buildEditor(page.originalBytes, page: page),
         ),
       );
-      if (result != null &&
-          mounted &&
-          !_isClearingDraft &&
-          documentGeneration == _documentGeneration &&
-          index < _pages.length &&
-          identical(_pages[index], page)) {
+      if (result != null && requestIsCurrent()) {
         if (!canReplaceDocumentPage(
           currentBytes: _retainedDocumentBytes,
           currentPages: _pages.length,
@@ -794,14 +786,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       widget.searchablePdfEnabled ??
       defaultTargetPlatform == TargetPlatform.android;
 
+  void _updatePdfProgress(int completed, int total) {
+    if (mounted) setState(() => _pdfProgress = completed / total);
+  }
+
   Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
-    return ocr_service.createSearchablePdf(
-      [for (final page in pages) page.processedBytes],
-      onProgress: (completed, total) {
-        if (!mounted) return;
-        setState(() => _pdfProgress = completed / total);
-      },
-    );
+    return ocr_service.createSearchablePdf([
+      for (final page in pages) page.processedBytes,
+    ], onProgress: _updatePdfProgress);
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -851,10 +843,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) {
     return image_pdf.createImageOnlyPdf(
       [for (final page in pages) page.processedBytes],
-      onProgress: (completed, total) {
-        if (!mounted) return;
-        setState(() => _pdfProgress = completed / total);
-      },
+      onProgress: _updatePdfProgress,
       isCancelled: () => _isCancellingPdf,
     );
   }
@@ -880,6 +869,30 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  Future<({Uint8List bytes, bool searchable})?> _createPdf(
+    List<ScannedPage> pages,
+  ) async {
+    if (_ocrSupported) {
+      try {
+        return (bytes: await _createSearchablePdf(pages), searchable: true);
+      } catch (error) {
+        if (ocr_service.isCancellation(error)) rethrow;
+        if (!mounted) return null;
+        setState(() => _pdfProgress = null);
+        if (!await _confirmImageOnlyFallback()) return null;
+      }
+    }
+
+    if (!mounted) return null;
+    setState(() {
+      // The user has confirmed a fresh export after an OCR failure.
+      _isCancellingPdf = false;
+      _pdfExporter = _PdfExporter.imageOnly;
+      _pdfProgress = 0;
+    });
+    return (bytes: await _createImageOnlyPdf(pages), searchable: false);
+  }
+
   Future<void> _generateAndSharePdf() async {
     if (_pages.isEmpty || _isClearingDraft || _isGeneratingPdf) return;
     final pages = List<ScannedPage>.of(_pages, growable: false);
@@ -898,66 +911,30 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     });
 
     var shared = false;
-    var needsImageOnlyFallback = !_ocrSupported;
     try {
-      if (_ocrSupported) {
-        Uint8List? searchablePdf;
-        try {
-          searchablePdf = await _createSearchablePdf(pages);
-        } catch (error) {
-          if (ocr_service.isCancellation(error)) {
-            if (mounted) _showMessage('PDF generation cancelled.');
-            return;
-          }
-          if (mounted) setState(() => _pdfProgress = null);
-          needsImageOnlyFallback = true;
-          if (!await _confirmImageOnlyFallback()) return;
-        }
-        if (searchablePdf != null) {
-          if (!mounted || _isCancellingPdf) return;
-          setState(() => _pdfProgress = null);
-          final result = await _sharePdfBytes(
-            searchablePdf,
-            fileName:
-                'FOSScanner_searchable_${DateTime.now().millisecondsSinceEpoch}.pdf',
-            message: 'Searchable document scanned with FOSScanner',
-            shareOrigin: shareOrigin,
-          );
-          shared = result.status != ShareResultStatus.dismissed;
-        }
-      }
-
-      if (needsImageOnlyFallback) {
-        if (!mounted) return;
-        setState(() {
-          // A cancel requested from the searchable stage does not carry over:
-          // the user has just confirmed they want this export instead.
-          _isCancellingPdf = false;
-          _pdfExporter = _PdfExporter.imageOnly;
-          _pdfProgress = 0;
-        });
-        final Uint8List pdfBytes;
-        try {
-          pdfBytes = await _createImageOnlyPdf(pages);
-        } on image_pdf.ImagePdfCancelledException {
-          if (mounted) _showMessage('PDF generation cancelled.');
-          return;
-        }
-        if (!mounted) return;
-        setState(() => _pdfProgress = null);
-        final result = await _sharePdfBytes(
-          pdfBytes,
-          fileName: 'FOSScanner_${DateTime.now().millisecondsSinceEpoch}.pdf',
-          message: 'Document scanned with FOSScanner',
-          shareOrigin: shareOrigin,
-        );
-        shared = result.status != ShareResultStatus.dismissed;
-      }
+      final pdf = await _createPdf(pages);
+      if (pdf == null || !mounted || _isCancellingPdf) return;
+      setState(() => _pdfProgress = null);
+      final prefix = pdf.searchable ? 'FOSScanner_searchable' : 'FOSScanner';
+      final result = await _sharePdfBytes(
+        pdf.bytes,
+        fileName: '${prefix}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        message: pdf.searchable
+            ? 'Searchable document scanned with FOSScanner'
+            : 'Document scanned with FOSScanner',
+        shareOrigin: shareOrigin,
+      );
+      shared = result.status != ShareResultStatus.dismissed;
     } catch (error) {
-      if (kDebugMode) {
-        debugPrint('PDF generation failed (${error.runtimeType}).');
+      if (ocr_service.isCancellation(error) ||
+          error is image_pdf.ImagePdfCancelledException) {
+        if (mounted) _showMessage('PDF generation cancelled.');
+      } else {
+        if (kDebugMode) {
+          debugPrint('PDF generation failed (${error.runtimeType}).');
+        }
+        if (mounted) _showMessage('Could not generate or share the PDF.');
       }
-      if (mounted) _showMessage('Could not generate or share the PDF.');
     } finally {
       if (mounted) {
         setState(() {

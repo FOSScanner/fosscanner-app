@@ -271,37 +271,32 @@ void main() {
     'workflow actions use approved immutable revisions and Flutter version',
     () {
       const approvedActions = {
-        'actions/checkout': (
-          sha: '11d5960a326750d5838078e36cf38b85af677262',
-          version: 'v4',
-        ),
-        'subosito/flutter-action': (
-          sha: '1a449444c387b1966244ae4d4f8c696479add0b2',
-          version: 'v2',
-        ),
-        'actions/upload-artifact': (
-          sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02',
-          version: 'v4',
-        ),
-        'actions/setup-java': (
-          sha: 'cf277c60eb25467037889841efdb72551f06f6c3',
-          version: 'v4',
-        ),
-        'softprops/action-gh-release': (
-          sha: '3bb12739c298aeb8a4eeaf626c5b8d85266b0e65',
-          version: 'v2',
-        ),
-        'actions/attest-build-provenance': (
-          sha: '43d14bc2b83dec42d39ecae14e916627a18bb661',
-          version: 'v3',
-        ),
-        'googleapis/release-please-action': (
-          sha: '8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5',
-          version: 'v4',
-        ),
+        'actions/checkout': {
+          'v4': '11d5960a326750d5838078e36cf38b85af677262',
+          'v7.0.1': '3d3c42e5aac5ba805825da76410c181273ba90b1',
+        },
+        'subosito/flutter-action': {
+          'v2': '1a449444c387b1966244ae4d4f8c696479add0b2',
+        },
+        'actions/upload-artifact': {
+          'v4': 'ea165f8d65b6e75b540449e92b4886f43607fa02',
+        },
+        'actions/setup-java': {
+          'v4': 'cf277c60eb25467037889841efdb72551f06f6c3',
+        },
+        'softprops/action-gh-release': {
+          'v2': '3bb12739c298aeb8a4eeaf626c5b8d85266b0e65',
+        },
+        'actions/attest-build-provenance': {
+          'v3': '43d14bc2b83dec42d39ecae14e916627a18bb661',
+        },
+        'googleapis/release-please-action': {
+          'v4': '8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5',
+        },
       };
       final actionPattern = RegExp(
-        r'^\s*(?:-\s+)?uses:\s*([^@\s]+)@([^\s#]+)\s+#\s*(v\d+)\s*$',
+        r'^\s*(?:-\s+)?uses:\s*([^@\s]+)@([^\s#]+)\s+#\s*'
+        r'(v\d+(?:\.\d+)*)\s*$',
         multiLine: true,
       );
 
@@ -328,14 +323,9 @@ void main() {
           final approved = approvedActions[name];
           expect(approved, isNotNull, reason: '${workflow.path}: $name');
           expect(
-            action.group(2),
-            approved!.sha,
-            reason: '${workflow.path}: $name',
-          );
-          expect(
-            action.group(3),
-            approved.version,
-            reason: '${workflow.path}: $name',
+            approved,
+            containsPair(action.group(3), action.group(2)),
+            reason: '${workflow.path}: $name revision/comment',
           );
         }
 

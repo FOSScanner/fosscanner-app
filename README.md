@@ -109,6 +109,13 @@ example, binfmt/QEMU) for the APK service:
 docker compose run --rm build-apk
 ```
 
+The build container is limited to 4 GiB of memory (with no additional swap)
+and two CPUs. Gradle uses at most two workers and a 2 GiB heap; the OpenCV hook
+uses at most two parallel jobs, configured in `pubspec.yaml` (also for local
+builds and tests). Leave at least 4 GiB available before
+starting a build. These limits contain build failures inside the container;
+very large builds may need more memory to finish.
+
 ## Contributing
 
 Issues and pull requests for Android and iOS are welcome — see

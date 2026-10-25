@@ -929,6 +929,11 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
       expect(params, isNotNull);
       expect(params!.sharePositionOrigin, expectedAnchor);
+      expect(
+        params.fileNameOverrides!.single,
+        matches(RegExp(r'^FOSScanner_searchable_\d+\.pdf$')),
+      );
+      expect(params.text, 'Searchable document scanned with FOSScanner');
     },
   );
 

@@ -22,7 +22,6 @@ docker-output/
 
 # Version-control metadata
 .git/
-.gitignore
 
 # Local IDE and machine configuration
 .idea/
