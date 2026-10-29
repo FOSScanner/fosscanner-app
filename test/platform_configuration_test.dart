@@ -280,9 +280,11 @@ void main() {
         },
         'actions/upload-artifact': {
           'v4': 'ea165f8d65b6e75b540449e92b4886f43607fa02',
+          'v7.0.2': 'cf430e030ddbb5b0abf93d22962f4752f3646cd9',
         },
         'actions/setup-java': {
           'v4': 'cf277c60eb25467037889841efdb72551f06f6c3',
+          'v6.1.0': 'b843ebf9b913146b38da2eaa7aeddf76074ae1ad',
         },
         'softprops/action-gh-release': {
           'v2': '3bb12739c298aeb8a4eeaf626c5b8d85266b0e65',
