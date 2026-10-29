@@ -322,10 +322,16 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(Card).at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit page'));
     await _waitForPreviewStart(tester, operations, 0);
+    // Finish the route transitions while leaving the worker pending.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.byType(Card).at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit page'));
     await tester.pump();
     await tester.pump();
 
@@ -340,6 +346,7 @@ void main() {
     expect(operations.maxConcurrentWorkers, 1);
     operations.previewResults[1].complete(_previews(bytes));
     await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pageBack();
     await tester.pumpAndSettle();
   });

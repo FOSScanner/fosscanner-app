@@ -12,6 +12,7 @@ import 'package:share_plus_platform_interface/share_plus_platform_interface.dart
 import 'package:fosscanner/main.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import 'package:fosscanner/screens/page_preview_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
@@ -576,8 +577,96 @@ void main() {
     expect(find.textContaining('Document memory limit reached'), findsNothing);
   });
 
+  testWidgets('page taps preview the saved result and retain edits', (
+    tester,
+  ) async {
+    final original = File('assets/icon/icon.png').readAsBytesSync();
+    final processed = Uint8List.fromList(original);
+    final updated = Uint8List.fromList(original);
+    final page = ScannedPage(
+      originalBytes: original,
+      processedBytes: processed,
+      corners: const [],
+      filter: PageFilter.grayscale,
+      rotationQuarterTurns: 1,
+      brightness: 12,
+      contrast: 1.3,
+    );
+    var metadataReads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: [page],
+          cornerAdjustOperations: const _ImmediateCornerOperations(),
+          sourceImageSizeReader: (_) async {
+            metadataReads++;
+            return const Size(1024, 1024);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Card).first);
+    await tester.pumpAndSettle();
+
+    final image = tester.widget<Image>(
+      find.descendant(
+        of: find.byType(PagePreviewScreen),
+        matching: find.byType(Image),
+      ),
+    );
+    final provider = image.image as ResizeImage;
+    expect(
+      identical((provider.imageProvider as MemoryImage).bytes, processed),
+      isTrue,
+    );
+    expect(provider.width, 2048);
+    expect(provider.height, 2048);
+    expect(provider.policy, ResizeImagePolicy.fit);
+    expect(image.fit, BoxFit.contain);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(metadataReads, 0);
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(metadataReads, 0);
+    await tester.tap(find.byType(Card).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit page'));
+    await tester.pumpAndSettle();
+    final editor = tester.widget<CornerAdjustScreen>(
+      find.byType(CornerAdjustScreen),
+    );
+    expect(metadataReads, 1);
+    expect(identical(editor.originalBytes, original), isTrue);
+    expect(editor.initialFilter, PageFilter.grayscale);
+    expect(editor.initialRotationQuarterTurns, 1);
+    expect(editor.initialBrightness, 12);
+    expect(editor.initialContrast, 1.3);
+    Navigator.of(tester.element(find.byType(CornerAdjustScreen))).pop(
+      ScannedPage(
+        originalBytes: original,
+        processedBytes: updated,
+        corners: const [],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Card).first);
+    await tester.pumpAndSettle();
+    expect(
+      identical(
+        tester
+            .widget<PagePreviewScreen>(find.byType(PagePreviewScreen))
+            .imageBytes,
+        updated,
+      ),
+      isTrue,
+    );
+  });
+
   testWidgets(
-    'initial 20MP-metadata page near the cap cannot open the editor',
+    'initial 20MP-metadata page near the cap can preview but cannot edit',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
       final sharedRetainedBytes = Uint8List(2 * 1024 * 1024)
@@ -609,6 +698,10 @@ void main() {
       await tester.tap(find.byType(Card).first);
       await tester.pumpAndSettle();
 
+      expect(find.byType(PagePreviewScreen), findsOneWidget);
+      expect(inspectedBytes, isNull);
+      await tester.tap(find.byTooltip('Edit page'));
+      await tester.pumpAndSettle();
       expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
       expect(
         find.text(
@@ -622,7 +715,7 @@ void main() {
   );
 
   testWidgets(
-    'rapid page taps perform one metadata read and open one editor route',
+    'rapid page taps open one preview and edit opens one editor route',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
       final page = ScannedPage(
@@ -652,6 +745,11 @@ void main() {
 
       await tester.tap(card);
       await tester.tap(card);
+      expect(metadataReads, 0);
+      await tester.pumpAndSettle();
+      expect(observer.pushCount, 2);
+      expect(find.byType(PagePreviewScreen), findsOneWidget);
+      await tester.tap(find.byTooltip('Edit page'));
       expect(metadataReads, 1);
 
       await tester.pump();
@@ -667,7 +765,7 @@ void main() {
       metadata.complete(const Size(1024, 1024));
       await tester.pumpAndSettle();
 
-      expect(observer.pushCount, 2);
+      expect(observer.pushCount, 3);
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
       final offstageHomeCard = find
           .descendant(

@@ -21,6 +21,7 @@ import '../services/platform_capabilities.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
+import 'page_preview_screen.dart';
 
 const _thumbnailCacheWidth = 512;
 const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
@@ -567,7 +568,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         : _PhotoIntakeResult.capacityReached;
   }
 
-  Future<void> _editPage(int index) async {
+  Future<void> _openPage(int index) async {
     if (_isClearingDraft ||
         _isOpeningEditor ||
         index < 0 ||
@@ -575,7 +576,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return;
     }
 
-    // Acquire this home page's editor lock before metadata loading yields.
+    // Acquire this home page's editor lock before opening the preview.
     // This blocks stale, rapid card taps from starting overlapping routes.
     setState(() => _isOpeningEditor = true);
     try {
@@ -587,6 +588,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           documentGeneration == _documentGeneration &&
           index < _pages.length &&
           identical(_pages[index], page);
+
+      final editRequested = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => PagePreviewScreen(
+            imageBytes: page.processedBytes,
+            pageNumber: index + 1,
+          ),
+        ),
+      );
+      if (editRequested != true || !requestIsCurrent()) return;
 
       late final Size imageSize;
       try {
@@ -1045,7 +1056,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   child: InkWell(
                     onTap: _isClearingDraft || _isOpeningEditor
                         ? null
-                        : () => _editPage(index),
+                        : () => _openPage(index),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
