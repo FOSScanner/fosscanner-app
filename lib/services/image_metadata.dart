@@ -13,6 +13,10 @@ const maxPickerEdge = 4472.0;
 const maxEncodedImageBytes = 32 * 1024 * 1024;
 const maxDocumentPages = 100;
 const maxRetainedDocumentBytes = 256 * 1024 * 1024;
+// Admission heuristic, not a hard process-RSS limit. Flutter's decoded image
+// cache, native libraries, isolate/message copies and PDF output add overhead.
+// The home screen also counts encoded buffers held by draft writes and Undo,
+// and prevents PDF/image workers from overlapping within a scanner session.
 const maxImageProcessingWorkingSetBytes = 256 * 1024 * 1024;
 
 // Peak processing allowance: the source decoder retains one four-channel

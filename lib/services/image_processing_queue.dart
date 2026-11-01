@@ -1,11 +1,14 @@
 import 'dart:async';
 
-/// Serializes OpenCV workers owned by one scanner session.
+/// Serializes image-processing and PDF workers owned by one scanner session.
 ///
-/// A route may be disposed before its worker finishes, so every editor opened
-/// by the same home screen must share this queue.
+/// A route may be disposed before its worker finishes, so every editor and
+/// exporter opened by the same home screen must share this queue.
 class ImageProcessingQueue {
   Future<void> _tail = Future<void>.value();
+
+  /// Waits for work already submitted, including workers from popped routes.
+  Future<void> get idle => _tail;
 
   Future<T> run<T>(Future<T> Function() work) {
     final result = Completer<T>();

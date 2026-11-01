@@ -46,6 +46,9 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 - On Android, export a searchable PDF with selectable, copyable text using
   bundled Latin-script OCR; iOS exports image-only PDFs
 - Share the PDF via the OS share sheet
+- Document editing, image intake, and barcode scanning pause while a PDF is
+  generated or shared to avoid overlapping memory-heavy jobs. Starting an
+  export dismisses any pending page-deletion Undo.
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
 - An in-app About screen (the ⓘ icon) shows the exact running version and
@@ -96,6 +99,22 @@ flutter run
 | `flutter test` | Run the test suite |
 | `flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64` | Build signed ARMv7 and ARM64 release APKs (requires `android/key.properties`) |
 | `flutter build ios --no-codesign` | Build the iOS app (on macOS) |
+
+### Memory admission
+
+Image intake and re-editing budget encoded image storage held by the current
+pages, active/pending draft saves, and page-deletion Undo. Shared image buffers
+are counted once, including views of the same backing allocation. Removing a
+page does not free that budget until these remaining owners release it.
+PDF generation uses the editor's processing queue, so a worker left running
+by a closed editor finishes before export starts. New exports are blocked
+while a picker, page preview/editor, or barcode camera is active; document
+mutations are blocked through PDF generation and sharing.
+
+These limits are admission estimates, not a hard bound on process memory.
+Decoded Flutter image caches, native OCR/OpenCV allocations, worker/message
+copies, and the completed PDF can add memory beyond the estimate. Peak memory
+and responsiveness still need profiling on lower-memory devices.
 
 ### Running with Docker
 
