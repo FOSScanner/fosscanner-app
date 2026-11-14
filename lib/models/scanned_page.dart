@@ -31,8 +31,8 @@ class ScannedPage {
     this.contrast = 1.0,
   });
 
-  /// The untouched captured photo. Kept so corners/filter can be redone
-  /// later (Phase 3: re-edit) without re-capturing.
+  /// The untouched captured photo. Kept so corners, filters, and adjustments
+  /// can be changed later without re-capturing.
   final Uint8List originalBytes;
 
   /// The 4 document corners in `originalBytes`' pixel space, ordered
@@ -56,23 +56,4 @@ class ScannedPage {
   /// Perspective-corrected + filtered image, ready for the thumbnail grid
   /// and PDF export.
   final Uint8List processedBytes;
-
-  ScannedPage copyWith({
-    List<Offset>? corners,
-    PageFilter? filter,
-    int? rotationQuarterTurns,
-    double? brightness,
-    double? contrast,
-    Uint8List? processedBytes,
-  }) {
-    return ScannedPage(
-      originalBytes: originalBytes,
-      corners: corners ?? this.corners,
-      filter: filter ?? this.filter,
-      rotationQuarterTurns: rotationQuarterTurns ?? this.rotationQuarterTurns,
-      brightness: brightness ?? this.brightness,
-      contrast: contrast ?? this.contrast,
-      processedBytes: processedBytes ?? this.processedBytes,
-    );
-  }
 }

@@ -5,10 +5,10 @@ packages:
     dependency: transitive
     description:
       name: archive
-      sha256: a96e8b390886ee8abb49b7bd3ac8df6f451c621619f52a26e815fdcf568959ff
+      sha256: "0d58d1fa1fddf6588251ccf2819f3fb3b6d0452c1b2813ac7413a05592bfbefe"
       url: "https://pub.dev"
     source: hosted
-    version: "4.0.9"
+    version: "4.5.2"
   args:
     dependency: transitive
     description:
@@ -77,10 +77,10 @@ packages:
     dependency: "direct dev"
     description:
       name: camera_platform_interface
-      sha256: "4524ca6eb4176b066864036ad4fe02c3e4863e63b77eadc21a5bf56824f43498"
+      sha256: b3083b183ef1daa408d5f0c98c8c7ac0325b490695fb4557ff4210fcf04c5984
       url: "https://pub.dev"
     source: hosted
-    version: "2.13.1"
+    version: "2.15.0"
   camera_web:
     dependency: transitive
     description:
@@ -284,10 +284,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_zxing
-      sha256: d94f5a5f75d30e503390e248c034eee3de9bd3481f7cdda348b05c2ce81b0bd0
+      sha256: ee2b97bf69b01385b91497501c060f4e3b53686709892e005de10f3ad30eee98
       url: "https://pub.dev"
     source: hosted
-    version: "3.0.1"
+    version: "3.1.0"
   glob:
     dependency: transitive
     description:
@@ -324,18 +324,18 @@ packages:
     dependency: "direct main"
     description:
       name: image
-      sha256: "6300175e00616bbc832e2fc91bfa4d776af5402c81c7151bee6905bb08473c52"
+      sha256: "89ed75b2f8231fe676808c5564f9590d728024ded7ac782a7ed8474f1c95b72a"
       url: "https://pub.dev"
     source: hosted
-    version: "4.9.1"
+    version: "4.12.0"
   image_picker:
     dependency: "direct main"
     description:
       name: image_picker
-      sha256: d8402284df184bc05f4a2210c6c23983b0720f4cd87cbd05c5390a78af602667
+      sha256: e71b1bd9e40124041128d60fc3034c7b1598e1bba4e570bba0c70301c817013a
       url: "https://pub.dev"
     source: hosted
-    version: "1.2.3"
+    version: "1.2.4"
   image_picker_android:
     dependency: transitive
     description:
@@ -380,10 +380,10 @@ packages:
     dependency: "direct dev"
     description:
       name: image_picker_platform_interface
-      sha256: "567e056716333a1647c64bb6bd873cff7622233a5c3f694be28a583d4715690c"
+      sha256: "2dee4b4e3be429db71472c9c559c981498070a61af1ba82e0e4986fc5dadc042"
       url: "https://pub.dev"
     source: hosted
-    version: "2.11.1"
+    version: "2.11.2"
   image_picker_windows:
     dependency: transitive
     description:
@@ -532,10 +532,10 @@ packages:
     dependency: "direct main"
     description:
       name: package_info_plus
-      sha256: "127e1751e37ffb2ff4658beeaca77bad0c27bf5f932bd3a501c2296926d4b481"
+      sha256: "73ef2cd5c11a7548f9b7f6fc2a4f6113de2e64aa2a70de63feede95548822908"
       url: "https://pub.dev"
     source: hosted
-    version: "10.2.1"
+    version: "10.2.2"
   package_info_plus_platform_interface:
     dependency: transitive
     description:
@@ -612,10 +612,10 @@ packages:
     dependency: "direct main"
     description:
       name: pdf
-      sha256: "517df47af468734a23c8b513c0c6a8a62357403ab1b8ab7fad1606576a9dbdd0"
+      sha256: "6e40827f370d196e97c6611724d923a3d86c431ce8e2ce1e59edd03a67a1a6e6"
       url: "https://pub.dev"
     source: hosted
-    version: "3.13.0"
+    version: "3.13.1"
   petitparser:
     dependency: transitive
     description:
@@ -676,10 +676,10 @@ packages:
     dependency: "direct main"
     description:
       name: share_plus
-      sha256: "34f00f9becd2743c1fb05363d624f9f70d37f7ccdcdda47450bc0b8c9d327b8c"
+      sha256: db40767f130189d53f3ae8a6393c217ff4a492da1baff718a9873679c0c00224
       url: "https://pub.dev"
     source: hosted
-    version: "13.3.0"
+    version: "13.3.1"
   share_plus_platform_interface:
     dependency: "direct dev"
     description:
@@ -761,10 +761,10 @@ packages:
     dependency: "direct main"
     description:
       name: url_launcher
-      sha256: f6a7e5c4835bb4e3026a04793a4199ca2d14c739ec378fdfe23fc8075d0439f8
+      sha256: e8cc955c97e06df9879140a1fe301f3d493f01b7c62dec7f46834be31d7e9fda
       url: "https://pub.dev"
     source: hosted
-    version: "6.3.2"
+    version: "6.3.3"
   url_launcher_android:
     dependency: transitive
     description:
