@@ -77,7 +77,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   var _documentGeneration = 0;
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
+  bool _useOcr = true;
   bool _isGeneratingPdf = false;
+  bool _isSharingPdf = false;
   bool _isCancellingPdf = false;
   double? _pdfProgress;
   _PdfExporter? _pdfExporter;
@@ -267,7 +269,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           children: [
             Image.asset('assets/icon/icon.png', width: 40, height: 40),
             const SizedBox(width: 12),
-            const Text('FOSScanner'),
+            const Expanded(child: Text('FOSScanner')),
           ],
         ),
         content: SingleChildScrollView(
@@ -289,26 +291,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               const SizedBox(height: 20),
               const Divider(height: 1),
               const SizedBox(height: 12),
-              InkWell(
-                onTap: _openSourceCode,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.code,
-                      size: 18,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'View source code',
-                      style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ],
-                ),
+              TextButton.icon(
+                onPressed: _openSourceCode,
+                icon: const Icon(Icons.code),
+                label: const Text('View source code'),
               ),
               const SizedBox(height: 4),
               Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
@@ -934,9 +920,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<({Uint8List bytes, bool searchable})?> _createPdf(
-    List<ScannedPage> pages,
-  ) async {
-    if (_ocrSupported) {
+    List<ScannedPage> pages, {
+    required bool useOcr,
+  }) async {
+    if (useOcr) {
       try {
         return (bytes: await _createSearchablePdf(pages), searchable: true);
       } catch (error) {
@@ -949,7 +936,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
     if (!mounted) return null;
     setState(() {
-      // The user has confirmed a fresh export after an OCR failure.
+      // A confirmed fallback starts fresh after an OCR failure.
       _isCancellingPdf = false;
       _pdfExporter = _PdfExporter.imageOnly;
       _pdfProgress = 0;
@@ -966,15 +953,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     ScaffoldMessenger.of(context).clearSnackBars();
     final pages = List<ScannedPage>.of(_pages, growable: false);
     final exportedRevision = _draftRevision;
+    final useOcr = _ocrSupported && _useOcr;
     // Capture the required iPad popover anchor before awaiting worker results.
     final shareOrigin = _shareOrigin;
 
     setState(() {
       _isGeneratingPdf = true;
+      _isSharingPdf = false;
       _isCancellingPdf = false;
-      _pdfExporter = _ocrSupported
-          ? _PdfExporter.searchable
-          : _PdfExporter.imageOnly;
+      _pdfExporter = useOcr ? _PdfExporter.searchable : _PdfExporter.imageOnly;
       _pdfProgress = 0;
     });
 
@@ -987,10 +974,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         if (_isCancellingPdf) {
           throw const image_pdf.ImagePdfCancelledException();
         }
-        return _createPdf(pages);
+        return _createPdf(pages, useOcr: useOcr);
       });
       if (pdf == null || !mounted || _isCancellingPdf) return;
-      setState(() => _pdfProgress = null);
+      setState(() {
+        _pdfProgress = null;
+        _isSharingPdf = true;
+      });
       final prefix = pdf.searchable ? 'FOSScanner_searchable' : 'FOSScanner';
       final result = await _sharePdfBytes(
         pdf.bytes,
@@ -1015,6 +1005,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (mounted) {
         setState(() {
           _isGeneratingPdf = false;
+          _isSharingPdf = false;
           _isCancellingPdf = false;
           _pdfExporter = null;
           _pdfProgress = null;
@@ -1024,6 +1015,142 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (shared && mounted && !_isClearingDraft && _pages.isNotEmpty) {
       await _askWhetherToKeepDraft(exportedRevision);
     }
+  }
+
+  Future<void> _showExportOptions() async {
+    if (!_canExport || !_ocrSupported) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) => SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'PDF export options',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Searchable text'),
+                  subtitle: Text(
+                    _useOcr
+                        ? 'Recognize text so you can search and select it in the PDF.'
+                        : 'Image-only PDF without text recognition.',
+                  ),
+                  value: _useOcr,
+                  onChanged: (value) {
+                    if (!mounted || !_canExport || !sheetContext.mounted) {
+                      return;
+                    }
+                    setState(() => _useOcr = value);
+                    updateSheet(() {});
+                  },
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Text recognition supports Latin-script text and runs '
+                  'entirely on your device. Your scans stay private.',
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String get _exportStatus {
+    if (_isClearingDraft) return 'Clearing draft...';
+    if (_isCancellingPdf) return 'Cancelling PDF...';
+    if (_isSharingPdf) return 'Opening share sheet...';
+    if (_pdfProgress == null) return 'Preparing PDF...';
+    return 'Generating PDF ${(_pdfProgress! * 100).round()}%';
+  }
+
+  Widget _buildExportBar() {
+    final busy = _isGeneratingPdf || _isClearingDraft;
+    return SafeArea(
+      key: const Key('pdf_export_bar'),
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Row(
+            children: busy
+                ? [
+                    SizedBox.square(
+                      dimension: 24,
+                      child: CircularProgressIndicator(
+                        value: _isCancellingPdf ? null : _pdfProgress,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(_exportStatus),
+                      ),
+                    ),
+                    if (_isGeneratingPdf && _pdfProgress != null)
+                      TextButton(
+                        onPressed: _isCancellingPdf
+                            ? null
+                            : _cancelPdfGeneration,
+                        child: const Text('Cancel'),
+                      ),
+                  ]
+                : [
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: _shareButtonKey,
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        onPressed: _canExport ? _generateAndSharePdf : null,
+                        icon: const Icon(Icons.picture_as_pdf),
+                        label: Text(
+                          'Export PDF (${_pages.length} '
+                          '${_pages.length == 1 ? 'page' : 'pages'})',
+                        ),
+                      ),
+                    ),
+                    if (_ocrSupported) ...[
+                      const SizedBox(width: 8),
+                      Semantics(
+                        value: _useOcr
+                            ? 'Searchable text enabled'
+                            : 'Image-only PDF',
+                        child: IconButton.filledTonal(
+                          onPressed: _canExport ? _showExportOptions : null,
+                          tooltip: 'PDF export options',
+                          icon: const Icon(Icons.tune),
+                        ),
+                      ),
+                    ],
+                  ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -1064,13 +1191,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   : _clearPages,
               tooltip: 'Clear all',
             ),
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            onSelected: (_) => _showAppInfo(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'about', child: Text('About FOSScanner')),
+            ],
+          ),
         ],
       ),
       body: _pages.isEmpty
           ? Center(
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(32.0),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (_isRestoringDraft)
@@ -1081,7 +1216,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                             ? Icons.camera_alt
                             : Icons.photo_library_outlined,
                         size: 80,
-                        color: Colors.grey,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     const SizedBox(height: 16),
                     Text(
@@ -1101,14 +1236,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                           ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
                           : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.grey),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
             )
           : GridView.builder(
-              padding: const EdgeInsets.all(8),
+              padding: EdgeInsets.fromLTRB(8, 8, 8, _cameraSupported ? 96 : 8),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 crossAxisSpacing: 8,
@@ -1124,53 +1261,44 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     onTap: _isDocumentInteractionLocked
                         ? null
                         : () => _openPage(index),
-                    child: Stack(
-                      fit: StackFit.expand,
+                    child: Column(
                       children: [
-                        Image(
-                          image: ResizeImage(
-                            MemoryImage(page.processedBytes),
-                            width: _thumbnailCacheWidth,
-                            height: _thumbnailCacheWidth,
-                            policy: ResizeImagePolicy.fit,
-                          ),
-                          fit: BoxFit.cover,
-                        ),
-                        Positioned(
-                          top: 8,
-                          left: 8,
-                          child: CircleAvatar(
-                            radius: 14,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primary,
-                            child: Text(
-                              '${index + 1}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white,
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                            child: Image(
+                              image: ResizeImage(
+                                MemoryImage(page.processedBytes),
+                                width: _thumbnailCacheWidth,
+                                height: _thumbnailCacheWidth,
+                                policy: ResizeImagePolicy.fit,
                               ),
+                              fit: BoxFit.contain,
                             ),
                           ),
                         ),
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
-                            ),
-                            child: IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12, right: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    'Page ${index + 1}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.labelLarge,
+                                  ),
+                                ),
                               ),
-                              tooltip: 'Delete page ${index + 1}',
-                              onPressed: _isDocumentInteractionLocked
-                                  ? null
-                                  : () => _removePage(index),
-                            ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: 'Delete page ${index + 1}',
+                                onPressed: _isDocumentInteractionLocked
+                                    ? null
+                                    : () => _removePage(index),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -1246,63 +1374,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               child: const Icon(Icons.camera_alt),
             )
           : null,
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_pages.isNotEmpty) ...[
-                ElevatedButton.icon(
-                  key: _shareButtonKey,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  onPressed: _isClearingDraft
-                      ? null
-                      : _isGeneratingPdf
-                      ? (_pdfProgress != null && !_isCancellingPdf
-                            ? _cancelPdfGeneration
-                            : null)
-                      : _canExport
-                      ? _generateAndSharePdf
-                      : null,
-                  icon: _isGeneratingPdf || _isClearingDraft
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.picture_as_pdf),
-                  label: Text(
-                    _isClearingDraft
-                        ? 'Clearing draft...'
-                        : _isGeneratingPdf
-                        ? _isCancellingPdf
-                              ? 'Cancelling PDF...'
-                              : _pdfProgress == null
-                              ? 'Generating PDF...'
-                              : 'Generating PDF '
-                                    '${(_pdfProgress! * 100).round()}%'
-                        : 'Save as PDF (${_pages.length} pages)',
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-              TextButton(
-                onPressed: _showAppInfo,
-                child: Text(
-                  'About FOSScanner',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      bottomNavigationBar: _pages.isEmpty ? null : _buildExportBar(),
     );
   }
 }

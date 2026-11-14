@@ -21,9 +21,10 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 
 <br>
 
-<img src="docs/screenshots/home-empty.png" width="45%" alt="Empty home screen, ready to scan"> <img src="docs/screenshots/home-pages.png" width="45%" alt="Home screen with three captured pages, ready to export as PDF">
+<img src="docs/screenshots/ui-home-pages.png" width="45%" alt="Current home screen with full-page previews and a compact PDF export bar"> <img src="docs/screenshots/ui-export-options.png" width="45%" alt="PDF export options with searchable text in a separate bottom sheet">
 
-*Captured from the Android build.*
+*Current Flutter widget renders using synthetic documents, not device camera captures.
+[Empty state](docs/screenshots/ui-home-empty.png) · [Dark mode](docs/screenshots/ui-home-pages-dark.png).*
 
 </div>
 
@@ -43,15 +44,18 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 - Import existing photos from your gallery instead of (or alongside)
   capturing new ones
 - Combine captured pages into a single PDF
-- On Android, export a searchable PDF with selectable, copyable text using
-  bundled Latin-script OCR; iOS exports image-only PDFs
-- Share the PDF via the OS share sheet
+- Use **Export PDF** to open the OS share sheet. On Android, open **PDF export
+  options** beside the export button to turn **Searchable text** on or off.
+  Recognition uses bundled Latin-script OCR entirely on-device; turning it off
+  exports an image-only PDF. Searchable text defaults to on, and the choice is
+  kept while the screen is open. iOS exports image-only PDFs
+- PDF generation shows progress with an explicit **Cancel** action
 - Document editing, image intake, and barcode scanning pause while a PDF is
   generated or shared to avoid overlapping memory-heavy jobs. Starting an
   export dismisses any pending page-deletion Undo.
 - Material 3 UI that follows the system's light/dark theme
 - No accounts, no cloud storage, no tracking
-- An in-app About screen (the ⓘ icon) shows the exact running version and
+- **More options → About FOSScanner** shows the exact running version and
   links straight to this source repo
 
 FOSScanner supports Android and iOS. Edge detection, perspective correction,

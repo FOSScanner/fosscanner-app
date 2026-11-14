@@ -240,7 +240,7 @@ void main() {
 
     // No captured pages yet, so there's nothing to clear or export.
     expect(find.byIcon(Icons.clear_all), findsNothing);
-    expect(find.text('Save as PDF'), findsNothing);
+    expect(find.textContaining('Export PDF'), findsNothing);
   });
 
   testWidgets(
@@ -945,7 +945,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save as PDF (1 pages)'));
+    expect(find.byTooltip('PDF export options'), findsNothing);
+    await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
     final params = sharePlatform.lastParams;
@@ -954,6 +955,74 @@ void main() {
     expect(
       params.fileNameOverrides!.single,
       matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+    );
+  });
+
+  testWidgets('turning OCR off bypasses recognition on a supported platform', (
+    tester,
+  ) async {
+    const channel = MethodChannel('com.fosscanner.app/ocr');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var ocrCalls = 0;
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      ocrCalls++;
+      throw PlatformException(code: 'unexpected_ocr');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final sharePlatform = _FakeSharePlatform();
+    final imageBytes = File('assets/icon/icon.png').readAsBytesSync();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: [
+            ScannedPage(
+              originalBytes: imageBytes,
+              processedBytes: imageBytes,
+              corners: const [],
+            ),
+          ],
+          searchablePdfEnabled: true,
+          sharePlus: SharePlus.custom(sharePlatform),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('PDF export options'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isTrue,
+    );
+    await tester.tap(find.text('Searchable text'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isFalse,
+    );
+    expect(
+      find.text('Image-only PDF without text recognition.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.pump();
+    expect(find.byTooltip('PDF export options'), findsNothing);
+    await pumpUntil(tester, () => sharePlatform.lastParams != null);
+    expect(ocrCalls, 0);
+    expect(find.text('Searchable export failed'), findsNothing);
+    expect(
+      sharePlatform.lastParams!.fileNameOverrides!.single,
+      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+    );
+    await tester.tap(find.text('Keep draft'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('PDF export options'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isFalse,
     );
   });
 
@@ -1013,9 +1082,20 @@ void main() {
             ),
           )
           .onPressed!;
-      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
-      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await tester.tap(find.byTooltip('PDF export options'));
+      await tester.pumpAndSettle();
+      final staleOcrChange = tester
+          .widget<SwitchListTile>(find.byType(SwitchListTile))
+          .onChanged!;
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      final expectedAnchor = tester.getRect(find.byType(FilledButton));
+      await tester.tap(find.text('Export PDF (1 page)'));
       await pumpUntil(tester, () => started.isCompleted, settle: false);
+      expect(find.byType(SwitchListTile), findsNothing);
+      expect(find.byTooltip('PDF export options'), findsNothing);
+      staleOcrChange(false);
+      await tester.pump();
       expect(
         tester
             .widget<IconButton>(
@@ -1029,7 +1109,7 @@ void main() {
       );
       staleDelete();
       await tester.pump();
-      expect(find.byType(ElevatedButton), findsOneWidget);
+      expect(find.text('Generating PDF 0%'), findsOneWidget);
 
       finish.complete();
       await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
@@ -1042,6 +1122,12 @@ void main() {
         matches(RegExp(r'^FOSScanner_searchable_\d+\.pdf$')),
       );
       expect(params.text, 'Searchable document scanned with FOSScanner');
+      await tester.tap(find.byTooltip('PDF export options'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isTrue,
+      );
     },
   );
 
@@ -1067,15 +1153,18 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.tap(find.text('Export PDF (1 page)'));
     await tester.pump();
     expect(find.text('Searchable export failed'), findsOneWidget);
     expect(find.text('Share image-only PDF'), findsOneWidget);
     // The OCR job has ended; the fallback cannot cancel a native OCR job.
-    final exportButton = tester.widget<ElevatedButton>(
-      find.byType(ElevatedButton, skipOffstage: false).first,
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
+        matching: find.byType(TextButton, skipOffstage: false),
+      ),
+      findsNothing,
     );
-    expect(exportButton.onPressed, isNull);
 
     await tester.tap(find.text('Share image-only PDF'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
