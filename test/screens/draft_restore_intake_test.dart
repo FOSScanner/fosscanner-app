@@ -151,7 +151,7 @@ void main() {
 
         store.loaded.complete([savedPage()]);
         await tester.pumpAndSettle();
-        expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+        expect(find.text('Export PDF (1 page)'), findsOneWidget);
         expect(find.text('Restoring draft...'), findsNothing);
         await tester.tap(find.byTooltip(tooltip));
         await tester.pumpAndSettle();
@@ -194,7 +194,7 @@ void main() {
       await tester.tap(find.text('Confirm'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
       expect(store.saves.single, hasLength(2));
       expect(store.saves.single.first, same(restored));
       expect(store.saves.single.last.originalBytes, orderedEquals(imageBytes));

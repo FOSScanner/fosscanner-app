@@ -210,7 +210,7 @@ void main() {
           )
           .onTap!;
 
-      await tester.tap(find.text('Save as PDF (2 pages)'));
+      await tester.tap(find.text('Export PDF (2 pages)'));
       await tester.pump();
       for (final tooltip in [
         'Import from gallery',
@@ -248,7 +248,7 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsNothing);
 
       await pumpUntil(tester, () => share.calls == 1);
-      expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
       expect(button(tester, 'Import from gallery').onPressed, isNotNull);
       expect(button(tester, 'Delete page 1').onPressed, isNotNull);
     },
@@ -264,7 +264,7 @@ void main() {
     final undo = tester
         .widget<SnackBarAction>(find.byType(SnackBarAction))
         .onPressed;
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     await tester.pump();
     undo();
     await tester.pump();
@@ -273,7 +273,7 @@ void main() {
     undo();
     await tester.pump();
     expect(store.saveCalls, 1);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     expect(find.byType(SnackBarAction), findsNothing);
   });
 
@@ -282,13 +282,13 @@ void main() {
   ) async {
     await pumpHome(tester);
     final export = tester
-        .widget<ElevatedButton>(find.byType(ElevatedButton))
+        .widget<FilledButton>(find.byType(FilledButton))
         .onPressed!;
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pump();
     expect(picker.calls, 1);
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
     );
     export();
@@ -299,7 +299,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
     );
   });
@@ -310,7 +310,7 @@ void main() {
     operations.pendingPreview = Completer<Map<PageFilter, Uint8List>>();
     await pumpHome(tester);
     final export = tester
-        .widget<ElevatedButton>(find.byType(ElevatedButton))
+        .widget<FilledButton>(find.byType(FilledButton))
         .onPressed!;
     await editFirstPage(tester);
     expect(operations.previewCalls, 1);
@@ -319,7 +319,7 @@ void main() {
     expect(share.calls, 0);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     await tester.pump();
     expect(find.text('Generating PDF 0%'), findsOneWidget);
     expect(share.calls, 0);
@@ -338,9 +338,9 @@ void main() {
     await editFirstPage(tester);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     await tester.pump();
-    await tester.tap(find.byType(ElevatedButton));
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pump();
     operations.pendingPreview!.complete({
       for (final filter in PageFilter.values) filter: imageBytes,
@@ -354,7 +354,7 @@ void main() {
   testWidgets('share failure releases admission', (tester) async {
     share.error = StateError('injected share failure');
     await pumpHome(tester);
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     await pumpUntilFound(
       tester,
       find.text('Could not generate or share the PDF.'),

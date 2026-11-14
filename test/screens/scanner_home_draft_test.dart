@@ -164,7 +164,7 @@ void main() {
     completer.complete(restored);
     await tester.pump();
 
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     expect(find.byTooltip('Delete page 1'), findsOneWidget);
     expect(find.byTooltip('Delete page 2'), findsOneWidget);
     expect(store.saves, isEmpty);
@@ -295,7 +295,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Clear all pages?'), findsOneWidget);
     expect(store.clearCalls, 0);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
@@ -417,7 +417,7 @@ void main() {
     await tester.pump();
 
     expect(store.clearCalls, 1);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     expect(find.text('Could not clear the saved draft.'), findsOneWidget);
     expect(find.text('Clearing draft...'), findsNothing);
     expect(iconButton(tester, 'Delete page 1').onPressed, isNotNull);
@@ -436,7 +436,7 @@ void main() {
       sharePlus: SharePlus.custom(sharePlatform),
     );
 
-    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntilFound(
       tester,
       find.text('Could not generate or share the PDF.'),
@@ -465,10 +465,13 @@ void main() {
       sharePlus: SharePlus.custom(platform),
     );
     final staleDelete = iconButton(tester, 'Delete page 2').onPressed!;
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     // The share is still parked on its Completer here, so the export spinner
     // keeps scheduling frames and nothing can settle yet.
     await pumpUntil(tester, () => platform.calls == 1, settle: false);
+    expect(find.text('Opening share sheet...'), findsOneWidget);
+    expect(find.textContaining('Generating PDF'), findsNothing);
+    expect(find.widgetWithText(TextButton, 'Cancel'), findsNothing);
     expect(iconButton(tester, 'Delete page 2').onPressed, isNull);
     staleDelete();
     await tester.pump();
@@ -480,7 +483,7 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
     await tester.pumpAndSettle();
     expect(store.clearCalls, 0);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     staleDelete();
     await tester.pump();
     expect(store.saves.last, orderedEquals([first]));
@@ -497,7 +500,7 @@ void main() {
       sharePlus: SharePlus.custom(_SharePlatform()),
     );
     final pendingDelete = iconButton(tester, 'Delete page 2').onPressed!;
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     await pumpUntilFound(tester, find.text('Keep this draft?'));
     expect(find.text('Keep this draft?'), findsOneWidget);
 
@@ -508,7 +511,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.clearCalls, 0);
-    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (1 page)'), findsOneWidget);
   });
 
   testWidgets('successful share keeps the draft unless clear is chosen', (
@@ -523,13 +526,13 @@ void main() {
       sharePlus: SharePlus.custom(sharePlatform),
     );
 
-    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntilFound(tester, find.text('Keep this draft?'));
     expect(find.text('Keep this draft?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
     await tester.pumpAndSettle();
     expect(keepStore.clearCalls, 0);
-    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (1 page)'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     final clearStore = _DraftStore();
@@ -539,7 +542,7 @@ void main() {
       pages: [page(2)],
       sharePlus: SharePlus.custom(sharePlatform),
     );
-    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntilFound(tester, find.text('Keep this draft?'));
     await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
     await tester.pump();
