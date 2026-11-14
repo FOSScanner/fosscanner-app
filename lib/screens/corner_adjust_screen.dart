@@ -34,6 +34,8 @@ const _filterLabels = {
 
 enum _Step { corners, filter }
 
+enum _PreviewStatus { pending, updating, ready, failed }
+
 /// Post-capture review, in two steps:
 ///
 /// 1. Adjust corners on the raw photo (pre-filled from auto-detection when
@@ -95,8 +97,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   // _selectedFilter], recomputed on rotate/slider-release/filter-change
   // rather than baked into _filterPreviews (which only need to answer
   // "what does each filter choice look like", not track these extras).
+  // Retain the last successful result; status, not the presence of bytes,
+  // determines whether the current settings can safely be confirmed.
   Uint8List? _finalPreviewBytes;
-  bool _isGeneratingFinalPreview = false;
+  _PreviewStatus _previewStatus = _PreviewStatus.pending;
   int _finalPreviewGeneration = 0;
 
   @override
@@ -190,9 +194,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     _finalPreviewGeneration++;
     setState(() {
       _isGeneratingPreviews = true;
-      _isGeneratingFinalPreview = false;
+      _previewStatus = _PreviewStatus.pending;
       _filterPreviews = null;
-      _finalPreviewBytes = null;
     });
 
     // Do not let an immediately completing worker erase the progress state
@@ -244,16 +247,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   /// selected filter's cached preview. This still decodes and transforms an
   /// image, so the default operations run it outside the UI isolate.
   Future<void> _updateFinalPreview() async {
+    if (!mounted || _isProcessing) return;
     final base = _filterPreviews?[_selectedFilter];
-    if (base == null || !mounted) return;
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
     final contrast = _contrast;
     final generation = ++_finalPreviewGeneration;
     setState(() {
-      _isGeneratingFinalPreview = true;
-      _finalPreviewBytes = null;
+      _previewStatus = base == null
+          ? _PreviewStatus.failed
+          : _PreviewStatus.updating;
     });
+    if (base == null) return;
 
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || generation != _finalPreviewGeneration) return;
@@ -275,12 +280,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       }
       setState(() {
         _finalPreviewBytes = queuedPreview.value!;
-        _isGeneratingFinalPreview = false;
+        _previewStatus = _PreviewStatus.ready;
       });
     } catch (_) {
       if (!mounted || generation != _finalPreviewGeneration) return;
-      // This is preview-only; Confirm recomputes from scratch if it fails.
-      setState(() => _isGeneratingFinalPreview = false);
+      setState(() => _previewStatus = _PreviewStatus.failed);
     }
   }
 
@@ -315,9 +319,16 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
   }
 
+  bool get _canConfirm =>
+      _step == _Step.filter &&
+      !_isProcessing &&
+      !_isGeneratingPreviews &&
+      _previewStatus == _PreviewStatus.ready &&
+      _finalPreviewBytes != null;
+
   Future<void> _confirm() async {
     final corners = _corners;
-    if (corners == null || _isProcessing) return;
+    if (corners == null || !_canConfirm) return;
     final filter = _selectedFilter;
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
@@ -328,7 +339,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     setState(() {
       _isProcessing = true;
       _isGeneratingPreviews = false;
-      _isGeneratingFinalPreview = false;
     });
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
@@ -366,6 +376,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   void _rotate() {
+    if (!mounted || _isProcessing) return;
     setState(() => _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4);
     unawaited(_updateFinalPreview());
   }
@@ -479,8 +490,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   );
 
   Widget _buildFilterStep(BuildContext context) {
-    final previewBytes =
-        _finalPreviewBytes ?? _filterPreviews?[_selectedFilter];
+    final previewBytes = _finalPreviewBytes;
     return LayoutBuilder(
       builder: (context, constraints) {
         final useScrollableLayout =
@@ -548,6 +558,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   Widget _filterPreview(Uint8List? previewBytes) => Padding(
+    key: const Key('adjusted_page_preview'),
     padding: const EdgeInsets.all(16),
     child: Stack(
       fit: StackFit.expand,
@@ -558,8 +569,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             fit: BoxFit.contain,
             maxDimension: _fullPreviewDecodeSize,
           ),
-        if (previewBytes == null || _isGeneratingFinalPreview)
-          const Center(child: CircularProgressIndicator()),
+        if (previewBytes == null)
+          Center(
+            child: _previewStatus == _PreviewStatus.updating
+                ? const CircularProgressIndicator()
+                : const Icon(Icons.image_not_supported_outlined, size: 48),
+          ),
       ],
     ),
   );
@@ -582,7 +597,16 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             max: max,
             onChanged: _isProcessing
                 ? null
-                : (newValue) => setState(() => onChanged(newValue)),
+                : (newValue) {
+                    if (!mounted || _isProcessing) return;
+                    setState(() {
+                      onChanged(newValue);
+                      // Invalidate in-flight work immediately, not only when
+                      // the slider is released, so it cannot mark a drag ready.
+                      _finalPreviewGeneration++;
+                      _previewStatus = _PreviewStatus.pending;
+                    });
+                  },
             onChangeEnd: _isProcessing
                 ? null
                 : (_) => unawaited(_updateFinalPreview()),
@@ -605,13 +629,44 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         ),
       );
 
+  Widget _previewFeedback() {
+    final message = switch (_previewStatus) {
+      _PreviewStatus.pending => 'Release the slider to update the preview.',
+      _PreviewStatus.updating =>
+        _finalPreviewBytes == null
+            ? 'Updating preview...'
+            : 'Updating preview. Previous result shown.',
+      _PreviewStatus.failed =>
+        _finalPreviewBytes == null
+            ? 'Preview unavailable. Retry to review this page.'
+            : 'Preview could not be updated. Previous result shown.',
+      _PreviewStatus.ready => '',
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(liveRegion: true, child: Text(message)),
+        if (_previewStatus == _PreviewStatus.failed)
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: _isProcessing ? null : _updateFinalPreview,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry preview'),
+            ),
+          ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
   Widget _filterActions({required bool scrollable}) {
     final back = OutlinedButton(
       onPressed: _isProcessing ? null : _leaveFilterStep,
       child: const Text('Back'),
     );
     final confirm = FilledButton(
-      onPressed: _isProcessing ? null : _confirm,
+      onPressed: _canConfirm ? _confirm : null,
       child: _isProcessing
           ? const SizedBox(
               width: 20,
@@ -624,18 +679,26 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       top: false,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: scrollable
-            ? Column(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_previewStatus != _PreviewStatus.ready) _previewFeedback(),
+            if (scrollable)
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [back, const SizedBox(height: 8), confirm],
               )
-            : Row(
+            else
+              Row(
                 children: [
                   Expanded(child: back),
                   const SizedBox(width: 16),
                   Expanded(child: confirm),
                 ],
               ),
+          ],
+        ),
       ),
     );
   }
@@ -656,6 +719,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           onTap: _isProcessing
               ? null
               : () {
+                  if (!mounted || _isProcessing) return;
                   setState(() => _selectedFilter = filter);
                   unawaited(_updateFinalPreview());
                 },

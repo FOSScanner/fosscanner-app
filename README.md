@@ -34,6 +34,8 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
   (dewarping) into a flat, upright page
 - Scan filters — Original, Auto-Enhance, Grayscale, and Black & White —
   with live thumbnail previews before you confirm
+- Keep the last successful preview while adjustments update; retry a failed
+  preview before confirming the page
 - Tap a saved page for a zoomable preview with its current filters and
   adjustments; choose Edit to make changes
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
