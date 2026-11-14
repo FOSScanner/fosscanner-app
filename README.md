@@ -55,6 +55,9 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
   exports an image-only PDF. Searchable text defaults to on, and the choice is
   kept while the screen is open. iOS exports image-only PDFs
 - PDF generation shows progress with an explicit **Cancel** action
+- Inspect complete, selectable QR/barcode results before opening HTTP/HTTPS
+  links; review the destination hostname separately and copy any scanned text
+
 - Document editing, image intake, and barcode scanning pause while a PDF is
   generated or shared to avoid overlapping memory-heavy jobs. Starting an
   export dismisses any pending page-deletion Undo.
