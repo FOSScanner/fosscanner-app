@@ -31,7 +31,8 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 
 - Real document scanning, not just a photo: automatic edge detection with
   a draggable corner overlay to fine-tune it, then perspective correction
-  (dewarping) into a flat, upright page
+  (dewarping) into a flat, upright page. If no page edges are detected, the
+  full image remains selected for manual adjustment instead of trimming it
 - Scan filters — Original, Auto-Enhance, Grayscale, and Black & White —
   with live thumbnail previews before you confirm
 - Tap a saved page for a zoomable preview with its current filters and
