@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
@@ -18,6 +19,14 @@ Future<Uint8List> _iconBytes() async {
 Map<PageFilter, Uint8List> _previews(Uint8List bytes) => {
   for (final filter in PageFilter.values) filter: bytes,
 };
+
+class _Picker extends ImagePickerPlatform {
+  @override
+  bool supportsImageSource(ImageSource source) => false;
+
+  @override
+  Future<LostDataResponse> getLostData() async => LostDataResponse.empty();
+}
 
 class _ControlledOperations implements CornerAdjustOperations {
   _ControlledOperations({
@@ -128,6 +137,13 @@ Future<void> _waitForFinalStart(
 }
 
 void main() {
+  late ImagePickerPlatform originalPicker;
+  setUp(() {
+    originalPicker = ImagePickerPlatform.instance;
+    ImagePickerPlatform.instance = _Picker();
+  });
+  tearDown(() => ImagePickerPlatform.instance = originalPicker);
+
   testWidgets('uses injectable corner detection before generating previews', (
     tester,
   ) async {
@@ -322,10 +338,16 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(Card).at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit page'));
     await _waitForPreviewStart(tester, operations, 0);
+    // Finish the route transitions while leaving the worker pending.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.byType(Card).at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit page'));
     await tester.pump();
     await tester.pump();
 
@@ -340,6 +362,7 @@ void main() {
     expect(operations.maxConcurrentWorkers, 1);
     operations.previewResults[1].complete(_previews(bytes));
     await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pageBack();
     await tester.pumpAndSettle();
   });

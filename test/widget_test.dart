@@ -12,6 +12,7 @@ import 'package:share_plus_platform_interface/share_plus_platform_interface.dart
 import 'package:fosscanner/main.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import 'package:fosscanner/screens/page_preview_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
@@ -209,11 +210,17 @@ class _ThrowingXFile extends XFile {
   }
 }
 
+Uint8List _imageWithRetainedStorage(Uint8List image, int retainedBytes) {
+  final storage = Uint8List(retainedBytes)..setRange(0, image.length, image);
+  return Uint8List.sublistView(storage, 0, image.length);
+}
+
 void main() {
   late ImagePickerPlatform originalPlatform;
 
   setUp(() {
     originalPlatform = ImagePickerPlatform.instance;
+    ImagePickerPlatform.instance = _FakeImagePickerPlatform();
   });
 
   tearDown(() {
@@ -333,7 +340,10 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final retainedBytes = Uint8List(3 * 1024 * 1024);
+    final retainedBytes = _imageWithRetainedStorage(
+      File('assets/icon/icon.png').readAsBytesSync(),
+      85 * 3 * 1024 * 1024,
+    );
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -507,8 +517,7 @@ void main() {
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
-    final retainedBytes = Uint8List(3 * 1024 * 1024)
-      ..setRange(0, icon.length, icon);
+    final retainedBytes = _imageWithRetainedStorage(icon, 85 * 3 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -543,8 +552,7 @@ void main() {
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
-    final retainedBytes = Uint8List(5 * 1024 * 1024)
-      ..setRange(0, icon.length, icon);
+    final retainedBytes = _imageWithRetainedStorage(icon, 50 * 5 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -576,12 +584,102 @@ void main() {
     expect(find.textContaining('Document memory limit reached'), findsNothing);
   });
 
+  testWidgets('page taps preview the saved result and retain edits', (
+    tester,
+  ) async {
+    final original = File('assets/icon/icon.png').readAsBytesSync();
+    final processed = Uint8List.fromList(original);
+    final updated = Uint8List.fromList(original);
+    final page = ScannedPage(
+      originalBytes: original,
+      processedBytes: processed,
+      corners: const [],
+      filter: PageFilter.grayscale,
+      rotationQuarterTurns: 1,
+      brightness: 12,
+      contrast: 1.3,
+    );
+    var metadataReads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: [page],
+          cornerAdjustOperations: const _ImmediateCornerOperations(),
+          sourceImageSizeReader: (_) async {
+            metadataReads++;
+            return const Size(1024, 1024);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Card).first);
+    await tester.pumpAndSettle();
+
+    final image = tester.widget<Image>(
+      find.descendant(
+        of: find.byType(PagePreviewScreen),
+        matching: find.byType(Image),
+      ),
+    );
+    final provider = image.image as ResizeImage;
+    expect(
+      identical((provider.imageProvider as MemoryImage).bytes, processed),
+      isTrue,
+    );
+    expect(provider.width, 2048);
+    expect(provider.height, 2048);
+    expect(provider.policy, ResizeImagePolicy.fit);
+    expect(image.fit, BoxFit.contain);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(metadataReads, 0);
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(metadataReads, 0);
+    await tester.tap(find.byType(Card).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit page'));
+    await tester.pumpAndSettle();
+    final editor = tester.widget<CornerAdjustScreen>(
+      find.byType(CornerAdjustScreen),
+    );
+    expect(metadataReads, 1);
+    expect(identical(editor.originalBytes, original), isTrue);
+    expect(editor.initialFilter, PageFilter.grayscale);
+    expect(editor.initialRotationQuarterTurns, 1);
+    expect(editor.initialBrightness, 12);
+    expect(editor.initialContrast, 1.3);
+    Navigator.of(tester.element(find.byType(CornerAdjustScreen))).pop(
+      ScannedPage(
+        originalBytes: original,
+        processedBytes: updated,
+        corners: const [],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Card).first);
+    await tester.pumpAndSettle();
+    expect(
+      identical(
+        tester
+            .widget<PagePreviewScreen>(find.byType(PagePreviewScreen))
+            .imageBytes,
+        updated,
+      ),
+      isTrue,
+    );
+  });
+
   testWidgets(
-    'initial 20MP-metadata page near the cap cannot open the editor',
+    'initial 20MP-metadata page near the cap can preview but cannot edit',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
-      final sharedRetainedBytes = Uint8List(2 * 1024 * 1024)
-        ..setRange(0, icon.length, icon);
+      final sharedRetainedBytes = _imageWithRetainedStorage(
+        icon,
+        52 * 2 * 1024 * 1024,
+      );
       final page = ScannedPage(
         originalBytes: sharedRetainedBytes,
         corners: const [
@@ -609,6 +707,10 @@ void main() {
       await tester.tap(find.byType(Card).first);
       await tester.pumpAndSettle();
 
+      expect(find.byType(PagePreviewScreen), findsOneWidget);
+      expect(inspectedBytes, isNull);
+      await tester.tap(find.byTooltip('Edit page'));
+      await tester.pumpAndSettle();
       expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
       expect(
         find.text(
@@ -622,7 +724,7 @@ void main() {
   );
 
   testWidgets(
-    'rapid page taps perform one metadata read and open one editor route',
+    'rapid page taps open one preview and edit opens one editor route',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
       final page = ScannedPage(
@@ -652,6 +754,11 @@ void main() {
 
       await tester.tap(card);
       await tester.tap(card);
+      expect(metadataReads, 0);
+      await tester.pumpAndSettle();
+      expect(observer.pushCount, 2);
+      expect(find.byType(PagePreviewScreen), findsOneWidget);
+      await tester.tap(find.byTooltip('Edit page'));
       expect(metadataReads, 1);
 
       await tester.pump();
@@ -667,7 +774,7 @@ void main() {
       metadata.complete(const Size(1024, 1024));
       await tester.pumpAndSettle();
 
-      expect(observer.pushCount, 2);
+      expect(observer.pushCount, 3);
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
       final offstageHomeCard = find
           .descendant(
@@ -717,20 +824,13 @@ void main() {
     const additionalProcessedBytes = 24 * 1024 * 1024;
     final targetRetainedBytes =
         maxRetainedDocumentBytes - icon.length - additionalProcessedBytes;
-    final sharedLength = targetRetainedBytes ~/ pageCount;
-    final sharedBytes = Uint8List(sharedLength);
-    final remainderBytes = Uint8List(
-      targetRetainedBytes - sharedLength * (pageCount - 1),
-    );
-    ScannedPage pageFor(Uint8List bytes) => ScannedPage(
-      originalBytes: bytes,
+    final sharedBytes = _imageWithRetainedStorage(icon, targetRetainedBytes);
+    final retainedPage = ScannedPage(
+      originalBytes: sharedBytes,
       corners: const [],
-      processedBytes: bytes,
+      processedBytes: sharedBytes,
     );
-    final pages = [
-      ...List.filled(pageCount - 1, pageFor(sharedBytes)),
-      pageFor(remainderBytes),
-    ];
+    final pages = List.filled(pageCount, retainedPage);
     final platform = _FakeImagePickerPlatform(
       images: [_SizedXFile('first.png', icon), _SizedXFile('second.png', icon)],
     );
@@ -773,8 +873,7 @@ void main() {
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
-    final retainedBytes = Uint8List(3 * 1024 * 1024)
-      ..setRange(0, icon.length, icon);
+    final retainedBytes = _imageWithRetainedStorage(icon, 85 * 3 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -845,6 +944,7 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save as PDF (1 pages)'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
@@ -858,7 +958,7 @@ void main() {
   });
 
   testWidgets(
-    'keeps the share anchor when the last page is removed during export',
+    'keeps the share anchor while document mutations are blocked during export',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -904,31 +1004,44 @@ void main() {
           ),
         ),
       );
-      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Save as PDF (1 pages)'));
-        await started.future.timeout(const Duration(seconds: 5));
-      });
-      await tester.pump();
-      tester
+      await tester.pumpAndSettle();
+      final staleDelete = tester
           .widget<IconButton>(
             find.ancestor(
               of: find.byTooltip('Delete page 1'),
               matching: find.byType(IconButton),
             ),
           )
-          .onPressed!();
+          .onPressed!;
+      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
+      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await pumpUntil(tester, () => started.isCompleted, settle: false);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.ancestor(
+                of: find.byTooltip('Delete page 1'),
+                matching: find.byType(IconButton),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+      staleDelete();
       await tester.pump();
-      expect(find.byType(ElevatedButton), findsNothing);
+      expect(find.byType(ElevatedButton), findsOneWidget);
 
-      final params = await tester.runAsync(() async {
-        finish.complete();
-        return sharePlatform.shared.future.timeout(const Duration(seconds: 5));
-      });
-      await tester.pumpAndSettle();
+      finish.complete();
+      await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
+      final params = await tester.runAsync(() => sharePlatform.shared.future);
       debugDefaultTargetPlatformOverride = null;
       expect(params, isNotNull);
       expect(params!.sharePositionOrigin, expectedAnchor);
+      expect(
+        params.fileNameOverrides!.single,
+        matches(RegExp(r'^FOSScanner_searchable_\d+\.pdf$')),
+      );
+      expect(params.text, 'Searchable document scanned with FOSScanner');
     },
   );
 
