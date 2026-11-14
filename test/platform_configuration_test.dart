@@ -289,6 +289,7 @@ void main() {
         },
         'softprops/action-gh-release': {
           'v2': '3bb12739c298aeb8a4eeaf626c5b8d85266b0e65',
+          'v3.0.4': '8a0cd651e5b2365bd640854a3fa5dfc70e4875f3',
         },
         'actions/attest-build-provenance': {
           'v3': '43d14bc2b83dec42d39ecae14e916627a18bb661',
