@@ -36,12 +36,12 @@ void main() {
     expect(find.text('first'), findsOneWidget);
     expect(find.text('second'), findsNothing);
     final resultNode = tester.getSemantics(
-      find.bySemanticsLabel('Scanned code result: first'),
+      find.byKey(const Key('barcode_result_semantics')),
     );
     expect(resultNode.getSemanticsData().flagsCollection.isLiveRegion, isTrue);
     expect(find.bySemanticsLabel('Copy scanned result'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Dismiss and keep scanning'));
+    await tester.tap(find.byTooltip('Scan another'));
     await tester.pump();
     emitScan(const BarcodeScanResult(isValid: true, text: 'second'));
     await tester.pump();
