@@ -121,16 +121,19 @@ void main() {
     DraftStore store, {
     List<ScannedPage> pages = const [],
     SharePlus? sharePlus,
-  }) => tester.pumpWidget(
-    MaterialApp(
-      home: ScannerHomePage(
-        initialPages: pages,
-        draftStore: store,
-        sharePlus: sharePlus,
-        searchablePdfEnabled: false,
+  }) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          initialPages: pages,
+          draftStore: store,
+          sharePlus: sharePlus,
+          searchablePdfEnabled: false,
+        ),
       ),
-    ),
-  );
+    );
+    await tester.pump();
+  }
 
   IconButton iconButton(WidgetTester tester, String tooltip) =>
       tester.widget<IconButton>(
@@ -443,7 +446,7 @@ void main() {
     expect(find.textContaining('private share provider details'), findsNothing);
   });
 
-  testWidgets('sharing an older revision never offers to clear newer edits', (
+  testWidgets('sharing locks document mutations until the platform returns', (
     tester,
   ) async {
     final store = _DraftStore();
@@ -461,18 +464,26 @@ void main() {
       pages: [first, page(2)],
       sharePlus: SharePlus.custom(platform),
     );
+    final staleDelete = iconButton(tester, 'Delete page 2').onPressed!;
     await tester.tap(find.text('Save as PDF (2 pages)'));
     // The share is still parked on its Completer here, so the export spinner
     // keeps scheduling frames and nothing can settle yet.
     await pumpUntil(tester, () => platform.calls == 1, settle: false);
-    await tapDelete(tester, 2);
-    expect(store.saves.last, orderedEquals([first]));
+    expect(iconButton(tester, 'Delete page 2').onPressed, isNull);
+    staleDelete();
+    await tester.pump();
+    expect(store.saves, isEmpty);
     share.complete(const ShareResult('shared', ShareResultStatus.success));
     await tester.pumpAndSettle();
 
-    expect(find.text('Keep this draft?'), findsNothing);
+    expect(find.text('Keep this draft?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
+    await tester.pumpAndSettle();
     expect(store.clearCalls, 0);
-    expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    staleDelete();
+    await tester.pump();
+    expect(store.saves.last, orderedEquals([first]));
   });
 
   testWidgets('clear confirmation cannot delete a later draft revision', (

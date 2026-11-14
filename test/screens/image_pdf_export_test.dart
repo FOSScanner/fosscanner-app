@@ -6,9 +6,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:share_plus_platform_interface/share_plus_platform_interface.dart';
 
 import '../support/worker_isolates.dart';
+
+class _Picker extends ImagePickerPlatform {
+  @override
+  bool supportsImageSource(ImageSource source) => false;
+
+  @override
+  Future<LostDataResponse> getLostData() async => LostDataResponse.empty();
+}
 
 class _Share implements SharePlatform {
   Uint8List? output;
@@ -24,11 +33,16 @@ class _Share implements SharePlatform {
 
 void main() {
   late Uint8List input;
+  late ImagePickerPlatform originalPicker;
 
   setUp(() async {
+    originalPicker = ImagePickerPlatform.instance;
+    ImagePickerPlatform.instance = _Picker();
     final data = await rootBundle.load('assets/icon/icon.png');
     input = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   });
+
+  tearDown(() => ImagePickerPlatform.instance = originalPicker);
 
   Future<_Share> pumpHome(WidgetTester tester, int pageCount) async {
     final platform = _Share();
@@ -48,6 +62,7 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
     return platform;
   }
 

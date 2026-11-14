@@ -210,11 +210,17 @@ class _ThrowingXFile extends XFile {
   }
 }
 
+Uint8List _imageWithRetainedStorage(Uint8List image, int retainedBytes) {
+  final storage = Uint8List(retainedBytes)..setRange(0, image.length, image);
+  return Uint8List.sublistView(storage, 0, image.length);
+}
+
 void main() {
   late ImagePickerPlatform originalPlatform;
 
   setUp(() {
     originalPlatform = ImagePickerPlatform.instance;
+    ImagePickerPlatform.instance = _FakeImagePickerPlatform();
   });
 
   tearDown(() {
@@ -334,7 +340,10 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final retainedBytes = Uint8List(3 * 1024 * 1024);
+    final retainedBytes = _imageWithRetainedStorage(
+      File('assets/icon/icon.png').readAsBytesSync(),
+      85 * 3 * 1024 * 1024,
+    );
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -508,8 +517,7 @@ void main() {
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
-    final retainedBytes = Uint8List(3 * 1024 * 1024)
-      ..setRange(0, icon.length, icon);
+    final retainedBytes = _imageWithRetainedStorage(icon, 85 * 3 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -544,8 +552,7 @@ void main() {
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
-    final retainedBytes = Uint8List(5 * 1024 * 1024)
-      ..setRange(0, icon.length, icon);
+    final retainedBytes = _imageWithRetainedStorage(icon, 50 * 5 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -669,8 +676,10 @@ void main() {
     'initial 20MP-metadata page near the cap can preview but cannot edit',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
-      final sharedRetainedBytes = Uint8List(2 * 1024 * 1024)
-        ..setRange(0, icon.length, icon);
+      final sharedRetainedBytes = _imageWithRetainedStorage(
+        icon,
+        52 * 2 * 1024 * 1024,
+      );
       final page = ScannedPage(
         originalBytes: sharedRetainedBytes,
         corners: const [
@@ -815,20 +824,13 @@ void main() {
     const additionalProcessedBytes = 24 * 1024 * 1024;
     final targetRetainedBytes =
         maxRetainedDocumentBytes - icon.length - additionalProcessedBytes;
-    final sharedLength = targetRetainedBytes ~/ pageCount;
-    final sharedBytes = Uint8List(sharedLength);
-    final remainderBytes = Uint8List(
-      targetRetainedBytes - sharedLength * (pageCount - 1),
-    );
-    ScannedPage pageFor(Uint8List bytes) => ScannedPage(
-      originalBytes: bytes,
+    final sharedBytes = _imageWithRetainedStorage(icon, targetRetainedBytes);
+    final retainedPage = ScannedPage(
+      originalBytes: sharedBytes,
       corners: const [],
-      processedBytes: bytes,
+      processedBytes: sharedBytes,
     );
-    final pages = [
-      ...List.filled(pageCount - 1, pageFor(sharedBytes)),
-      pageFor(remainderBytes),
-    ];
+    final pages = List.filled(pageCount, retainedPage);
     final platform = _FakeImagePickerPlatform(
       images: [_SizedXFile('first.png', icon), _SizedXFile('second.png', icon)],
     );
@@ -871,8 +873,7 @@ void main() {
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
-    final retainedBytes = Uint8List(3 * 1024 * 1024)
-      ..setRange(0, icon.length, icon);
+    final retainedBytes = _imageWithRetainedStorage(icon, 85 * 3 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
       corners: const [],
@@ -943,6 +944,7 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save as PDF (1 pages)'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
@@ -956,7 +958,7 @@ void main() {
   });
 
   testWidgets(
-    'keeps the share anchor when the last page is removed during export',
+    'keeps the share anchor while document mutations are blocked during export',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -1002,28 +1004,36 @@ void main() {
           ),
         ),
       );
-      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Save as PDF (1 pages)'));
-        await started.future.timeout(const Duration(seconds: 5));
-      });
-      await tester.pump();
-      tester
+      await tester.pumpAndSettle();
+      final staleDelete = tester
           .widget<IconButton>(
             find.ancestor(
               of: find.byTooltip('Delete page 1'),
               matching: find.byType(IconButton),
             ),
           )
-          .onPressed!();
+          .onPressed!;
+      final expectedAnchor = tester.getRect(find.byType(ElevatedButton));
+      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await pumpUntil(tester, () => started.isCompleted, settle: false);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.ancestor(
+                of: find.byTooltip('Delete page 1'),
+                matching: find.byType(IconButton),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+      staleDelete();
       await tester.pump();
-      expect(find.byType(ElevatedButton), findsNothing);
+      expect(find.byType(ElevatedButton), findsOneWidget);
 
-      final params = await tester.runAsync(() async {
-        finish.complete();
-        return sharePlatform.shared.future.timeout(const Duration(seconds: 5));
-      });
-      await tester.pumpAndSettle();
+      finish.complete();
+      await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
+      final params = await tester.runAsync(() => sharePlatform.shared.future);
       debugDefaultTargetPlatformOverride = null;
       expect(params, isNotNull);
       expect(params!.sharePositionOrigin, expectedAnchor);

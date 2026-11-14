@@ -102,6 +102,8 @@ void main() {
       ),
     );
 
+    // Startup lost-picker recovery must release the document interaction lock.
+    await tester.pump();
     final node = tester.getSemantics(
       find.byKey(const ValueKey('page_semantics_1')),
     );
