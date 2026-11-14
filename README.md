@@ -16,8 +16,8 @@ PDF — all on-device. No accounts, no cloud, no tracking.
 </a>
 
 Grab `app-arm64-v8a-release.apk` from the release's assets — that's the
-right build for virtually every phone from the last ~7 years. Prefer a
-32-bit or x86 device? Use `armeabi-v7a` or `x86_64` instead.
+right build for virtually every phone from the last ~7 years.
+For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 
 <br>
 
@@ -34,6 +34,8 @@ right build for virtually every phone from the last ~7 years. Prefer a
   (dewarping) into a flat, upright page
 - Scan filters — Original, Auto-Enhance, Grayscale, and Black & White —
   with live thumbnail previews before you confirm
+- Tap a saved page for a zoomable preview with its current filters and
+  adjustments; choose Edit to make changes
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
   and contrast) without re-scanning
 - Capture multiple pages in sequence and reorder them with drag-and-drop
@@ -92,7 +94,7 @@ flutter run
 |---|---|
 | `flutter analyze` | Static analysis / lint |
 | `flutter test` | Run the test suite |
-| `flutter build apk --release --split-per-abi` | Build signed, per-ABI release APKs (requires `android/key.properties`) |
+| `flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64` | Build signed ARMv7 and ARM64 release APKs (requires `android/key.properties`) |
 | `flutter build ios --no-codesign` | Build the iOS app (on macOS) |
 
 ### Running with Docker
@@ -105,9 +107,16 @@ slower there. Native arm64 Linux Docker engines need amd64 emulation (for
 example, binfmt/QEMU) for the APK service:
 
 ```bash
-# Debug Android APKs (one per ABI), output to ./docker-output/
+# Debug Android APKs (ARMv7 and ARM64), output to ./docker-output/
 docker compose run --rm build-apk
 ```
+
+The build container is limited to 4 GiB of memory (with no additional swap)
+and two CPUs. Gradle uses at most two workers and a 2 GiB heap; the OpenCV hook
+uses at most two parallel jobs, configured in `pubspec.yaml` (also for local
+builds and tests). Leave at least 4 GiB available before
+starting a build. These limits contain build failures inside the container;
+very large builds may need more memory to finish.
 
 ## Contributing
 
