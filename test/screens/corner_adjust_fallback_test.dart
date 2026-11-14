@@ -98,6 +98,7 @@ void main() {
     _Operations operations, {
     List<Offset>? initialCorners,
     double textScale = 1,
+    bool isBatchImport = false,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -109,6 +110,8 @@ void main() {
         ),
         home: CornerAdjustScreen(
           originalBytes: operations.bytes,
+          source: isBatchImport ? PageReviewSource.gallery : null,
+          isBatchImport: isBatchImport,
           initialCorners: initialCorners,
           operations: operations,
         ),
@@ -274,6 +277,38 @@ void main() {
       expect(find.text('Next').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+  }
+
+  for (final size in [const Size(320, 568), const Size(640, 300)]) {
+    testWidgets(
+      'combined batch and fallback guidance remains reachable at $size',
+      (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await pumpEditor(
+          tester,
+          _Operations(imageBytes),
+          textScale: 2,
+          isBatchImport: true,
+        );
+        expect(find.text(_notice), findsOneWidget);
+        expect(
+          find.text(
+            'Skip this image only. Any remaining images will still be reviewed.',
+          ),
+          findsOneWidget,
+        );
+        await tester.ensureVisible(find.text('Skip image'));
+        await tester.pumpAndSettle();
+        expect(find.text('Skip image').hitTestable(), findsOneWidget);
+        await tester.ensureVisible(find.text('Next'));
+        await tester.pumpAndSettle();
+        expect(find.text('Next').hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
   testWidgets('confirm exports and saves the full-image fallback corners', (

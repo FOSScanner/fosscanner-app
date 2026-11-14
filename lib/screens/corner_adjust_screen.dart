@@ -542,7 +542,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final scrollable =
-            (_canSkipImage || _showFullImageNotice) &&
+            _canSkipImage &&
             (constraints.maxHeight < 480 ||
                 MediaQuery.textScalerOf(context).scale(16) > 20);
         if (scrollable) {
