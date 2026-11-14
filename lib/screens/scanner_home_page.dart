@@ -354,6 +354,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         // Android image_picker recovery paths are app-owned cache copies.
         final result = await _addCapturedPhoto(
           files[index],
+          source: PageReviewSource.recovered,
+          isBatchImport: files.length > 1,
           deleteAfterRead: true,
           documentGeneration: documentGeneration,
         );
@@ -408,6 +410,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // Camera capture writes a fresh file that's genuinely ours to delete.
       await _addCapturedPhoto(
         photo,
+        source: PageReviewSource.camera,
         deleteAfterRead: true,
         documentGeneration: documentGeneration,
       );
@@ -450,6 +453,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         // that might actually be the user's original photo.
         final result = await _addCapturedPhoto(
           photo,
+          source: PageReviewSource.gallery,
+          isBatchImport: photos.length > 1,
           deleteAfterRead: false,
           documentGeneration: documentGeneration,
         );
@@ -465,9 +470,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   CornerAdjustScreen _buildEditor(
     Uint8List originalBytes, {
     ScannedPage? page,
+    PageReviewSource? source,
+    bool isBatchImport = false,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
+      source: source,
+      isBatchImport: isBatchImport,
       initialCorners: page?.corners,
       initialFilter: page?.filter ?? PageFilter.original,
       initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
@@ -483,6 +492,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// through the detect/adjust flow before adding it as a page.
   Future<_PhotoIntakeResult> _addCapturedPhoto(
     XFile photo, {
+    required PageReviewSource source,
+    bool isBatchImport = false,
     required bool deleteAfterRead,
     required int documentGeneration,
   }) async {
@@ -575,9 +586,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
-    final result = await Navigator.of(
-      context,
-    ).push<ScannedPage>(MaterialPageRoute(builder: (_) => _buildEditor(bytes)));
+    final result = await Navigator.of(context).push<ScannedPage>(
+      MaterialPageRoute(
+        builder: (_) =>
+            _buildEditor(bytes, source: source, isBatchImport: isBatchImport),
+      ),
+    );
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
