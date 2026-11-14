@@ -41,7 +41,9 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 - Capture multiple pages in sequence and reorder them with drag-and-drop
 - Automatically restore an unfinished draft after a native app restart
 - Import existing photos from your gallery instead of (or alongside)
-  capturing new ones
+  capturing new ones; skip individual images in a multi-image import without
+  abandoning the remaining selection
+- Cancel an unsaved camera capture or single-image import without adding a page
 - Combine captured pages into a single PDF
 - On Android, export a searchable PDF with selectable, copyable text using
   bundled Latin-script OCR; iOS exports image-only PDFs
