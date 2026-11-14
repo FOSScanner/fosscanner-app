@@ -46,6 +46,8 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 - On Android, export a searchable PDF with selectable, copyable text using
   bundled Latin-script OCR; iOS exports image-only PDFs
 - Share the PDF via the OS share sheet
+- Inspect complete, selectable QR/barcode results before opening HTTP/HTTPS
+  links; review the destination hostname separately and copy any scanned text
 - Document editing, image intake, and barcode scanning pause while a PDF is
   generated or shared to avoid overlapping memory-heavy jobs. Starting an
   export dismisses any pending page-deletion Undo.
