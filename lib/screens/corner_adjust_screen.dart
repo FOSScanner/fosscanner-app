@@ -32,6 +32,9 @@ const _filterLabels = {
   PageFilter.blackAndWhite: 'B&W',
 };
 
+/// The original picker source may be unknown after Android activity recovery.
+enum PageReviewSource { camera, gallery, recovered }
+
 enum _Step { corners, filter }
 
 enum _PreviewStatus { pending, updating, ready, failed }
@@ -50,6 +53,8 @@ class CornerAdjustScreen extends StatefulWidget {
   const CornerAdjustScreen({
     super.key,
     required this.originalBytes,
+    this.source,
+    this.isBatchImport = false,
     this.initialCorners,
     this.initialFilter = PageFilter.original,
     this.initialRotationQuarterTurns = 0,
@@ -60,6 +65,12 @@ class CornerAdjustScreen extends StatefulWidget {
   });
 
   final Uint8List originalBytes;
+
+  /// Null for existing-page editing or callers without intake provenance.
+  final PageReviewSource? source;
+
+  /// Refers to the original selection, including its final image.
+  final bool isBatchImport;
   final List<Offset>? initialCorners;
   final PageFilter initialFilter;
   final int initialRotationQuarterTurns;
@@ -77,6 +88,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   List<Offset>? _corners;
   bool _showFullImageNotice = false;
   bool _isProcessing = false;
+  bool _isLeaving = false;
   String? _error;
   late final ImageProcessingQueue _processingQueue;
   int _initializationGeneration = 0;
@@ -289,9 +301,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   Future<void> _goToFilterStep() async {
+    if (!mounted || _isLeaving || _isProcessing) return;
     if (_filterPreviews == null) {
       await _updatePreviews();
-      if (!mounted || _filterPreviews == null) return;
+      if (!mounted || _isLeaving || _filterPreviews == null) return;
     }
     setState(() => _step = _Step.filter);
     if (_filterHistoryEntry != null) return;
@@ -383,6 +396,26 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   bool get _isEditingExistingPage => widget.initialCorners != null;
 
+  bool get _canSkipImage =>
+      !_isEditingExistingPage &&
+      widget.isBatchImport &&
+      (widget.source == PageReviewSource.gallery ||
+          widget.source == PageReviewSource.recovered);
+
+  void _cancelReview() {
+    if (!mounted ||
+        _isLeaving ||
+        _isProcessing ||
+        _step != _Step.corners ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    // The caller advances an import after this route returns. Ignore stale
+    // taps during the reverse transition rather than popping another route.
+    setState(() => _isLeaving = true);
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final imageSize = _imageSize;
@@ -391,6 +424,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
     return PopScope(
       canPop: !_isProcessing,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) _isLeaving = true;
+      },
       child: Scaffold(
         appBar: AppBar(
           title: Text(_appBarTitle),
@@ -426,25 +462,24 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     Size imageSize,
     List<Offset> corners,
   ) {
-    return Column(
+    final preview = Padding(
+      padding: const EdgeInsets.all(16),
+      child: CornerOverlay(
+        imageBytes: widget.originalBytes,
+        imageSize: imageSize,
+        corners: corners,
+        onChanged: (c) {
+          setState(() {
+            _corners = c;
+            _showFullImageNotice = false;
+          });
+          unawaited(_updatePreviews());
+        },
+      ),
+    );
+    final actions = Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: CornerOverlay(
-              imageBytes: widget.originalBytes,
-              imageSize: imageSize,
-              corners: corners,
-              onChanged: (c) {
-                setState(() {
-                  _corners = c;
-                  _showFullImageNotice = false;
-                });
-                unawaited(_updatePreviews());
-              },
-            ),
-          ),
-        ),
         if (_showFullImageNotice)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -457,6 +492,17 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               ),
             ),
           ),
+        if (_canSkipImage)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: const Text(
+                'Skip this image only. Any remaining images will still be reviewed.',
+              ),
+            ),
+          ),
+
         SafeArea(
           top: false,
           child: Padding(
@@ -465,14 +511,19 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: Text(_isEditingExistingPage ? 'Cancel' : 'Retake'),
+                    onPressed: _isLeaving || _isProcessing
+                        ? null
+                        : _cancelReview,
+                    child: Text(_canSkipImage ? 'Skip image' : 'Cancel'),
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: FilledButton(
-                    onPressed: _isGeneratingPreviews ? null : _goToFilterStep,
+                    onPressed:
+                        _isGeneratingPreviews || _isLeaving || _isProcessing
+                        ? null
+                        : _goToFilterStep,
                     child: _isGeneratingPreviews
                         ? const SizedBox(
                             width: 20,
@@ -487,6 +538,34 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           ),
         ),
       ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scrollable =
+            (_canSkipImage || _showFullImageNotice) &&
+            (constraints.maxHeight < 480 ||
+                MediaQuery.textScalerOf(context).scale(16) > 20);
+        if (scrollable) {
+          return SingleChildScrollView(
+            key: const Key('batch_review_scroll_view'),
+            child: Column(
+              children: [
+                SizedBox(
+                  height: (constraints.maxHeight * 0.55).clamp(120.0, 280.0),
+                  child: preview,
+                ),
+                actions,
+              ],
+            ),
+          );
+        }
+        return Column(
+          children: [
+            Expanded(child: preview),
+            actions,
+          ],
+        );
+      },
     );
   }
 
