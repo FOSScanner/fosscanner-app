@@ -73,6 +73,7 @@ class CornerAdjustScreen extends StatefulWidget {
 class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
+  bool _showFullImageNotice = false;
   bool _isProcessing = false;
   String? _error;
   late final ImageProcessingQueue _processingQueue;
@@ -132,14 +133,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         if (!detection.started) return;
         candidateCorners = detection.value;
       }
-      final corners = _hasRenderableCorners(candidateCorners)
-          ? candidateCorners!
-          : _fullBoundsCorners(size);
+      final hasCorners = _hasRenderableCorners(candidateCorners);
+      final corners = hasCorners ? candidateCorners! : _fullBoundsCorners(size);
 
       if (!mounted) return;
       setState(() {
         _imageSize = size;
         _corners = corners;
+        _showFullImageNotice = !hasCorners;
       });
       unawaited(_updatePreviews());
     } catch (error) {
@@ -169,14 +170,13 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       corners.every((corner) => corner.dx.isFinite && corner.dy.isFinite);
 
   List<Offset> _fullBoundsCorners(Size size) {
-    const marginFrac = 0.05;
-    final mx = size.width * marginFrac;
-    final my = size.height * marginFrac;
+    final right = size.width - 1;
+    final bottom = size.height - 1;
     return [
-      Offset(mx, my),
-      Offset(size.width - mx, my),
-      Offset(size.width - mx, size.height - my),
-      Offset(mx, size.height - my),
+      Offset.zero,
+      Offset(right, 0),
+      Offset(right, bottom),
+      Offset(0, bottom),
     ];
   }
 
@@ -425,12 +425,27 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               imageSize: imageSize,
               corners: corners,
               onChanged: (c) {
-                setState(() => _corners = c);
+                setState(() {
+                  _corners = c;
+                  _showFullImageNotice = false;
+                });
                 unawaited(_updatePreviews());
               },
             ),
           ),
         ),
+        if (_showFullImageNotice)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                'No page edges detected. Full image selected.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ),
         SafeArea(
           top: false,
           child: Padding(
