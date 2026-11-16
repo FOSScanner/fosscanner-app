@@ -172,24 +172,136 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
   }
 
+  Widget _buildResultReview(String result) {
+    final uri = _resultUri;
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                key: const Key('barcode_result_scroll_view'),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (uri != null) ...[
+                      Text(
+                        'Destination host',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      SelectableText(
+                        uri.host,
+                        key: const Key('barcode_destination_host'),
+                        textDirection: TextDirection.ltr,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('Opening this link leaves FOSScanner.'),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Full URL',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Semantics(
+                      key: const Key('barcode_result_semantics'),
+                      container: true,
+                      liveRegion: true,
+                      child: SelectableText(
+                        result,
+                        key: const Key('barcode_result_text'),
+                        textDirection: uri == null ? null : TextDirection.ltr,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: OverflowBar(
+                alignment: MainAxisAlignment.end,
+                overflowAlignment: OverflowBarAlignment.end,
+                spacing: 12,
+                overflowSpacing: 8,
+                children: [
+                  Semantics(
+                    container: true,
+                    button: true,
+                    label: 'Copy scanned result',
+                    onTap: _copyResult,
+                    child: ExcludeSemantics(
+                      child: OutlinedButton.icon(
+                        onPressed: _copyResult,
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copy'),
+                      ),
+                    ),
+                  ),
+                  if (uri != null)
+                    Semantics(
+                      container: true,
+                      button: true,
+                      label: 'Open scanned link',
+                      onTap: _openResult,
+                      child: ExcludeSemantics(
+                        child: FilledButton.icon(
+                          onPressed: _openResult,
+                          icon: const Icon(Icons.open_in_new),
+                          label: const Text('Open'),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final result = _latchedResult;
     final cameraError = _cameraError;
     final cameraAttempt = _cameraAttempt;
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan QR / Barcode')),
+      appBar: AppBar(
+        title: Text(result == null ? 'Scan QR / Barcode' : 'Scanned result'),
+        actions: [
+          if (result != null)
+            IconButton(
+              onPressed: _dismissResult,
+              icon: const Icon(Icons.qr_code_scanner),
+              tooltip: 'Scan another',
+            ),
+        ],
+      ),
       body: Stack(
+        fit: StackFit.expand,
         children: [
           if (cameraError == null)
-            widget.scanViewBuilder?.call(context, _handleScan) ??
-                _defaultScanView(
-                  context,
-                  _handleScan,
-                  attempt: cameraAttempt,
-                  onCameraCreated: (error) =>
-                      _handleCameraCreated(error, cameraAttempt),
-                ),
+            Offstage(
+              // Keep the camera state, but hide its controls and semantics
+              // while the user inspects the latched result.
+              offstage: result != null,
+              child:
+                  widget.scanViewBuilder?.call(context, _handleScan) ??
+                  _defaultScanView(
+                    context,
+                    _handleScan,
+                    attempt: cameraAttempt,
+                    onCameraCreated: (error) =>
+                        _handleCameraCreated(error, cameraAttempt),
+                  ),
+            ),
           if (result == null && cameraError == null)
             IgnorePointer(
               child: Center(
@@ -206,93 +318,9 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                 ),
               ),
             ),
-          if (result != null && cameraError == null)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: SafeArea(
-                top: false,
-                child: Card(
-                  margin: const EdgeInsets.all(16),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Semantics(
-                                container: true,
-                                liveRegion: true,
-                                label: 'Scanned code result: $result',
-                                child: ExcludeSemantics(
-                                  child: Text(
-                                    result,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close),
-                              tooltip: 'Dismiss and keep scanning',
-                              onPressed: _dismissResult,
-                              visualDensity: VisualDensity.compact,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            if (_resultUri != null) ...[
-                              Expanded(
-                                child: Semantics(
-                                  container: true,
-                                  button: true,
-                                  label: 'Open scanned link',
-                                  onTap: _openResult,
-                                  child: ExcludeSemantics(
-                                    child: FilledButton.icon(
-                                      onPressed: _openResult,
-                                      icon: const Icon(Icons.open_in_new),
-                                      label: const Text('Open'),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                            ],
-                            Expanded(
-                              child: Semantics(
-                                container: true,
-                                button: true,
-                                label: 'Copy scanned result',
-                                onTap: _copyResult,
-                                child: ExcludeSemantics(
-                                  child: OutlinedButton.icon(
-                                    onPressed: _copyResult,
-                                    icon: const Icon(Icons.copy),
-                                    label: const Text('Copy'),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (cameraError != null)
+          if (result != null)
+            Positioned.fill(child: _buildResultReview(result)),
+          if (cameraError != null && result == null)
             Positioned.fill(child: _buildCameraError(cameraError)),
         ],
       ),
