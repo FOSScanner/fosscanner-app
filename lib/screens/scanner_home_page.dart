@@ -1209,10 +1209,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           children: [
             if (_pages.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Text('Drafts are temporary. Export a PDF to keep a copy.',
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                child: Text(
+                  'Drafts are temporary. Export a PDF to keep a copy.',
                   style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center),
+                  textAlign: TextAlign.center,
+                ),
               ),
             if (_draftSaveFailed)
               ConstrainedBox(
@@ -1242,172 +1247,200 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             Expanded(
               child: _pages.isEmpty
-          ? Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(32.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_isRestoringDraft)
-                      const CircularProgressIndicator()
-                    else
-                      Icon(
-                        _cameraSupported
-                            ? Icons.camera_alt
-                            : Icons.photo_library_outlined,
-                        size: 80,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _isRestoringDraft
-                          ? 'Restoring draft...'
-                          : 'Ready to Scan',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isRestoringDraft
-                          ? 'Your saved pages will appear here.'
-                          : _cameraSupported
-                          ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
-                          : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : GridView.builder(
-              padding: EdgeInsets.fromLTRB(8, 8, 8, _cameraSupported ? 96 : 8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 0.7,
-              ),
-              itemCount: _pages.length,
-              itemBuilder: (context, index) {
-                final page = _pages[index];
-                final card = Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: _isDocumentInteractionLocked
-                        ? null
-                        : () => _openPage(index),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                            child: Image(
-                              image: ResizeImage(
-                                MemoryImage(page.processedBytes),
-                                width: _thumbnailCacheWidth,
-                                height: _thumbnailCacheWidth,
-                                policy: ResizeImagePolicy.fit,
+                  ? Center(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(32.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_isRestoringDraft)
+                              const CircularProgressIndicator()
+                            else
+                              Icon(
+                                _cameraSupported
+                                    ? Icons.camera_alt
+                                    : Icons.photo_library_outlined,
+                                size: 80,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
-                              fit: BoxFit.contain,
+                            const SizedBox(height: 16),
+                            Text(
+                              _isRestoringDraft
+                                  ? 'Restoring draft...'
+                                  : 'Ready to Scan',
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _isRestoringDraft
+                                  ? 'Your saved pages will appear here.'
+                                  : _cameraSupported
+                                  ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
+                                  : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: EdgeInsets.fromLTRB(
+                        8,
+                        8,
+                        8,
+                        _cameraSupported ? 96 : 8,
+                      ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            childAspectRatio: 0.7,
+                          ),
+                      itemCount: _pages.length,
+                      itemBuilder: (context, index) {
+                        final page = _pages[index];
+                        final card = Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: _isDocumentInteractionLocked
+                                ? null
+                                : () => _openPage(index),
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      8,
+                                      8,
+                                      8,
+                                      0,
+                                    ),
+                                    child: Image(
+                                      image: ResizeImage(
+                                        MemoryImage(page.processedBytes),
+                                        width: _thumbnailCacheWidth,
+                                        height: _thumbnailCacheWidth,
+                                        policy: ResizeImagePolicy.fit,
+                                      ),
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 12,
+                                    right: 4,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: ExcludeSemantics(
+                                          child: Text(
+                                            'Page ${index + 1}',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.labelLarge,
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline),
+                                        tooltip: 'Delete page ${index + 1}',
+                                        onPressed: _isDocumentInteractionLocked
+                                            ? null
+                                            : () => _removePage(index),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 12, right: 4),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: ExcludeSemantics(
-                                  child: Text(
-                                    'Page ${index + 1}',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.labelLarge,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                tooltip: 'Delete page ${index + 1}',
-                                onPressed: _isDocumentInteractionLocked
-                                    ? null
-                                    : () => _removePage(index),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
+                        );
 
-                // Drag-to-reorder remains available alongside equivalent
-                // semantic actions for switch and screen-reader users.
-                final reorderActions = <CustomSemanticsAction, VoidCallback>{
-                  if (!_isDocumentInteractionLocked && index > 0)
-                    const CustomSemanticsAction(label: 'Move earlier'): () =>
-                        _reorderPage(index, index - 1),
-                  if (!_isDocumentInteractionLocked &&
-                      index < _pages.length - 1)
-                    const CustomSemanticsAction(label: 'Move later'): () =>
-                        _reorderPage(index, index + 1),
-                };
-                return Semantics(
-                  key: ValueKey('page_semantics_$index'),
-                  label: 'Page ${index + 1} of ${_pages.length}',
-                  sortKey: OrdinalSortKey(index.toDouble()),
-                  container: true,
-                  customSemanticsActions: reorderActions,
-                  child: DragTarget<int>(
-                    onWillAcceptWithDetails: (details) =>
-                        !_isDocumentInteractionLocked && details.data != index,
-                    onAcceptWithDetails: (details) =>
-                        _reorderPage(details.data, index),
-                    builder: (context, candidateData, rejectedData) {
-                      final isDropTarget = candidateData.isNotEmpty;
-                      return LongPressDraggable<int>(
-                        data: index,
-                        maxSimultaneousDrags: _isDocumentInteractionLocked
-                            ? 0
-                            : 1,
-                        feedback: SizedBox(
-                          width: 140,
-                          height: 200,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: Opacity(opacity: 0.85, child: card),
-                          ),
-                        ),
-                        childWhenDragging: Opacity(opacity: 0.3, child: card),
-                        child: isDropTarget
-                            ? Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    width: 3,
+                        // Drag-to-reorder remains available alongside equivalent
+                        // semantic actions for switch and screen-reader users.
+                        final reorderActions =
+                            <CustomSemanticsAction, VoidCallback>{
+                              if (!_isDocumentInteractionLocked && index > 0)
+                                const CustomSemanticsAction(
+                                  label: 'Move earlier',
+                                ): () =>
+                                    _reorderPage(index, index - 1),
+                              if (!_isDocumentInteractionLocked &&
+                                  index < _pages.length - 1)
+                                const CustomSemanticsAction(
+                                  label: 'Move later',
+                                ): () =>
+                                    _reorderPage(index, index + 1),
+                            };
+                        return Semantics(
+                          key: ValueKey('page_semantics_$index'),
+                          label: 'Page ${index + 1} of ${_pages.length}',
+                          sortKey: OrdinalSortKey(index.toDouble()),
+                          container: true,
+                          customSemanticsActions: reorderActions,
+                          child: DragTarget<int>(
+                            onWillAcceptWithDetails: (details) =>
+                                !_isDocumentInteractionLocked &&
+                                details.data != index,
+                            onAcceptWithDetails: (details) =>
+                                _reorderPage(details.data, index),
+                            builder: (context, candidateData, rejectedData) {
+                              final isDropTarget = candidateData.isNotEmpty;
+                              return LongPressDraggable<int>(
+                                data: index,
+                                maxSimultaneousDrags:
+                                    _isDocumentInteractionLocked ? 0 : 1,
+                                feedback: SizedBox(
+                                  width: 140,
+                                  height: 200,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: Opacity(opacity: 0.85, child: card),
                                   ),
-                                  borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: card,
-                              )
-                            : card,
-                      );
-                    },
-                  ),
-                );
-              },
+                                childWhenDragging: Opacity(
+                                  opacity: 0.3,
+                                  child: card,
+                                ),
+                                child: isDropTarget
+                                    ? Container(
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
+                                            width: 3,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: card,
+                                      )
+                                    : card,
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
             ),
-                ),
-              ],
-            ),
+          ],
+        ),
       ),
       floatingActionButton: _cameraSupported
           ? FloatingActionButton(

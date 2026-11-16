@@ -306,7 +306,9 @@ void main() {
     expect(operations.exportResults, isEmpty);
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes'))
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Save changes'),
+          )
           .onPressed,
       isNull,
     );

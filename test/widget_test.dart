@@ -1016,8 +1016,8 @@ void main() {
       sharePlatform.lastParams!.fileNameOverrides!.single,
       matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
     );
-    await tester.tap(find.text('Keep draft'));
-    await tester.pumpAndSettle();
+    expect(find.text('Keep this draft?'), findsNothing);
+    expect(find.text('Export PDF (1 page)'), findsOneWidget);
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
     expect(

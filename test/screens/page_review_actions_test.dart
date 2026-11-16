@@ -137,7 +137,7 @@ void main() {
             tester.widget<CornerAdjustScreen>(editors).originalBytes,
             previousBytes,
           ) &&
-          find.text('Next').evaluate().isNotEmpty) {
+          find.text('Preview page').evaluate().isNotEmpty) {
         await tester.pumpAndSettle();
         return;
       }
@@ -150,9 +150,9 @@ void main() {
   }
 
   Future<void> accept(WidgetTester tester) async {
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm'));
+    await tester.tap(find.text('Add page'));
     await tester.pumpAndSettle();
   }
 
@@ -246,7 +246,9 @@ void main() {
           )
           .onPressed!;
       final next = tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'))
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Preview page'),
+          )
           .onPressed!;
       skip();
       skip();
@@ -311,6 +313,9 @@ void main() {
       await tester.tap(find.byType(Card));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Edit page'));
+      await tester.pumpAndSettle();
+      expect(find.text('Adjust appearance'), findsOneWidget);
+      await tester.tap(find.text('Adjust crop'));
       await tester.pumpAndSettle();
       expect(find.text('Edit page'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);

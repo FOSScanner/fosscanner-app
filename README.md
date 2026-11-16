@@ -47,7 +47,7 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
   without changing the crop, filter, or rotation
 - Crop guidance includes **Reset crop** to restore the initially detected
   (or previously saved) corners, and **Use full image** to include the entire
-  photo. If detection fails, review the suggested inset crop before continuing
+  photo. If detection fails, review the selected full image before continuing
 - Choose **Preview page**, then **Add page** for a new scan or **Save changes**
   when editing an existing page
 - Capture multiple pages in sequence and reorder them with drag-and-drop

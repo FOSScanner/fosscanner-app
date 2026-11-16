@@ -145,7 +145,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(operations.requests, hasLength(1));
     if (finishInitial) operations.requests.single.result.complete(previous);
-    await tester.tap(find.text('Next'));
+    await tester.ensureVisible(find.text('Preview page'));
+    await tester.tap(find.text('Preview page'));
     if (finishInitial) {
       await tester.pumpAndSettle();
     } else {
@@ -163,8 +164,9 @@ void main() {
     return (resize.imageProvider as MemoryImage).bytes;
   }
 
-  FilledButton confirm(WidgetTester tester) =>
-      tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'));
+  FilledButton confirm(WidgetTester tester) => tester.widget<FilledButton>(
+    find.widgetWithText(FilledButton, 'Save changes'),
+  );
 
   Future<void> change(
     WidgetTester tester,
@@ -175,7 +177,7 @@ void main() {
       case 'rotation':
         await tester.tap(find.byTooltip('Rotate'));
       case 'filter':
-        await tester.tap(find.text('Gray'));
+        await tester.tap(find.text('Grayscale'));
       case 'brightness' || 'contrast':
         final slider = tester.widget<Slider>(
           adjustment == 'brightness'
@@ -263,7 +265,7 @@ void main() {
         expect(find.text('Retry preview'), findsNothing);
         expect(confirm(tester).onPressed, isNotNull);
 
-        await tester.tap(find.text('Confirm'));
+        await tester.tap(find.text('Save changes'));
         await tester.pumpAndSettle();
         expect(saved, isNotNull);
         expect(
@@ -410,7 +412,9 @@ void main() {
       await pumpWork(tester);
       operations.requests.last.result.complete(updated);
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Confirm'));
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Save changes'),
+      );
       await tester.pumpAndSettle();
       expect(confirm(tester).onPressed, isNotNull);
       expect(tester.takeException(), isNull);

@@ -203,7 +203,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('Page edges were not detected'), findsOneWidget);
+    expect(
+      find.text('No page edges detected. Full image selected.'),
+      findsOneWidget,
+    );
     expect(find.text('Reset crop'), findsOneWidget);
     expect(find.text('Use full image'), findsOneWidget);
     await tester.tap(find.text('Preview page'));

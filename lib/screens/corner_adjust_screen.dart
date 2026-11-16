@@ -73,6 +73,7 @@ class CornerAdjustScreen extends StatefulWidget {
   /// Refers to the original selection, including its final image.
   final bool isBatchImport;
   final List<Offset>? initialCorners;
+
   /// Open saved appearance directly; crop remains available.
   final bool startWithAdjustments;
   final PageFilter initialFilter;
@@ -560,7 +561,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       builder: (context, constraints) {
         final scrollable =
             constraints.maxHeight < 480 ||
-                MediaQuery.textScalerOf(context).scale(16) > 20;
+            MediaQuery.textScalerOf(context).scale(16) > 20;
         if (scrollable) {
           return SingleChildScrollView(
             key: const Key('batch_review_scroll_view'),
@@ -745,10 +746,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                     : (newValue) {
                         if (!mounted || _isProcessing) return;
                         setState(() {
-                        onChanged(newValue);
-                        _finalPreviewGeneration++;
-                        _previewStatus = _PreviewStatus.pending;
-                      });
+                          onChanged(newValue);
+                          _finalPreviewGeneration++;
+                          _previewStatus = _PreviewStatus.pending;
+                        });
                       },
                 onChangeEnd: _isProcessing
                     ? null

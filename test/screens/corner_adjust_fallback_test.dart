@@ -148,9 +148,9 @@ void main() {
     );
     await tester.tap(find.text('Open editor'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Add page'));
     await tester.pumpAndSettle();
     expect(result, isNotNull);
     return result!;
@@ -274,7 +274,9 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await pumpEditor(tester, _Operations(imageBytes), textScale: 2);
       expect(find.text(_notice), findsOneWidget);
-      expect(find.text('Next').hitTestable(), findsOneWidget);
+      await tester.ensureVisible(find.text('Preview page'));
+      await tester.pumpAndSettle();
+      expect(find.text('Preview page').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
@@ -303,9 +305,9 @@ void main() {
         await tester.ensureVisible(find.text('Skip image'));
         await tester.pumpAndSettle();
         expect(find.text('Skip image').hitTestable(), findsOneWidget);
-        await tester.ensureVisible(find.text('Next'));
+        await tester.ensureVisible(find.text('Preview page'));
         await tester.pumpAndSettle();
-        expect(find.text('Next').hitTestable(), findsOneWidget);
+        expect(find.text('Preview page').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
