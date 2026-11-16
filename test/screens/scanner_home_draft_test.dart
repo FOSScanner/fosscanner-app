@@ -17,11 +17,13 @@ class _DraftStore implements DraftStore {
     Future<List<ScannedPage>>? loaded,
     this.clearCompleter,
     this.clearError,
+    this.saveError,
   }) : loaded = loaded ?? Future.value(const []);
 
   final Future<List<ScannedPage>> loaded;
   final Completer<void>? clearCompleter;
   final Object? clearError;
+  Object? saveError;
   final saves = <List<ScannedPage>>[];
   var clearCalls = 0;
 
@@ -31,6 +33,7 @@ class _DraftStore implements DraftStore {
   @override
   Future<void> save(List<ScannedPage> pages) async {
     saves.add(List.of(pages));
+    if (saveError case final error?) throw error;
   }
 
   @override
@@ -71,10 +74,22 @@ class _ImagePickerPlatform extends ImagePickerPlatform {
   }) => multiImageCompleter?.future ?? Future.value(const <XFile>[]);
 }
 
+class _FailingPicker extends _ImagePickerPlatform {
+  @override
+  Future<List<XFile>> getMultiImageWithOptions({
+    MultiImagePickerOptions options = const MultiImagePickerOptions(),
+  }) async => throw StateError('private platform details');
+}
+
 class _SharePlatform implements SharePlatform {
-  _SharePlatform({this.error, this.completer});
+  _SharePlatform({
+    this.error,
+    this.completer,
+    this.status = ShareResultStatus.success,
+  });
 
   final Object? error;
+  final ShareResultStatus status;
   final Completer<ShareResult>? completer;
   var calls = 0;
 
@@ -83,7 +98,7 @@ class _SharePlatform implements SharePlatform {
     calls++;
     if (error case final value?) throw value;
     if (completer case final pending?) return pending.future;
-    return const ShareResult('shared', ShareResultStatus.success);
+    return ShareResult('result', status);
   }
 }
 
@@ -164,7 +179,7 @@ void main() {
     completer.complete(restored);
     await tester.pump();
 
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
     expect(find.byTooltip('Delete page 1'), findsOneWidget);
     expect(find.byTooltip('Delete page 2'), findsOneWidget);
     expect(store.saves, isEmpty);
@@ -295,7 +310,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Clear all pages?'), findsOneWidget);
     expect(store.clearCalls, 0);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
@@ -417,7 +432,7 @@ void main() {
     await tester.pump();
 
     expect(store.clearCalls, 1);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
     expect(find.text('Could not clear the saved draft.'), findsOneWidget);
     expect(find.text('Clearing draft...'), findsNothing);
     expect(iconButton(tester, 'Delete page 1').onPressed, isNotNull);
@@ -436,7 +451,7 @@ void main() {
       sharePlus: SharePlus.custom(sharePlatform),
     );
 
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Save as PDF (1 pages)'));
     await pumpUntilFound(
       tester,
       find.text('Could not generate or share the PDF.'),
@@ -465,13 +480,10 @@ void main() {
       sharePlus: SharePlus.custom(platform),
     );
     final staleDelete = iconButton(tester, 'Delete page 2').onPressed!;
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Save as PDF (2 pages)'));
     // The share is still parked on its Completer here, so the export spinner
     // keeps scheduling frames and nothing can settle yet.
     await pumpUntil(tester, () => platform.calls == 1, settle: false);
-    expect(find.text('Opening share sheet...'), findsOneWidget);
-    expect(find.textContaining('Generating PDF'), findsNothing);
-    expect(find.widgetWithText(TextButton, 'Cancel'), findsNothing);
     expect(iconButton(tester, 'Delete page 2').onPressed, isNull);
     staleDelete();
     await tester.pump();
@@ -479,77 +491,136 @@ void main() {
     share.complete(const ShareResult('shared', ShareResultStatus.success));
     await tester.pumpAndSettle();
 
-    expect(find.text('Keep this draft?'), findsOneWidget);
-    await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
-    await tester.pumpAndSettle();
+    expect(find.text('Keep this draft?'), findsNothing);
     expect(store.clearCalls, 0);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
     staleDelete();
     await tester.pump();
     expect(store.saves.last, orderedEquals([first]));
   });
 
-  testWidgets('clear confirmation cannot delete a later draft revision', (
+  for (final status in ShareResultStatus.values) {
+    testWidgets('share $status retains draft without cleanup or success claims', (
+      tester,
+    ) async {
+      final store = _DraftStore();
+      final platform = _SharePlatform(status: status);
+      await pumpHome(
+        tester,
+        store,
+        pages: [page(1)],
+        sharePlus: SharePlus.custom(platform),
+      );
+      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await pumpUntil(tester, () => platform.calls == 1);
+      expect(find.text('Keep this draft?'), findsNothing);
+      expect(find.textContaining('The PDF was shared'), findsNothing);
+      expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+      expect(
+        find.text('Drafts are temporary. Export a PDF to keep a copy.'),
+        findsOneWidget,
+      );
+      expect(store.clearCalls, 0);
+      // Exporting again also leaves the draft intact without an extra decision.
+      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await pumpUntil(tester, () => platform.calls == 2);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(store.clearCalls, 0);
+      // Cleanup is explicit and still requires confirmation.
+      await tester.tap(find.byTooltip('Clear all'));
+      await tester.pumpAndSettle();
+      expect(find.text('Clear all pages?'), findsOneWidget);
+      expect(store.clearCalls, 0);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+      await tester.tap(find.byTooltip('Clear all'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
+      await tester.pumpAndSettle();
+      expect(store.clearCalls, 1);
+      expect(find.text('Ready to Scan'), findsOneWidget);
+    });
+  }
+
+  testWidgets('failed saves remain actionable and retry the current pages', (
+    tester,
+  ) async {
+    final store = _DraftStore(saveError: StateError('private file path'));
+    final first = page(1);
+    final second = page(2);
+    final third = page(3);
+    final semantics = tester.ensureSemantics();
+    await pumpHome(tester, store, pages: [first, second, third]);
+    await tapDelete(tester, 1);
+    await tester.pumpAndSettle();
+    final failure = find.textContaining(
+      'Could not save the latest draft changes.',
+    );
+    expect(failure, findsOneWidget);
+    expect(find.textContaining('private file path'), findsNothing);
+    expect(
+      tester
+          .getSemantics(failure)
+          .getSemanticsData()
+          .flagsCollection
+          .isLiveRegion,
+      isTrue,
+    );
+    expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+    expect(failure, findsOneWidget);
+    await tester.tap(find.text('Retry saving draft'));
+    await tester.pumpAndSettle();
+    expect(store.saves, hasLength(2));
+    expect(failure, findsOneWidget);
+    // New edits may fail too; retry must save the newest state, not a held
+    // snapshot of the first failure.
+    await tapDelete(tester, 1);
+    await tester.pumpAndSettle();
+    store.saveError = null;
+    await tester.tap(find.text('Retry saving draft'));
+    await tester.pumpAndSettle();
+    expect(store.saves.last, orderedEquals([third]));
+    expect(failure, findsNothing);
+    expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('unrelated feedback waits until deletion Undo is used', (
     tester,
   ) async {
     final store = _DraftStore();
-    await pumpHome(
-      tester,
-      store,
-      pages: [page(1), page(2)],
-      sharePlus: SharePlus.custom(_SharePlatform()),
-    );
-    final pendingDelete = iconButton(tester, 'Delete page 2').onPressed!;
-    await tester.tap(find.text('Export PDF (2 pages)'));
-    await pumpUntilFound(tester, find.text('Keep this draft?'));
-    expect(find.text('Keep this draft?'), findsOneWidget);
-
-    // Exercise a mutation delivered after the confirmation was created.
-    pendingDelete();
-    await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
+    final first = page(1);
+    final second = page(2);
+    await pumpHome(tester, store, pages: [first, second]);
+    await tapDelete(tester, 1);
     await tester.pumpAndSettle();
-
-    expect(store.clearCalls, 0);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    // A gallery failure is ordinary feedback that previously displaced Undo.
+    ImagePickerPlatform.instance = _FailingPicker();
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+    expect(find.text('Could not open the photo gallery.'), findsNothing);
+    await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
+    await tester.pumpAndSettle();
+    expect(store.saves.last, orderedEquals([first, second]));
+    expect(find.text('Could not open the photo gallery.'), findsOneWidget);
   });
 
-  testWidgets('successful share keeps the draft unless clear is chosen', (
-    tester,
-  ) async {
-    final keepStore = _DraftStore();
-    final sharePlatform = _SharePlatform();
-    await pumpHome(
-      tester,
-      keepStore,
-      pages: [page(1)],
-      sharePlus: SharePlus.custom(sharePlatform),
-    );
-
-    await tester.tap(find.text('Export PDF (1 page)'));
-    await pumpUntilFound(tester, find.text('Keep this draft?'));
-    expect(find.text('Keep this draft?'), findsOneWidget);
-    await tester.tap(find.widgetWithText(TextButton, 'Keep draft'));
+  testWidgets('deferred feedback appears after Undo expires', (tester) async {
+    final store = _DraftStore();
+    await pumpHome(tester, store, pages: [page(1), page(2)]);
+    await tapDelete(tester, 1);
     await tester.pumpAndSettle();
-    expect(keepStore.clearCalls, 0);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
-
-    await tester.pumpWidget(const SizedBox());
-    final clearStore = _DraftStore();
-    await pumpHome(
-      tester,
-      clearStore,
-      pages: [page(2)],
-      sharePlus: SharePlus.custom(sharePlatform),
-    );
-    await tester.tap(find.text('Export PDF (1 page)'));
-    await pumpUntilFound(tester, find.text('Keep this draft?'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Clear draft'));
-    await tester.pump();
-    await tester.pump();
-
-    expect(clearStore.clearCalls, 1);
-    expect(find.text('Ready to Scan'), findsOneWidget);
-    expect(sharePlatform.calls, 2);
+    ImagePickerPlatform.instance = _FailingPicker();
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
+    expect(find.text('Could not open the photo gallery.'), findsOneWidget);
+    expect(store.saves, hasLength(1));
   });
 }

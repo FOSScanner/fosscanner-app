@@ -92,9 +92,18 @@ and filters run on real OpenCV (`opencv_dart`) on both mobile platforms.
   backups. A draft includes both original and processed page images plus
   crop/filter/edit settings. Atomic staging plus one backup generation can
   retain the current and immediately previous draft contents. Draft data is
-  also removed when you confirm **Clear all**, choose **Clear draft** after
-  sharing, clear the app's storage, or uninstall the app. Sharing does not
-  delete a draft unless you explicitly choose that option.
+  also removed when you confirm **Clear all**, clear the app's storage, or
+  uninstall the app. Exporting/sharing retains the draft by default without
+  a cleanup prompt; use **Clear all** explicitly when starting over.
+- If saving a draft fails, a persistent warning offers **Retry saving draft**.
+  Keep the app open and retry, or export a PDF to preserve a separate copy.
+  A successful retry saves the current pages, including edits made since the
+  failure; it does not make the OS-managed cache durable.
+- Deleting a page offers **Undo** for four seconds (extended by the platform's
+  accessible-navigation mode). Unrelated transient feedback waits until Undo
+  is used or expires; only its newest message is kept. A new deletion replaces
+  the previous Undo. Exporting or confirmed clearing deliberately discards Undo
+  and any waiting feedback.
 - PDF sharing starts from in-memory bytes. Depending on the platform,
   `share_plus` may materialize a copy in the app/OS cache for the receiving app;
   that cache is OS-managed and is not guaranteed to disappear immediately

@@ -386,8 +386,12 @@ void main() {
     await tester.pumpAndSettle();
     await editFirstPage(tester);
     expect(operations.previewCalls, 0);
-    expect(find.textContaining('too much temporary memory'), findsOneWidget);
+    expect(find.textContaining('too much temporary memory'), findsNothing);
     expect(find.byType(CornerAdjustScreen), findsNothing);
+    expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('too much temporary memory'), findsOneWidget);
   });
 
   testWidgets('dismissing Undo releases image-processing headroom', (
