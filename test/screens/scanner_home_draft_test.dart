@@ -136,9 +136,16 @@ void main() {
     DraftStore store, {
     List<ScannedPage> pages = const [],
     SharePlus? sharePlus,
+    bool accessibleNavigation = false,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(accessibleNavigation: accessibleNavigation),
+          child: child!,
+        ),
         home: ScannerHomePage(
           initialPages: pages,
           draftStore: store,
@@ -179,7 +186,7 @@ void main() {
     completer.complete(restored);
     await tester.pump();
 
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     expect(find.byTooltip('Delete page 1'), findsOneWidget);
     expect(find.byTooltip('Delete page 2'), findsOneWidget);
     expect(store.saves, isEmpty);
@@ -205,6 +212,35 @@ void main() {
     expect(store.saves.last, orderedEquals([first, second, third]));
     expect(find.byTooltip('Delete page 2'), findsOneWidget);
   });
+
+  for (final accessibleNavigation in [false, true]) {
+    for (final pageCount in [1, 2]) {
+      testWidgets('deletion Undo expires after four seconds '
+          '($pageCount pages, accessibleNavigation=$accessibleNavigation)', (
+        tester,
+      ) async {
+        final store = _DraftStore();
+        await pumpHome(
+          tester,
+          store,
+          pages: [for (var i = 1; i <= pageCount; i++) page(i)],
+          accessibleNavigation: accessibleNavigation,
+        );
+        await tapDelete(tester, 1);
+        await tester.pumpAndSettle();
+        expect(find.text('Page deleted.'), findsOneWidget);
+        expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 3));
+        expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+        expect(find.text('Page deleted.'), findsNothing);
+        expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
+        expect(store.saves.single, hasLength(pageCount - 1));
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
 
   testWidgets('two rapid deletes expose only the newest Undo', (tester) async {
     final store = _DraftStore();
@@ -310,7 +346,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Clear all pages?'), findsOneWidget);
     expect(store.clearCalls, 0);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
@@ -432,7 +468,7 @@ void main() {
     await tester.pump();
 
     expect(store.clearCalls, 1);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     expect(find.text('Could not clear the saved draft.'), findsOneWidget);
     expect(find.text('Clearing draft...'), findsNothing);
     expect(iconButton(tester, 'Delete page 1').onPressed, isNotNull);
@@ -451,7 +487,7 @@ void main() {
       sharePlus: SharePlus.custom(sharePlatform),
     );
 
-    await tester.tap(find.text('Save as PDF (1 pages)'));
+    await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntilFound(
       tester,
       find.text('Could not generate or share the PDF.'),
@@ -480,7 +516,7 @@ void main() {
       sharePlus: SharePlus.custom(platform),
     );
     final staleDelete = iconButton(tester, 'Delete page 2').onPressed!;
-    await tester.tap(find.text('Save as PDF (2 pages)'));
+    await tester.tap(find.text('Export PDF (2 pages)'));
     // The share is still parked on its Completer here, so the export spinner
     // keeps scheduling frames and nothing can settle yet.
     await pumpUntil(tester, () => platform.calls == 1, settle: false);
@@ -493,7 +529,7 @@ void main() {
 
     expect(find.text('Keep this draft?'), findsNothing);
     expect(store.clearCalls, 0);
-    expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     staleDelete();
     await tester.pump();
     expect(store.saves.last, orderedEquals([first]));
@@ -511,18 +547,18 @@ void main() {
         pages: [page(1)],
         sharePlus: SharePlus.custom(platform),
       );
-      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await tester.tap(find.text('Export PDF (1 page)'));
       await pumpUntil(tester, () => platform.calls == 1);
       expect(find.text('Keep this draft?'), findsNothing);
       expect(find.textContaining('The PDF was shared'), findsNothing);
-      expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+      expect(find.text('Export PDF (1 page)'), findsOneWidget);
       expect(
         find.text('Drafts are temporary. Export a PDF to keep a copy.'),
         findsOneWidget,
       );
       expect(store.clearCalls, 0);
       // Exporting again also leaves the draft intact without an extra decision.
-      await tester.tap(find.text('Save as PDF (1 pages)'));
+      await tester.tap(find.text('Export PDF (1 page)'));
       await pumpUntil(tester, () => platform.calls == 2);
       expect(find.byType(AlertDialog), findsNothing);
       expect(store.clearCalls, 0);
@@ -533,7 +569,7 @@ void main() {
       expect(store.clearCalls, 0);
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pumpAndSettle();
-      expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+      expect(find.text('Export PDF (1 page)'), findsOneWidget);
       await tester.tap(find.byTooltip('Clear all'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));

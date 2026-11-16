@@ -99,8 +99,8 @@ and filters run on real OpenCV (`opencv_dart`) on both mobile platforms.
   Keep the app open and retry, or export a PDF to preserve a separate copy.
   A successful retry saves the current pages, including edits made since the
   failure; it does not make the OS-managed cache durable.
-- Deleting a page offers **Undo** for four seconds (extended by the platform's
-  accessible-navigation mode). Unrelated transient feedback waits until Undo
+- Deleting a page offers **Undo** for four seconds. Unrelated transient
+  feedback waits until Undo
   is used or expires; only its newest message is kept. A new deletion replaces
   the previous Undo. Exporting or confirmed clearing deliberately discards Undo
   and any waiting feedback.

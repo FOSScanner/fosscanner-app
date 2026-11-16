@@ -73,6 +73,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   List<ScannedPage>? _activeDraftSnapshot;
   ScannedPage? _undoPage;
   bool _isDraftSaveScheduled = false;
+  bool _draftSaveFailed = false;
+  String? _deferredMessage;
   var _draftRevision = 0;
   var _documentGeneration = 0;
   var _undoGeneration = 0;
@@ -141,8 +143,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           _activeDraftSnapshot = snapshot;
           try {
             await widget.draftStore.save(snapshot);
+            if (mounted) setState(() => _draftSaveFailed = false);
           } catch (_) {
-            if (mounted) _showMessage('Could not save the draft.');
+            if (mounted) setState(() => _draftSaveFailed = true);
           } finally {
             _activeDraftSnapshot = null;
             if (mounted) setState(() {});
@@ -150,6 +153,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         }
       } finally {
         _isDraftSaveScheduled = false;
+        if (mounted) setState(() {});
       }
     });
   }
@@ -240,7 +244,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return true;
   }
 
-  void _showMessage(String message) => showTransientMessage(context, message);
+  void _showMessage(String message) {
+    // Only the newest informational message survives until Undo expires or is
+    // used. New deletions, export, and explicit clearing deliberately discard it.
+    if (_undoPage != null) {
+      _deferredMessage = message;
+    } else {
+      showTransientMessage(context, message);
+    }
+  }
 
   Future<void> _openSourceCode() async {
     try {
@@ -698,6 +710,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_isDocumentInteractionLocked || index < 0 || index >= _pages.length) {
       return;
     }
+    _deferredMessage = null;
     _undoPage = _pages[index];
     final undoGeneration = ++_undoGeneration;
     final messenger = ScaffoldMessenger.of(context);
@@ -707,6 +720,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final controller = messenger.showSnackBar(
       SnackBar(
         content: const Text('Page deleted.'),
+        // Flutter otherwise makes action snackbars persistent by default.
+        // Explicitly opt into expiry even though Undo provides an action.
+        persist: false,
+        duration: const Duration(seconds: 4),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
@@ -739,6 +756,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       controller.closed.then((_) {
         if (!mounted || undoGeneration != _undoGeneration) return;
         setState(() => _undoPage = null);
+        final message = _deferredMessage;
+        _deferredMessage = null;
+        if (message != null) _showMessage(message);
       }),
     );
   }
@@ -770,7 +790,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear all pages?'),
-        content: const Text('This removes every page from the current draft.'),
+        content: const Text(
+          'This removes every page from the current draft. '
+          'Drafts are temporary app-cache data, not saved PDFs. '
+          'PDFs already shared are not removed.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -808,43 +832,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       ScaffoldMessenger.of(context).clearSnackBars();
     }
     setState(() {
-      if (cleared) _pages.clear();
+      if (cleared) {
+        _pages.clear();
+        _draftSaveFailed = false;
+        _deferredMessage = null;
+      }
       _isClearingDraft = false;
     });
-  }
-
-  Future<void> _askWhetherToKeepDraft(int exportedRevision) async {
-    if (_isClearingDraft ||
-        _pages.isEmpty ||
-        exportedRevision != _draftRevision) {
-      return;
-    }
-    final clear = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Keep this draft?'),
-        content: const Text(
-          'The PDF was shared. You can keep these pages for later or clear the draft now.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Keep draft'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Clear draft'),
-          ),
-        ],
-      ),
-    );
-    if (clear != true ||
-        !mounted ||
-        _isClearingDraft ||
-        exportedRevision != _draftRevision) {
-      return;
-    }
-    await _clearCurrentDraft();
   }
 
   bool get _ocrSupported =>
@@ -965,9 +959,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // headroom or be restored by a callback captured before the export lock.
     _undoGeneration++;
     _undoPage = null;
+    _deferredMessage = null;
     ScaffoldMessenger.of(context).clearSnackBars();
     final pages = List<ScannedPage>.of(_pages, growable: false);
-    final exportedRevision = _draftRevision;
     final useOcr = _ocrSupported && _useOcr;
     // Capture the required iPad popover anchor before awaiting worker results.
     final shareOrigin = _shareOrigin;
@@ -980,7 +974,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pdfProgress = 0;
     });
 
-    var shared = false;
     try {
       // Popping an editor does not interrupt its active worker. Use the same
       // queue so PDF/OCR processing cannot overlap that native allocation.
@@ -997,7 +990,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _isSharingPdf = true;
       });
       final prefix = pdf.searchable ? 'FOSScanner_searchable' : 'FOSScanner';
-      final result = await _sharePdfBytes(
+      await _sharePdfBytes(
         pdf.bytes,
         fileName: '${prefix}_${DateTime.now().millisecondsSinceEpoch}.pdf',
         message: pdf.searchable
@@ -1005,7 +998,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             : 'Document scanned with FOSScanner',
         shareOrigin: shareOrigin,
       );
-      shared = result.status != ShareResultStatus.dismissed;
     } catch (error) {
       if (ocr_service.isCancellation(error) ||
           error is image_pdf.ImagePdfCancelledException) {
@@ -1026,9 +1018,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           _pdfProgress = null;
         });
       }
-    }
-    if (shared && mounted && !_isClearingDraft && _pages.isNotEmpty) {
-      await _askWhetherToKeepDraft(exportedRevision);
     }
   }
 
@@ -1215,7 +1204,44 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
         ],
       ),
-      body: _pages.isEmpty
+      body: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            if (_pages.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Text('Drafts are temporary. Export a PDF to keep a copy.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  textAlign: TextAlign.center),
+              ),
+            if (_draftSaveFailed)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: constraints.maxHeight * 0.6,
+                ),
+                child: SingleChildScrollView(
+                  child: MaterialBanner(
+                    content: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        'Could not save the latest draft changes. '
+                        'Keep the app open and retry. Drafts are temporary '
+                        'app-cache data, not saved PDFs.',
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: _isDraftSaveScheduled || _isClearingDraft
+                            ? null
+                            : _queueDraftSave,
+                        child: const Text('Retry saving draft'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            Expanded(
+              child: _pages.isEmpty
           ? Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(32.0),
@@ -1379,6 +1405,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 );
               },
             ),
+                ),
+              ],
+            ),
+      ),
       floatingActionButton: _cameraSupported
           ? FloatingActionButton(
               onPressed:
