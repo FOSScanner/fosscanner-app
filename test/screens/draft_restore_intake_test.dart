@@ -180,7 +180,11 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsNothing);
 
       store.loaded.complete([restored]);
-      for (var i = 0; i < 50 && find.text('Next').evaluate().isEmpty; i++) {
+      for (
+        var i = 0;
+        i < 50 && find.text('Preview page').evaluate().isEmpty;
+        i++
+      ) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)),
         );
@@ -189,9 +193,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(picker.lostDataCalls, 1);
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
-      await tester.tap(find.text('Next'));
+      await tester.tap(find.text('Preview page'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Confirm'));
+      await tester.tap(find.text('Add page'));
       await tester.pumpAndSettle();
 
       expect(find.text('Export PDF (2 pages)'), findsOneWidget);

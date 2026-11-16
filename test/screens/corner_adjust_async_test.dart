@@ -285,12 +285,12 @@ void main() {
     await _waitForPreviewStart(tester, operations, 0);
     operations.previewResults.single.complete(_previews(bytes));
     await _waitForFinalStart(tester, operations, 0);
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pump();
-    await tester.tap(find.text('Gray'));
+    await tester.tap(find.text('Grayscale'));
     await tester.pump();
     await tester.pump();
-    await tester.tap(find.text('Confirm'));
+    await tester.tap(find.text('Save changes'));
     await tester.pump();
     await tester.pump();
 
@@ -306,13 +306,13 @@ void main() {
     expect(operations.exportResults, isEmpty);
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes'))
           .onPressed,
       isNull,
     );
     operations.finalResults[1].complete(bytes);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm'));
+    await tester.tap(find.text('Save changes'));
     await tester.pump();
     await tester.pump();
 

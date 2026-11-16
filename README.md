@@ -39,9 +39,17 @@ For older 32-bit ARM phones, use `app-armeabi-v7a-release.apk` instead.
 - Keep the last successful preview while adjustments update; retry a failed
   preview before confirming the page
 - Tap a saved page for a zoomable preview with its current filters and
-  adjustments; choose Edit to make changes
+  adjustments; choose Edit to open appearance settings directly, or
+  **Adjust crop** to change its corners
 - Re-edit any page after the fact (corners, filter, rotation, brightness,
-  and contrast) without re-scanning
+  and contrast) without re-scanning. Brightness and contrast show numeric
+  values; **Reset adjustments** restores neutral brightness and contrast
+  without changing the crop, filter, or rotation
+- Crop guidance includes **Reset crop** to restore the initially detected
+  (or previously saved) corners, and **Use full image** to include the entire
+  photo. If detection fails, review the suggested inset crop before continuing
+- Choose **Preview page**, then **Add page** for a new scan or **Save changes**
+  when editing an existing page
 - Capture multiple pages in sequence and reorder them with drag-and-drop
 - Automatically restore an unfinished draft after a native app restart
 - Import existing photos from your gallery instead of (or alongside)

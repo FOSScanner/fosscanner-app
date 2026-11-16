@@ -464,6 +464,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       source: source,
       isBatchImport: isBatchImport,
       initialCorners: page?.corners,
+      startWithAdjustments: page != null,
       initialFilter: page?.filter ?? PageFilter.original,
       initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
       initialBrightness: page?.brightness ?? 0,

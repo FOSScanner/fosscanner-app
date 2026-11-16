@@ -28,8 +28,8 @@ class _QueuedWorkResult<T> {
 const _filterLabels = {
   PageFilter.original: 'Original',
   PageFilter.autoEnhance: 'Enhance',
-  PageFilter.grayscale: 'Gray',
-  PageFilter.blackAndWhite: 'B&W',
+  PageFilter.grayscale: 'Grayscale',
+  PageFilter.blackAndWhite: 'Black & white',
 };
 
 /// The original picker source may be unknown after Android activity recovery.
@@ -56,6 +56,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.source,
     this.isBatchImport = false,
     this.initialCorners,
+    this.startWithAdjustments = false,
     this.initialFilter = PageFilter.original,
     this.initialRotationQuarterTurns = 0,
     this.initialBrightness = 0.0,
@@ -72,6 +73,8 @@ class CornerAdjustScreen extends StatefulWidget {
   /// Refers to the original selection, including its final image.
   final bool isBatchImport;
   final List<Offset>? initialCorners;
+  /// Open saved appearance directly; crop remains available.
+  final bool startWithAdjustments;
   final PageFilter initialFilter;
   final int initialRotationQuarterTurns;
   final double initialBrightness;
@@ -87,6 +90,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
   bool _showFullImageNotice = false;
+  List<Offset>? _resetCorners;
   bool _isProcessing = false;
   bool _isLeaving = false;
   String? _error;
@@ -157,6 +161,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _imageSize = size;
         _corners = corners;
         _showFullImageNotice = !hasCorners;
+        _resetCorners = List<Offset>.of(corners);
+        if (widget.startWithAdjustments && hasCorners) _step = _Step.filter;
       });
       unawaited(_updatePreviews());
     } catch (error) {
@@ -453,7 +459,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   String get _appBarTitle {
-    if (_step == _Step.filter) return 'Preview';
+    if (_step == _Step.filter) return 'Adjust appearance';
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
@@ -468,18 +474,29 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         imageBytes: widget.originalBytes,
         imageSize: imageSize,
         corners: corners,
-        onChanged: (c) {
-          setState(() {
-            _corners = c;
-            _showFullImageNotice = false;
-          });
-          unawaited(_updatePreviews());
-        },
+        onChanged: _setCrop,
       ),
     );
     final actions = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text('Drag the corners to match the page edges.'),
+        ),
+        Wrap(
+          alignment: WrapAlignment.center,
+          children: [
+            TextButton(
+              onPressed: () => _setCrop(List<Offset>.of(_resetCorners!)),
+              child: const Text('Reset crop'),
+            ),
+            TextButton(
+              onPressed: () => _setCrop(_fullBoundsCorners(imageSize)),
+              child: const Text('Use full image'),
+            ),
+          ],
+        ),
         if (_showFullImageNotice)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -530,7 +547,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Next'),
+                        : const Text('Preview page'),
                   ),
                 ),
               ],
@@ -542,9 +559,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final scrollable =
-            _canSkipImage &&
-            (constraints.maxHeight < 480 ||
-                MediaQuery.textScalerOf(context).scale(16) > 20);
+            constraints.maxHeight < 480 ||
+                MediaQuery.textScalerOf(context).scale(16) > 20;
         if (scrollable) {
           return SingleChildScrollView(
             key: const Key('batch_review_scroll_view'),
@@ -568,6 +584,29 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       },
     );
   }
+
+  void _setCrop(List<Offset> corners) {
+    setState(() {
+      _corners = corners;
+      _showFullImageNotice = false;
+    });
+    unawaited(_updatePreviews());
+  }
+
+  Widget _resetAdjustmentsButton() => TextButton(
+    onPressed: _isProcessing
+        ? null
+        : () {
+            setState(() {
+              _brightness = 0;
+              _contrast = 1;
+              _finalPreviewGeneration++;
+              _previewStatus = _PreviewStatus.pending;
+            });
+            unawaited(_updateFinalPreview());
+          },
+    child: const Text('Reset adjustments'),
+  );
 
   Widget _boundedPreviewImage(
     Uint8List bytes, {
@@ -608,6 +647,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 max: 2.0,
                 onChanged: (value) => _contrast = value,
               ),
+              _resetAdjustmentsButton(),
               _filterStrip(context, height: 92),
               _filterActions(scrollable: false),
             ],
@@ -642,6 +682,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 max: 2.0,
                 onChanged: (value) => _contrast = value,
               ),
+              _resetAdjustmentsButton(),
               _filterStrip(context, height: stripHeight),
               _filterActions(scrollable: true),
             ],
@@ -679,36 +720,46 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     required double min,
     required double max,
     required ValueChanged<double> onChanged,
-  }) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: Row(
-      children: [
-        SizedBox(width: 88, child: Text(label)),
-        Expanded(
-          child: Slider(
-            value: value,
-            min: min,
-            max: max,
-            onChanged: _isProcessing
-                ? null
-                : (newValue) {
-                    if (!mounted || _isProcessing) return;
-                    setState(() {
-                      onChanged(newValue);
-                      // Invalidate in-flight work immediately, not only when
-                      // the slider is released, so it cannot mark a drag ready.
-                      _finalPreviewGeneration++;
-                      _previewStatus = _PreviewStatus.pending;
-                    });
-                  },
-            onChangeEnd: _isProcessing
-                ? null
-                : (_) => unawaited(_updateFinalPreview()),
+  }) {
+    final displayValue = label == 'Brightness'
+        ? '${value > 0 ? '+' : ''}${value.round()}'
+        : '${value.toStringAsFixed(2)}×';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$label: $displayValue'),
+          MergeSemantics(
+            child: Semantics(
+              label: label,
+              child: Slider(
+                value: value,
+                min: min,
+                max: max,
+                semanticFormatterCallback: (v) => label == 'Brightness'
+                    ? '${v.round()}, neutral 0'
+                    : '${v.toStringAsFixed(2)} times, neutral 1',
+                onChanged: _isProcessing
+                    ? null
+                    : (newValue) {
+                        if (!mounted || _isProcessing) return;
+                        setState(() {
+                        onChanged(newValue);
+                        _finalPreviewGeneration++;
+                        _previewStatus = _PreviewStatus.pending;
+                      });
+                      },
+                onChangeEnd: _isProcessing
+                    ? null
+                    : (_) => unawaited(_updateFinalPreview()),
+              ),
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 
   Widget _filterStrip(BuildContext context, {required double height}) =>
       SizedBox(
@@ -757,7 +808,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Widget _filterActions({required bool scrollable}) {
     final back = OutlinedButton(
       onPressed: _isProcessing ? null : _leaveFilterStep,
-      child: const Text('Back'),
+      child: const Text('Adjust crop'),
     );
     final confirm = FilledButton(
       onPressed: _canConfirm ? _confirm : null,
@@ -767,7 +818,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const Text('Confirm'),
+          : Text(_isEditingExistingPage ? 'Save changes' : 'Add page'),
     );
     return SafeArea(
       top: false,
@@ -809,7 +860,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       label: '${_filterLabels[filter]} filter',
       child: Padding(
         padding: const EdgeInsets.only(right: 12),
-        child: GestureDetector(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
           onTap: _isProcessing
               ? null
               : () {
