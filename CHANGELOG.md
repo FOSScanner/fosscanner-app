@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0](https://github.com/FOSScanner/fosscanner-app/compare/v1.4.0...v1.5.0) (2026-11-16)
+
+
+### Features
+
+* prepare scanner UI improvements for 1.5.0 ([6efbcd8](https://github.com/FOSScanner/fosscanner-app/commit/6efbcd8039b6ef00a1532f7b534d971f6a2c98b3))
+* release scanner UI improvements for 1.5.0 ([cc8ced4](https://github.com/FOSScanner/fosscanner-app/commit/cc8ced4b6b6cb50c8c9620005316e93a6948e690))
+* **ui:** improve page editing guidance and accessible adjustments ([9472d4c](https://github.com/FOSScanner/fosscanner-app/commit/9472d4c77444d33c46f18c69d4f979ca9a101ba3))
+* **ui:** simplify document review and PDF export controls ([8cfba94](https://github.com/FOSScanner/fosscanner-app/commit/8cfba9434a8126baa192d0daf72dd99466cc0519))
+
+
+### Bug Fixes
+
+* account for retained images and serialize memory-heavy jobs ([0f24d08](https://github.com/FOSScanner/fosscanner-app/commit/0f24d080e70b6a3231cd3df780d5465ea7d786ac))
+* account for retained images and serialize memory-heavy jobs ([4ce0fee](https://github.com/FOSScanner/fosscanner-app/commit/4ce0fee7f41a328b683ae37b76e74203f4c97fef)), closes [#73](https://github.com/FOSScanner/fosscanner-app/issues/73)
+* **android:** restore production identity in release candidate ([fdd193c](https://github.com/FOSScanner/fosscanner-app/commit/fdd193c08d47edac1a005e6b6fdd6b9040da1569))
+* **ui:** allow complete inspection of scanned codes ([c86975b](https://github.com/FOSScanner/fosscanner-app/commit/c86975b4d803115c57fb94e9356ea0031a757a29))
+* **ui:** match page review actions to image intake context ([96bcfe3](https://github.com/FOSScanner/fosscanner-app/commit/96bcfe3fc57526b44c23476f7d76a7bf53f1d730))
+* **ui:** preserve full image when page edges are not detected ([de72dd2](https://github.com/FOSScanner/fosscanner-app/commit/de72dd2394e036a6ecbac65b4bd865b6d7b2e4e2))
+* **ui:** reconcile editor and export flows for release candidate ([d7883ed](https://github.com/FOSScanner/fosscanner-app/commit/d7883ed7033d1505c2f69312064e17071e2c1fa6))
+* **ui:** repair crop handle drags and default OCR to off ([ee25ec1](https://github.com/FOSScanner/fosscanner-app/commit/ee25ec18c3cadb5f65e516bac9627696d9b8464f))
+* **ui:** require a current adjustment preview before confirming ([d0f65e1](https://github.com/FOSScanner/fosscanner-app/commit/d0f65e12cf6e0e1e647cae52eb566cc424cf88e9))
+* **ux:** retain drafts and protect actionable failure feedback ([78749b2](https://github.com/FOSScanner/fosscanner-app/commit/78749b2d29c6788589ac3563405b874136d47886))
+
 ## [1.4.0](https://github.com/FOSScanner/fosscanner-app/compare/v1.3.0...v1.4.0) (2026-09-19)
 
 
