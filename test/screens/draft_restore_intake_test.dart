@@ -151,7 +151,7 @@ void main() {
 
         store.loaded.complete([savedPage()]);
         await tester.pumpAndSettle();
-        expect(find.text('Save as PDF (1 pages)'), findsOneWidget);
+        expect(find.text('Export PDF (1 page)'), findsOneWidget);
         expect(find.text('Restoring draft...'), findsNothing);
         await tester.tap(find.byTooltip(tooltip));
         await tester.pumpAndSettle();
@@ -180,7 +180,11 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsNothing);
 
       store.loaded.complete([restored]);
-      for (var i = 0; i < 50 && find.text('Next').evaluate().isEmpty; i++) {
+      for (
+        var i = 0;
+        i < 50 && find.text('Preview page').evaluate().isEmpty;
+        i++
+      ) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)),
         );
@@ -189,12 +193,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(picker.lostDataCalls, 1);
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
-      await tester.tap(find.text('Next'));
+      await tester.tap(find.text('Preview page'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Confirm'));
+      await tester.tap(find.text('Add page'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Save as PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
       expect(store.saves.single, hasLength(2));
       expect(store.saves.single.first, same(restored));
       expect(store.saves.single.last.originalBytes, orderedEquals(imageBytes));

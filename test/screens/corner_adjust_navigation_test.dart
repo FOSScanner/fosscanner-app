@@ -61,6 +61,7 @@ void main() {
     CornerAdjustOperations operations,
     Uint8List originalBytes, {
     ValueChanged<ScannedPage?>? onResult,
+    bool startWithAdjustments = false,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -73,6 +74,7 @@ void main() {
                     builder: (_) => CornerAdjustScreen(
                       originalBytes: originalBytes,
                       initialCorners: corners,
+                      startWithAdjustments: startWithAdjustments,
                       operations: operations,
                     ),
                   ),
@@ -87,18 +89,64 @@ void main() {
     );
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
-    expect(find.text('Edit page'), findsOneWidget);
+    expect(
+      find.text(startWithAdjustments ? 'Adjust appearance' : 'Edit page'),
+      findsOneWidget,
+    );
   }
+
+  testWidgets(
+    'saved appearance opens directly and back cancels without saving',
+    (tester) async {
+      ScannedPage? result;
+      await openAdjuster(
+        tester,
+        _Operations(imageBytes),
+        imageBytes,
+        startWithAdjustments: true,
+        onResult: (page) => result = page,
+      );
+      expect(find.text('Save changes'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Open'), findsOneWidget);
+      expect(result, isNull);
+    },
+  );
+
+  testWidgets('direct appearance can adjust crop and save the existing page', (
+    tester,
+  ) async {
+    ScannedPage? result;
+    await openAdjuster(
+      tester,
+      _Operations(imageBytes),
+      imageBytes,
+      startWithAdjustments: true,
+      onResult: (page) => result = page,
+    );
+    await tester.tap(find.text('Adjust crop'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit page'), findsOneWidget);
+    await tester.tap(find.text('Preview page'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Open'), findsOneWidget);
+    expect(result?.corners, corners);
+    expect(result?.brightness, 0);
+    expect(result?.contrast, 1);
+  });
 
   testWidgets('filter navigation uses removable local history', (tester) async {
     await openAdjuster(tester, _Operations(imageBytes), imageBytes);
 
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pump();
-    expect(find.text('Preview'), findsOneWidget);
+    expect(find.text('Adjust appearance'), findsOneWidget);
     expect(
       ModalRoute.of(
-        tester.element(find.text('Preview')),
+        tester.element(find.text('Adjust appearance')),
       )!.willHandlePopInternally,
       isTrue,
     );
@@ -114,9 +162,9 @@ void main() {
       isFalse,
     );
 
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Back'));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Adjust crop'));
     await tester.pump();
     expect(find.text('Edit page'), findsOneWidget);
     expect(
@@ -126,7 +174,7 @@ void main() {
       isFalse,
     );
 
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pump();
     await tester.tap(find.byTooltip('Back'));
     await tester.pump();
@@ -149,22 +197,22 @@ void main() {
       imageBytes,
       onResult: (value) => result = value,
     );
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Preview page'));
     await tester.pump();
 
-    await tester.tap(find.text('Confirm'));
+    await tester.tap(find.text('Save changes'));
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsWidgets);
 
     await tester.binding.handlePopRoute();
     await tester.pump();
-    expect(find.text('Preview'), findsOneWidget);
+    expect(find.text('Adjust appearance'), findsOneWidget);
     expect(find.text('Open'), findsNothing);
 
     completer.complete(imageBytes);
     await tester.pumpAndSettle();
     expect(find.text('Open'), findsOneWidget);
-    expect(find.text('Preview'), findsNothing);
+    expect(find.text('Adjust appearance'), findsNothing);
     expect(result, isNotNull);
     expect(result!.processedBytes, orderedEquals(imageBytes));
   });

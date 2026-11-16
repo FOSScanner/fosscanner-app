@@ -2,7 +2,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
-import 'package:flutter/gestures.dart' show computeHitSlop, kPrimaryButton;
+import 'package:flutter/gestures.dart'
+    show computeHitSlop, kPrimaryButton, EagerGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 
@@ -44,6 +45,19 @@ class CornerOverlay extends StatefulWidget {
 
   @override
   State<CornerOverlay> createState() => _CornerOverlayState();
+}
+
+// Join the gesture arena only for touches on a corner. Raw pointer handling
+// below keeps exact drag/cancellation behavior, while this recognizer prevents
+// a parent scroll view from moving at the same time as a corner drag.
+class _CornerEagerGestureRecognizer extends EagerGestureRecognizer {
+  bool Function(Offset)? hitTestCorner;
+
+  @override
+  bool isPointerAllowed(PointerDownEvent event) =>
+      event.buttons & kPrimaryButton != 0 &&
+      (hitTestCorner?.call(event.localPosition) ?? false) &&
+      super.isPointerAllowed(event);
 }
 
 class _CornerOverlayState extends State<CornerOverlay> {
@@ -102,10 +116,19 @@ class _CornerOverlayState extends State<CornerOverlay> {
     assert(_liveCorners.length == 4);
     return LayoutBuilder(
       builder: (context, constraints) {
+        // Reserve space for the entire handle, including its hit region, at
+        // image boundaries. Otherwise its visible outer half cannot be touched.
+        final gutter = math.min(
+          24.0,
+          math.max(0.0, (constraints.biggest.shortestSide - 48) / 2),
+        );
         final fitted = applyBoxFit(
           BoxFit.contain,
           widget.imageSize,
-          constraints.biggest,
+          Size(
+            constraints.maxWidth - 2 * gutter,
+            constraints.maxHeight - 2 * gutter,
+          ),
         );
         final displaySize = fitted.destination;
         final scale = displaySize.width / widget.imageSize.width;
@@ -140,90 +163,102 @@ class _CornerOverlayState extends State<CornerOverlay> {
           return nearestIndex;
         }
 
-        return Listener(
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: (event) {
-            if (_activePointer != null || event.buttons & kPrimaryButton == 0) {
-              return;
-            }
-            final index = nearestCorner(event.localPosition);
-            if (index == null) return;
-            _activePointer = event.pointer;
-            _pendingIndex = index;
-            _pointerDownPosition = event.localPosition;
-            _cornerAtPointerDown = _liveCorners[index];
+        return RawGestureDetector(
+          gestures: <Type, GestureRecognizerFactory>{
+            _CornerEagerGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  _CornerEagerGestureRecognizer
+                >(_CornerEagerGestureRecognizer.new, (recognizer) {
+                  recognizer.hitTestCorner = (position) =>
+                      nearestCorner(position) != null;
+                }),
           },
-          onPointerMove: (event) {
-            if (_activePointer != event.pointer || scale <= 0) return;
-            final index = _pendingIndex;
-            final downPosition = _pointerDownPosition;
-            final initialCorner = _cornerAtPointerDown;
-            if (index == null ||
-                downPosition == null ||
-                initialCorner == null) {
-              return;
-            }
-            final totalDelta = event.localPosition - downPosition;
-            if (_draggingIndex == null &&
-                totalDelta.distance <= computeHitSlop(event.kind, null)) {
-              return;
-            }
-            setState(() {
-              _draggingIndex = index;
-              _liveCorners = [..._liveCorners];
-              _liveCorners[index] = _clampToImage(
-                initialCorner + totalDelta / scale,
-              );
-            });
-          },
-          onPointerUp: (event) {
-            if (_activePointer != event.pointer) return;
-            final shouldCommit = _draggingIndex != null;
-            _clearPointerState();
-            if (shouldCommit) {
-              setState(() => _draggingIndex = null);
-              widget.onChanged([..._liveCorners]);
-            }
-          },
-          onPointerCancel: (event) {
-            if (_activePointer == event.pointer) _cancelDrag();
-          },
-          child: Stack(
-            children: [
-              Positioned(
-                left: offsetX,
-                top: offsetY,
-                width: displaySize.width,
-                height: displaySize.height,
-                // Isolates the (potentially large) photo's paint layer from
-                // the quad/handles repainting every drag frame.
-                child: RepaintBoundary(
-                  child: Image(
-                    image: ResizeImage(
-                      MemoryImage(widget.imageBytes),
-                      width: _previewDecodeSize,
-                      height: _previewDecodeSize,
-                      policy: ResizeImagePolicy.fit,
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              if (_activePointer != null ||
+                  event.buttons & kPrimaryButton == 0) {
+                return;
+              }
+              final index = nearestCorner(event.localPosition);
+              if (index == null) return;
+              _activePointer = event.pointer;
+              _pendingIndex = index;
+              _pointerDownPosition = event.localPosition;
+              _cornerAtPointerDown = _liveCorners[index];
+            },
+            onPointerMove: (event) {
+              if (_activePointer != event.pointer || scale <= 0) return;
+              final index = _pendingIndex;
+              final downPosition = _pointerDownPosition;
+              final initialCorner = _cornerAtPointerDown;
+              if (index == null ||
+                  downPosition == null ||
+                  initialCorner == null) {
+                return;
+              }
+              final totalDelta = event.localPosition - downPosition;
+              if (_draggingIndex == null &&
+                  totalDelta.distance <= computeHitSlop(event.kind, null)) {
+                return;
+              }
+              setState(() {
+                _draggingIndex = index;
+                _liveCorners = [..._liveCorners];
+                _liveCorners[index] = _clampToImage(
+                  initialCorner + totalDelta / scale,
+                );
+              });
+            },
+            onPointerUp: (event) {
+              if (_activePointer != event.pointer) return;
+              final shouldCommit = _draggingIndex != null;
+              _clearPointerState();
+              if (shouldCommit) {
+                setState(() => _draggingIndex = null);
+                widget.onChanged([..._liveCorners]);
+              }
+            },
+            onPointerCancel: (event) {
+              if (_activePointer == event.pointer) _cancelDrag();
+            },
+            child: Stack(
+              children: [
+                Positioned(
+                  left: offsetX,
+                  top: offsetY,
+                  width: displaySize.width,
+                  height: displaySize.height,
+                  // Isolates the (potentially large) photo's paint layer from
+                  // the quad/handles repainting every drag frame.
+                  child: RepaintBoundary(
+                    child: Image(
+                      image: ResizeImage(
+                        MemoryImage(widget.imageBytes),
+                        width: _previewDecodeSize,
+                        height: _previewDecodeSize,
+                        policy: ResizeImagePolicy.fit,
+                      ),
+                      fit: BoxFit.fill,
                     ),
-                    fit: BoxFit.fill,
                   ),
                 ),
-              ),
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _QuadPainter(displayCorners, context),
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _QuadPainter(displayCorners, context),
+                  ),
                 ),
-              ),
-              for (var i = 0; i < 4; i++)
-                _cornerHandle(
-                  index: i,
-                  displayPos: displayCorners[i],
-                  targetRect: handleTargets[i],
-                  exposeSemantics: !hasOverlappingTargets,
-                ),
-              if (hasOverlappingTargets)
-                _combinedCornerSemantics(handleTargets),
-            ],
+                for (var i = 0; i < 4; i++)
+                  _cornerHandle(
+                    index: i,
+                    displayPos: displayCorners[i],
+                    targetRect: handleTargets[i],
+                    exposeSemantics: !hasOverlappingTargets,
+                  ),
+                if (hasOverlappingTargets)
+                  _combinedCornerSemantics(handleTargets),
+              ],
+            ),
           ),
         );
       },

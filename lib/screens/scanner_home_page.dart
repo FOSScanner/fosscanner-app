@@ -73,11 +73,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   List<ScannedPage>? _activeDraftSnapshot;
   ScannedPage? _undoPage;
   bool _isDraftSaveScheduled = false;
+  bool _draftSaveFailed = false;
+  String? _deferredMessage;
   var _draftRevision = 0;
   var _documentGeneration = 0;
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
+  bool _useOcr = false;
   bool _isGeneratingPdf = false;
+  bool _isSharingPdf = false;
   bool _isCancellingPdf = false;
   double? _pdfProgress;
   _PdfExporter? _pdfExporter;
@@ -139,8 +143,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           _activeDraftSnapshot = snapshot;
           try {
             await widget.draftStore.save(snapshot);
+            if (mounted) setState(() => _draftSaveFailed = false);
           } catch (_) {
-            if (mounted) _showMessage('Could not save the draft.');
+            if (mounted) setState(() => _draftSaveFailed = true);
           } finally {
             _activeDraftSnapshot = null;
             if (mounted) setState(() {});
@@ -148,6 +153,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         }
       } finally {
         _isDraftSaveScheduled = false;
+        if (mounted) setState(() {});
       }
     });
   }
@@ -238,7 +244,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return true;
   }
 
-  void _showMessage(String message) => showTransientMessage(context, message);
+  void _showMessage(String message) {
+    // Only the newest informational message survives until Undo expires or is
+    // used. New deletions, export, and explicit clearing deliberately discard it.
+    if (_undoPage != null) {
+      _deferredMessage = message;
+    } else {
+      showTransientMessage(context, message);
+    }
+  }
 
   Future<void> _openSourceCode() async {
     try {
@@ -267,7 +281,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           children: [
             Image.asset('assets/icon/icon.png', width: 40, height: 40),
             const SizedBox(width: 12),
-            const Text('FOSScanner'),
+            const Expanded(child: Text('FOSScanner')),
           ],
         ),
         content: SingleChildScrollView(
@@ -289,26 +303,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               const SizedBox(height: 20),
               const Divider(height: 1),
               const SizedBox(height: 12),
-              InkWell(
-                onTap: _openSourceCode,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.code,
-                      size: 18,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'View source code',
-                      style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ],
-                ),
+              TextButton.icon(
+                onPressed: _openSourceCode,
+                icon: const Icon(Icons.code),
+                label: const Text('View source code'),
               ),
               const SizedBox(height: 4),
               Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
@@ -354,6 +352,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         // Android image_picker recovery paths are app-owned cache copies.
         final result = await _addCapturedPhoto(
           files[index],
+          source: PageReviewSource.recovered,
+          isBatchImport: files.length > 1,
           deleteAfterRead: true,
           documentGeneration: documentGeneration,
         );
@@ -408,6 +408,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // Camera capture writes a fresh file that's genuinely ours to delete.
       await _addCapturedPhoto(
         photo,
+        source: PageReviewSource.camera,
         deleteAfterRead: true,
         documentGeneration: documentGeneration,
       );
@@ -450,6 +451,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         // that might actually be the user's original photo.
         final result = await _addCapturedPhoto(
           photo,
+          source: PageReviewSource.gallery,
+          isBatchImport: photos.length > 1,
           deleteAfterRead: false,
           documentGeneration: documentGeneration,
         );
@@ -465,10 +468,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   CornerAdjustScreen _buildEditor(
     Uint8List originalBytes, {
     ScannedPage? page,
+    PageReviewSource? source,
+    bool isBatchImport = false,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
+      source: source,
+      isBatchImport: isBatchImport,
       initialCorners: page?.corners,
+      startWithAdjustments: page != null,
       initialFilter: page?.filter ?? PageFilter.original,
       initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
       initialBrightness: page?.brightness ?? 0,
@@ -483,6 +491,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// through the detect/adjust flow before adding it as a page.
   Future<_PhotoIntakeResult> _addCapturedPhoto(
     XFile photo, {
+    required PageReviewSource source,
+    bool isBatchImport = false,
     required bool deleteAfterRead,
     required int documentGeneration,
   }) async {
@@ -575,9 +585,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
-    final result = await Navigator.of(
-      context,
-    ).push<ScannedPage>(MaterialPageRoute(builder: (_) => _buildEditor(bytes)));
+    final result = await Navigator.of(context).push<ScannedPage>(
+      MaterialPageRoute(
+        builder: (_) =>
+            _buildEditor(bytes, source: source, isBatchImport: isBatchImport),
+      ),
+    );
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
@@ -697,6 +710,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_isDocumentInteractionLocked || index < 0 || index >= _pages.length) {
       return;
     }
+    _deferredMessage = null;
     _undoPage = _pages[index];
     final undoGeneration = ++_undoGeneration;
     final messenger = ScaffoldMessenger.of(context);
@@ -706,6 +720,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final controller = messenger.showSnackBar(
       SnackBar(
         content: const Text('Page deleted.'),
+        // Flutter otherwise makes action snackbars persistent by default.
+        // Explicitly opt into expiry even though Undo provides an action.
+        persist: false,
+        duration: const Duration(seconds: 4),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
@@ -738,6 +756,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       controller.closed.then((_) {
         if (!mounted || undoGeneration != _undoGeneration) return;
         setState(() => _undoPage = null);
+        final message = _deferredMessage;
+        _deferredMessage = null;
+        if (message != null) _showMessage(message);
       }),
     );
   }
@@ -769,7 +790,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear all pages?'),
-        content: const Text('This removes every page from the current draft.'),
+        content: const Text(
+          'This removes every page from the current draft. '
+          'Drafts are temporary app-cache data, not saved PDFs. '
+          'PDFs already shared are not removed.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -807,43 +832,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       ScaffoldMessenger.of(context).clearSnackBars();
     }
     setState(() {
-      if (cleared) _pages.clear();
+      if (cleared) {
+        _pages.clear();
+        _draftSaveFailed = false;
+        _deferredMessage = null;
+      }
       _isClearingDraft = false;
     });
-  }
-
-  Future<void> _askWhetherToKeepDraft(int exportedRevision) async {
-    if (_isClearingDraft ||
-        _pages.isEmpty ||
-        exportedRevision != _draftRevision) {
-      return;
-    }
-    final clear = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Keep this draft?'),
-        content: const Text(
-          'The PDF was shared. You can keep these pages for later or clear the draft now.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Keep draft'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Clear draft'),
-          ),
-        ],
-      ),
-    );
-    if (clear != true ||
-        !mounted ||
-        _isClearingDraft ||
-        exportedRevision != _draftRevision) {
-      return;
-    }
-    await _clearCurrentDraft();
   }
 
   bool get _ocrSupported =>
@@ -934,9 +929,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<({Uint8List bytes, bool searchable})?> _createPdf(
-    List<ScannedPage> pages,
-  ) async {
-    if (_ocrSupported) {
+    List<ScannedPage> pages, {
+    required bool useOcr,
+  }) async {
+    if (useOcr) {
       try {
         return (bytes: await _createSearchablePdf(pages), searchable: true);
       } catch (error) {
@@ -949,7 +945,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
     if (!mounted) return null;
     setState(() {
-      // The user has confirmed a fresh export after an OCR failure.
+      // A confirmed fallback starts fresh after an OCR failure.
       _isCancellingPdf = false;
       _pdfExporter = _PdfExporter.imageOnly;
       _pdfProgress = 0;
@@ -963,22 +959,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // headroom or be restored by a callback captured before the export lock.
     _undoGeneration++;
     _undoPage = null;
+    _deferredMessage = null;
     ScaffoldMessenger.of(context).clearSnackBars();
     final pages = List<ScannedPage>.of(_pages, growable: false);
-    final exportedRevision = _draftRevision;
+    final useOcr = _ocrSupported && _useOcr;
     // Capture the required iPad popover anchor before awaiting worker results.
     final shareOrigin = _shareOrigin;
 
     setState(() {
       _isGeneratingPdf = true;
+      _isSharingPdf = false;
       _isCancellingPdf = false;
-      _pdfExporter = _ocrSupported
-          ? _PdfExporter.searchable
-          : _PdfExporter.imageOnly;
+      _pdfExporter = useOcr ? _PdfExporter.searchable : _PdfExporter.imageOnly;
       _pdfProgress = 0;
     });
 
-    var shared = false;
     try {
       // Popping an editor does not interrupt its active worker. Use the same
       // queue so PDF/OCR processing cannot overlap that native allocation.
@@ -987,12 +982,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         if (_isCancellingPdf) {
           throw const image_pdf.ImagePdfCancelledException();
         }
-        return _createPdf(pages);
+        return _createPdf(pages, useOcr: useOcr);
       });
       if (pdf == null || !mounted || _isCancellingPdf) return;
-      setState(() => _pdfProgress = null);
+      setState(() {
+        _pdfProgress = null;
+        _isSharingPdf = true;
+      });
       final prefix = pdf.searchable ? 'FOSScanner_searchable' : 'FOSScanner';
-      final result = await _sharePdfBytes(
+      await _sharePdfBytes(
         pdf.bytes,
         fileName: '${prefix}_${DateTime.now().millisecondsSinceEpoch}.pdf',
         message: pdf.searchable
@@ -1000,7 +998,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             : 'Document scanned with FOSScanner',
         shareOrigin: shareOrigin,
       );
-      shared = result.status != ShareResultStatus.dismissed;
     } catch (error) {
       if (ocr_service.isCancellation(error) ||
           error is image_pdf.ImagePdfCancelledException) {
@@ -1015,15 +1012,149 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (mounted) {
         setState(() {
           _isGeneratingPdf = false;
+          _isSharingPdf = false;
           _isCancellingPdf = false;
           _pdfExporter = null;
           _pdfProgress = null;
         });
       }
     }
-    if (shared && mounted && !_isClearingDraft && _pages.isNotEmpty) {
-      await _askWhetherToKeepDraft(exportedRevision);
-    }
+  }
+
+  Future<void> _showExportOptions() async {
+    if (!_canExport || !_ocrSupported) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) => SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'PDF export options',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Searchable text'),
+                  subtitle: Text(
+                    _useOcr
+                        ? 'Recognize text so you can search and select it in the PDF.'
+                        : 'Image-only PDF without text recognition.',
+                  ),
+                  value: _useOcr,
+                  onChanged: (value) {
+                    if (!mounted || !_canExport || !sheetContext.mounted) {
+                      return;
+                    }
+                    setState(() => _useOcr = value);
+                    updateSheet(() {});
+                  },
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Text recognition supports Latin-script text and runs '
+                  'entirely on your device. Your scans stay private.',
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String get _exportStatus {
+    if (_isClearingDraft) return 'Clearing draft...';
+    if (_isCancellingPdf) return 'Cancelling PDF...';
+    if (_isSharingPdf) return 'Opening share sheet...';
+    if (_pdfProgress == null) return 'Preparing PDF...';
+    return 'Generating PDF ${(_pdfProgress! * 100).round()}%';
+  }
+
+  Widget _buildExportBar() {
+    final busy = _isGeneratingPdf || _isClearingDraft;
+    return SafeArea(
+      key: const Key('pdf_export_bar'),
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Row(
+            children: busy
+                ? [
+                    SizedBox.square(
+                      dimension: 24,
+                      child: CircularProgressIndicator(
+                        value: _isCancellingPdf ? null : _pdfProgress,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(_exportStatus),
+                      ),
+                    ),
+                    if (_isGeneratingPdf && _pdfProgress != null)
+                      TextButton(
+                        onPressed: _isCancellingPdf
+                            ? null
+                            : _cancelPdfGeneration,
+                        child: const Text('Cancel'),
+                      ),
+                  ]
+                : [
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: _shareButtonKey,
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        onPressed: _canExport ? _generateAndSharePdf : null,
+                        icon: const Icon(Icons.picture_as_pdf),
+                        label: Text(
+                          'Export PDF (${_pages.length} '
+                          '${_pages.length == 1 ? 'page' : 'pages'})',
+                        ),
+                      ),
+                    ),
+                    if (_ocrSupported) ...[
+                      const SizedBox(width: 8),
+                      Semantics(
+                        value: _useOcr
+                            ? 'Searchable text enabled'
+                            : 'Image-only PDF',
+                        child: IconButton.filledTonal(
+                          onPressed: _canExport ? _showExportOptions : null,
+                          tooltip: 'PDF export options',
+                          icon: const Icon(Icons.tune),
+                        ),
+                      ),
+                    ],
+                  ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -1064,178 +1195,253 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   : _clearPages,
               tooltip: 'Clear all',
             ),
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            onSelected: (_) => _showAppInfo(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'about', child: Text('About FOSScanner')),
+            ],
+          ),
         ],
       ),
-      body: _pages.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_isRestoringDraft)
-                      const CircularProgressIndicator()
-                    else
-                      Icon(
-                        _cameraSupported
-                            ? Icons.camera_alt
-                            : Icons.photo_library_outlined,
-                        size: 80,
-                        color: Colors.grey,
-                      ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _isRestoringDraft
-                          ? 'Restoring draft...'
-                          : 'Ready to Scan',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isRestoringDraft
-                          ? 'Your saved pages will appear here.'
-                          : _cameraSupported
-                          ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
-                          : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ],
+      body: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            if (_pages.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                child: Text(
+                  'Drafts are temporary. Export a PDF to keep a copy.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  textAlign: TextAlign.center,
                 ),
               ),
-            )
-          : GridView.builder(
-              padding: const EdgeInsets.all(8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 0.7,
-              ),
-              itemCount: _pages.length,
-              itemBuilder: (context, index) {
-                final page = _pages[index];
-                final card = Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: _isDocumentInteractionLocked
-                        ? null
-                        : () => _openPage(index),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image(
-                          image: ResizeImage(
-                            MemoryImage(page.processedBytes),
-                            width: _thumbnailCacheWidth,
-                            height: _thumbnailCacheWidth,
-                            policy: ResizeImagePolicy.fit,
-                          ),
-                          fit: BoxFit.cover,
-                        ),
-                        Positioned(
-                          top: 8,
-                          left: 8,
-                          child: CircleAvatar(
-                            radius: 14,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primary,
-                            child: Text(
-                              '${index + 1}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
-                            ),
-                            child: IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                              ),
-                              tooltip: 'Delete page ${index + 1}',
-                              onPressed: _isDocumentInteractionLocked
-                                  ? null
-                                  : () => _removePage(index),
-                            ),
-                          ),
-                        ),
-                      ],
+            if (_draftSaveFailed)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: constraints.maxHeight * 0.6,
+                ),
+                child: SingleChildScrollView(
+                  child: MaterialBanner(
+                    content: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        'Could not save the latest draft changes. '
+                        'Keep the app open and retry. Drafts are temporary '
+                        'app-cache data, not saved PDFs.',
+                      ),
                     ),
+                    actions: [
+                      TextButton(
+                        onPressed: _isDraftSaveScheduled || _isClearingDraft
+                            ? null
+                            : _queueDraftSave,
+                        child: const Text('Retry saving draft'),
+                      ),
+                    ],
                   ),
-                );
-
-                // Drag-to-reorder remains available alongside equivalent
-                // semantic actions for switch and screen-reader users.
-                final reorderActions = <CustomSemanticsAction, VoidCallback>{
-                  if (!_isDocumentInteractionLocked && index > 0)
-                    const CustomSemanticsAction(label: 'Move earlier'): () =>
-                        _reorderPage(index, index - 1),
-                  if (!_isDocumentInteractionLocked &&
-                      index < _pages.length - 1)
-                    const CustomSemanticsAction(label: 'Move later'): () =>
-                        _reorderPage(index, index + 1),
-                };
-                return Semantics(
-                  key: ValueKey('page_semantics_$index'),
-                  label: 'Page ${index + 1} of ${_pages.length}',
-                  sortKey: OrdinalSortKey(index.toDouble()),
-                  container: true,
-                  customSemanticsActions: reorderActions,
-                  child: DragTarget<int>(
-                    onWillAcceptWithDetails: (details) =>
-                        !_isDocumentInteractionLocked && details.data != index,
-                    onAcceptWithDetails: (details) =>
-                        _reorderPage(details.data, index),
-                    builder: (context, candidateData, rejectedData) {
-                      final isDropTarget = candidateData.isNotEmpty;
-                      return LongPressDraggable<int>(
-                        data: index,
-                        maxSimultaneousDrags: _isDocumentInteractionLocked
-                            ? 0
-                            : 1,
-                        feedback: SizedBox(
-                          width: 140,
-                          height: 200,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: Opacity(opacity: 0.85, child: card),
-                          ),
+                ),
+              ),
+            Expanded(
+              child: _pages.isEmpty
+                  ? Center(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(32.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_isRestoringDraft)
+                              const CircularProgressIndicator()
+                            else
+                              Icon(
+                                _cameraSupported
+                                    ? Icons.camera_alt
+                                    : Icons.photo_library_outlined,
+                                size: 80,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _isRestoringDraft
+                                  ? 'Restoring draft...'
+                                  : 'Ready to Scan',
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _isRestoringDraft
+                                  ? 'Your saved pages will appear here.'
+                                  : _cameraSupported
+                                  ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
+                                  : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
-                        childWhenDragging: Opacity(opacity: 0.3, child: card),
-                        child: isDropTarget
-                            ? Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    width: 3,
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: EdgeInsets.fromLTRB(
+                        8,
+                        8,
+                        8,
+                        _cameraSupported ? 96 : 8,
+                      ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            childAspectRatio: 0.7,
+                          ),
+                      itemCount: _pages.length,
+                      itemBuilder: (context, index) {
+                        final page = _pages[index];
+                        final card = Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: _isDocumentInteractionLocked
+                                ? null
+                                : () => _openPage(index),
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      8,
+                                      8,
+                                      8,
+                                      0,
+                                    ),
+                                    child: Image(
+                                      image: ResizeImage(
+                                        MemoryImage(page.processedBytes),
+                                        width: _thumbnailCacheWidth,
+                                        height: _thumbnailCacheWidth,
+                                        policy: ResizeImagePolicy.fit,
+                                      ),
+                                      fit: BoxFit.contain,
+                                    ),
                                   ),
-                                  borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: card,
-                              )
-                            : card,
-                      );
-                    },
-                  ),
-                );
-              },
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 12,
+                                    right: 4,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: ExcludeSemantics(
+                                          child: Text(
+                                            'Page ${index + 1}',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.labelLarge,
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline),
+                                        tooltip: 'Delete page ${index + 1}',
+                                        onPressed: _isDocumentInteractionLocked
+                                            ? null
+                                            : () => _removePage(index),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+
+                        // Drag-to-reorder remains available alongside equivalent
+                        // semantic actions for switch and screen-reader users.
+                        final reorderActions =
+                            <CustomSemanticsAction, VoidCallback>{
+                              if (!_isDocumentInteractionLocked && index > 0)
+                                const CustomSemanticsAction(
+                                  label: 'Move earlier',
+                                ): () =>
+                                    _reorderPage(index, index - 1),
+                              if (!_isDocumentInteractionLocked &&
+                                  index < _pages.length - 1)
+                                const CustomSemanticsAction(
+                                  label: 'Move later',
+                                ): () =>
+                                    _reorderPage(index, index + 1),
+                            };
+                        return Semantics(
+                          key: ValueKey('page_semantics_$index'),
+                          label: 'Page ${index + 1} of ${_pages.length}',
+                          sortKey: OrdinalSortKey(index.toDouble()),
+                          container: true,
+                          customSemanticsActions: reorderActions,
+                          child: DragTarget<int>(
+                            onWillAcceptWithDetails: (details) =>
+                                !_isDocumentInteractionLocked &&
+                                details.data != index,
+                            onAcceptWithDetails: (details) =>
+                                _reorderPage(details.data, index),
+                            builder: (context, candidateData, rejectedData) {
+                              final isDropTarget = candidateData.isNotEmpty;
+                              return LongPressDraggable<int>(
+                                data: index,
+                                maxSimultaneousDrags:
+                                    _isDocumentInteractionLocked ? 0 : 1,
+                                feedback: SizedBox(
+                                  width: 140,
+                                  height: 200,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: Opacity(opacity: 0.85, child: card),
+                                  ),
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: 0.3,
+                                  child: card,
+                                ),
+                                child: isDropTarget
+                                    ? Container(
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
+                                            width: 3,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: card,
+                                      )
+                                    : card,
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
             ),
+          ],
+        ),
+      ),
       floatingActionButton: _cameraSupported
           ? FloatingActionButton(
               onPressed:
@@ -1246,63 +1452,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               child: const Icon(Icons.camera_alt),
             )
           : null,
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_pages.isNotEmpty) ...[
-                ElevatedButton.icon(
-                  key: _shareButtonKey,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  onPressed: _isClearingDraft
-                      ? null
-                      : _isGeneratingPdf
-                      ? (_pdfProgress != null && !_isCancellingPdf
-                            ? _cancelPdfGeneration
-                            : null)
-                      : _canExport
-                      ? _generateAndSharePdf
-                      : null,
-                  icon: _isGeneratingPdf || _isClearingDraft
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.picture_as_pdf),
-                  label: Text(
-                    _isClearingDraft
-                        ? 'Clearing draft...'
-                        : _isGeneratingPdf
-                        ? _isCancellingPdf
-                              ? 'Cancelling PDF...'
-                              : _pdfProgress == null
-                              ? 'Generating PDF...'
-                              : 'Generating PDF '
-                                    '${(_pdfProgress! * 100).round()}%'
-                        : 'Save as PDF (${_pages.length} pages)',
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-              TextButton(
-                onPressed: _showAppInfo,
-                child: Text(
-                  'About FOSScanner',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      bottomNavigationBar: _pages.isEmpty ? null : _buildExportBar(),
     );
   }
 }

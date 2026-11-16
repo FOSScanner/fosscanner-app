@@ -78,15 +78,15 @@ void main() {
     expect(operations.decodeCompleted.isCompleted, isTrue);
     await tester.pumpAndSettle();
 
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Preview page'), findsOneWidget);
     expect(operations.previewsRequested.isCompleted, isFalse);
     tester
-        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'))
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Preview page'))
         .onPressed!();
     await tester.pump();
 
     expect(find.text('Edit page'), findsOneWidget);
-    expect(find.text('Preview'), findsNothing);
+    expect(find.text('Adjust appearance'), findsNothing);
     expect(find.textContaining('Could not preview this crop'), findsOneWidget);
   });
 
@@ -112,6 +112,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Preview page'), findsOneWidget);
   });
 }

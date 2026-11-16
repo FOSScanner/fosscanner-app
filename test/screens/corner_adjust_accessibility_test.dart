@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import 'package:fosscanner/widgets/corner_overlay.dart';
 
 class _Operations implements CornerAdjustOperations {
   _Operations(this.bytes, {this.decodeError});
@@ -83,11 +84,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Next'));
+    await tester.ensureVisible(find.text('Preview page'));
+    await tester.tap(find.text('Preview page'));
     await tester.pumpAndSettle();
   }
 
-  testWidgets('short landscape with large text scrolls to Confirm', (
+  testWidgets('short landscape with large text scrolls to Save changes', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 300);
@@ -99,13 +101,15 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('filter_step_scroll_view')), findsOneWidget);
 
-    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.ensureVisible(
+      find.widgetWithText(FilledButton, 'Save changes'),
+    );
     await tester.pump();
     expect(tester.takeException(), isNull);
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save changes'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Preview'), findsNothing);
+    expect(find.text('Adjust appearance'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -115,8 +119,99 @@ void main() {
     await openFilterStep(tester);
 
     expect(find.byKey(const Key('filter_step_scroll_view')), findsNothing);
-    expect(find.widgetWithText(FilledButton, 'Confirm'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Save changes'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sliders name their values and reset without changing crop', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await openFilterStep(tester);
+    final sliders = find.byType(Slider);
+    expect(tester.getSemantics(sliders.first).label, 'Brightness');
+    expect(
+      tester.getSemantics(sliders.first).getSemanticsData().value,
+      contains('neutral 0'),
+    );
+    expect(tester.getSemantics(sliders.last).label, 'Contrast');
+    expect(
+      tester.getSemantics(sliders.last).getSemanticsData().value,
+      contains('neutral 1'),
+    );
+    tester.widget<Slider>(sliders.first).onChanged!(100);
+    tester.widget<Slider>(sliders.last).onChanged!(2);
+    await tester.pump();
+    expect(find.text('Brightness: +100'), findsOneWidget);
+    expect(find.text('Contrast: 2.00×'), findsOneWidget);
+    await tester.tap(find.text('Reset adjustments'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(sliders.first).value, 0);
+    expect(tester.widget<Slider>(sliders.last).value, 1);
+    await tester.tap(find.text('Adjust crop'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<CornerOverlay>(find.byType(CornerOverlay)).corners,
+      const [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)],
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('reset restores saved crop after dragging or using full image', (
+    tester,
+  ) async {
+    await openFilterStep(tester);
+    await tester.tap(find.text('Adjust crop'));
+    await tester.pumpAndSettle();
+    final overlay = find.byType(CornerOverlay);
+    final original = List<Offset>.of(
+      tester.widget<CornerOverlay>(overlay).corners,
+    );
+    tester.widget<CornerOverlay>(overlay).onChanged(const [
+      Offset(10, 10),
+      Offset(90, 10),
+      Offset(90, 90),
+      Offset(10, 90),
+    ]);
+    await tester.pumpAndSettle();
+    expect(tester.widget<CornerOverlay>(overlay).corners, isNot(original));
+    await tester.tap(find.text('Reset crop'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<CornerOverlay>(overlay).corners, original);
+    await tester.tap(find.text('Use full image'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<CornerOverlay>(overlay).corners, const [
+      Offset.zero,
+      Offset(99, 0),
+      Offset(99, 99),
+      Offset(0, 99),
+    ]);
+    await tester.tap(find.text('Reset crop'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<CornerOverlay>(overlay).corners, original);
+  });
+
+  testWidgets('failed detection explains the fallback and offers recovery', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CornerAdjustScreen(
+          originalBytes: imageBytes,
+          operations: _Operations(imageBytes),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('No page edges detected. Full image selected.'),
+      findsOneWidget,
+    );
+    expect(find.text('Reset crop'), findsOneWidget);
+    expect(find.text('Use full image'), findsOneWidget);
+    await tester.tap(find.text('Preview page'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add page'), findsOneWidget);
   });
 
   testWidgets('corner initialization hides raw exception details', (
