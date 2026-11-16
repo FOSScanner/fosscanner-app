@@ -124,13 +124,13 @@ void main() {
     expect(find.textContaining('entirely on your device'), findsOneWidget);
     expect(
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-      isTrue,
+      isFalse,
     );
 
     await tester.tap(find.text('Searchable text'));
     await tester.pumpAndSettle();
     expect(
-      find.text('Image-only PDF without text recognition.'),
+      find.text('Recognize text so you can search and select it in the PDF.'),
       findsOneWidget,
     );
     await tester.tap(find.text('Done'));
@@ -140,13 +140,13 @@ void main() {
     await openOptions(tester);
     expect(
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-      isFalse,
+      isTrue,
     );
     await tester.tap(find.text('Searchable text'));
     await tester.pumpAndSettle();
     expect(
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-      isTrue,
+      isFalse,
     );
   });
 
@@ -192,7 +192,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(
           tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-          isFalse,
+          isTrue,
         );
         await tester.ensureVisible(find.widgetWithText(FilledButton, 'Done'));
         await tester.pumpAndSettle();

@@ -180,7 +180,14 @@ void main() {
     await tester.pump();
 
     expect(changed, isNotNull);
-    expect(changed!.first, const Offset(15, 10));
+    expect(
+      changed!.first.dx,
+      closeTo(
+        10 + 10 / (tester.getSize(find.byType(Image)).width / 100),
+        0.001,
+      ),
+    );
+    expect(changed!.first.dy, 10);
   });
 
   testWidgets('a cancelled corner drag restores the committed position', (
@@ -390,7 +397,7 @@ void main() {
       _overlayApp(
         imageBytes: imageBytes,
         onChanged: (_) {},
-        containerSize: const Size.square(100),
+        containerSize: const Size.square(200),
         corners: const [
           Offset(90, 10),
           Offset(10, 10),
@@ -401,7 +408,7 @@ void main() {
     );
 
     expect(find.bySemanticsLabel('Document corners'), findsNothing);
-    final overlay = tester.getRect(find.byType(CornerOverlay));
+    final image = tester.getRect(find.byType(Image));
     const expectedPositions = [
       Offset(90, 10),
       Offset(10, 10),
@@ -413,7 +420,9 @@ void main() {
         find.bySemanticsLabel(_cornerSemanticLabels[i]),
       );
       expect(
-        semanticRect.contains(overlay.topLeft + expectedPositions[i]),
+        semanticRect.contains(
+          image.topLeft + expectedPositions[i] * (image.width / 100),
+        ),
         isTrue,
         reason: 'corner $i semantics detached from its visible handle',
       );
@@ -472,7 +481,11 @@ void main() {
     await tester.pump();
 
     expect(changed, isNotNull);
-    expect(changed!.first, const Offset(20, 0));
+    expect(
+      changed!.first.dx,
+      closeTo(20 / (tester.getSize(find.byType(Image)).width / 100), 0.001),
+    );
+    expect(changed!.first.dy, 0);
   });
 
   testWidgets('all boundary corners retain full 48 pixel hit regions', (

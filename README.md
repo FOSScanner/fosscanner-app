@@ -78,8 +78,9 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | System light/dark theme | Yes | Yes |
 
 Perspective correction and filters use OpenCV. Searchable PDFs use bundled,
-offline Tesseract data. On Android, searchable text is enabled by default;
-your choice stays in effect while the home screen remains open. Recognition
+offline Tesseract data. On Android, searchable text is off by default; enable it
+in **PDF export options**. Your choice stays in effect while the home screen
+remains open. Recognition
 quality depends on the document, language, lighting, and image quality.
 
 The editor keeps the last successful preview visible while processing a new

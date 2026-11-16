@@ -79,7 +79,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   var _documentGeneration = 0;
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
-  bool _useOcr = true;
+  bool _useOcr = false;
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
   bool _isCancellingPdf = false;
