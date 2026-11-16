@@ -70,10 +70,6 @@ android {
     }
 
     buildTypes {
-        debug {
-            applicationIdSuffix = ".uitest"
-            versionNameSuffix = "-ui-test"
-        }
         release {
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
