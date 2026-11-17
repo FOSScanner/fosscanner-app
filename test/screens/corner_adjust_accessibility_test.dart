@@ -9,10 +9,15 @@ import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
 
 class _Operations implements CornerAdjustOperations {
-  _Operations(this.bytes, {this.decodeError});
+  _Operations(
+    this.bytes, {
+    this.decodeError,
+    this.imageSize = const Size(100, 100),
+  });
 
   final Uint8List bytes;
   final Object? decodeError;
+  final Size imageSize;
 
   @override
   Future<Map<PageFilter, Uint8List>> buildPreviews(
@@ -31,7 +36,7 @@ class _Operations implements CornerAdjustOperations {
   @override
   Future<Size> decodeSize(Uint8List imageBytes) async {
     if (decodeError case final error?) throw error;
-    return const Size(100, 100);
+    return imageSize;
   }
 
   @override
@@ -87,6 +92,71 @@ void main() {
     await tester.ensureVisible(find.text('Preview page'));
     await tester.tap(find.text('Preview page'));
     await tester.pumpAndSettle();
+  }
+
+  for (final configuration in [
+    (size: const Size(390, 844), textScale: 1.0),
+    (size: const Size(390, 844), textScale: 1.5),
+    (size: const Size(320, 568), textScale: 2.0),
+    (size: const Size(800, 360), textScale: 1.0),
+    (size: const Size(640, 300), textScale: 2.0),
+  ]) {
+    testWidgets('crop canvas gets priority at ${configuration.size} with '
+        '${configuration.textScale}x text', (tester) async {
+      tester.view.physicalSize = configuration.size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(
+              textScaler: TextScaler.linear(configuration.textScale),
+            ),
+            child: CornerAdjustScreen(
+              originalBytes: imageBytes,
+              operations: _Operations(
+                imageBytes,
+                imageSize: const Size(600, 900),
+              ),
+              source: PageReviewSource.gallery,
+              isBatchImport: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final canvas = find.byType(CornerOverlay);
+      final before = tester.getRect(canvas);
+      final bodyHeight =
+          configuration.size.height -
+          tester.getBottomRight(find.byType(AppBar)).dy;
+      final landscape = configuration.size.width > bodyHeight;
+      expect(
+        before.height,
+        greaterThanOrEqualTo(bodyHeight * (landscape ? 0.9 : 0.6)),
+      );
+      expect(before.width, greaterThan(configuration.size.width * 0.5));
+
+      // Scrolling controls must not shrink or move the crop canvas.
+      for (final label in ['Use full image', 'Skip image', 'Preview page']) {
+        await tester.ensureVisible(find.text(label));
+        await tester.pumpAndSettle();
+        expect(find.text(label).hitTestable(), findsOneWidget);
+        expect(tester.getRect(canvas), before);
+      }
+      final oldCorner = tester.widget<CornerOverlay>(canvas).corners.first;
+      await tester.dragFrom(
+        tester.getCenter(find.byKey(const ValueKey('corner-handle-0'))),
+        const Offset(20, 20),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<CornerOverlay>(canvas).corners.first,
+        isNot(oldCorner),
+      );
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets('short landscape with large text scrolls to Save changes', (

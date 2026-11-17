@@ -470,7 +470,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     List<Offset> corners,
   ) {
     final preview = Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(8),
       child: CornerOverlay(
         imageBytes: widget.originalBytes,
         imageSize: imageSize,
@@ -559,27 +559,33 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scrollable =
-            constraints.maxHeight < 480 ||
-            MediaQuery.textScalerOf(context).scale(16) > 20;
-        if (scrollable) {
-          return SingleChildScrollView(
-            key: const Key('batch_review_scroll_view'),
-            child: Column(
-              children: [
-                SizedBox(
-                  height: (constraints.maxHeight * 0.55).clamp(120.0, 280.0),
-                  child: preview,
-                ),
-                actions,
-              ],
-            ),
+        final controls = SingleChildScrollView(
+          key: const Key('batch_review_scroll_view'),
+          child: actions,
+        );
+        // Keep the crop canvas stable while guidance and large-text controls
+        // scroll independently. A height cap on the canvas made it tiny on
+        // short screens and whenever accessibility text scaling was enabled.
+        if (constraints.maxWidth > constraints.maxHeight) {
+          return Row(
+            children: [
+              Expanded(child: preview),
+              SizedBox(
+                width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
+                child: controls,
+              ),
+            ],
           );
         }
         return Column(
           children: [
             Expanded(child: preview),
-            actions,
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * 0.35,
+              ),
+              child: controls,
+            ),
           ],
         );
       },
