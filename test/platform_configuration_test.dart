@@ -560,13 +560,31 @@ void main() {
       }
       expect(
         preflightCommands,
-        contains(r'git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"'),
+        contains(
+          r'git merge-base --is-ancestor "$validated_sha" "origin/main"',
+        ),
       );
+      expect(
+        preflightCommands,
+        contains(r'validated_sha="$(git rev-parse "HEAD^{commit}")"'),
+      );
+      expect(
+        preflightCommands,
+        contains(
+          r'tagged_sha="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"',
+        ),
+      );
+      expect(preflightCommands, contains(r'"$tagged_sha" != "$validated_sha"'));
+      expect(
+        preflight.source,
+        contains(r'RELEASE_TAG: ${{ inputs.tag || github.ref_name }}'),
+      );
+      expect(release, contains('workflow_dispatch:'));
       expect(preflightCommands, contains('pubspec.yaml'));
       expect(preflightCommands, contains(r'${pubspec_version%%+*}'));
       expect(
         preflightCommands,
-        contains(r'"$GITHUB_REF_NAME" != "v$release_version"'),
+        contains(r'"$RELEASE_TAG" != "v$release_version"'),
       );
       for (final command in [
         'flutter pub get',
@@ -582,6 +600,10 @@ void main() {
       expect(
         preflightCheckout.source,
         matches(RegExp(r'^\s+fetch-depth:\s*0\s*$', multiLine: true)),
+      );
+      expect(
+        preflightCheckout.source,
+        contains(r'ref: ${{ inputs.tag || github.ref }}'),
       );
       final buildCheckout = _workflowSteps(
         build.source,
@@ -626,6 +648,12 @@ void main() {
       (step) => step.action == 'softprops/action-gh-release',
     );
     expect(publish.source, contains('fail_on_unmatched_files: true'));
+    expect(publish.source, contains(r'token: ${{ secrets.RELEASE_TOKEN }}'));
+    expect(
+      publish.source,
+      contains(r'tag_name: ${{ needs.preflight.outputs.release-tag }}'),
+    );
+    expect(publish.source, isNot(contains('GITHUB_TOKEN:')));
   });
 
   test('release PAT is scoped to publishing action steps', () {
