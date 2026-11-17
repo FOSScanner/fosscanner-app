@@ -6,6 +6,13 @@ on:
       # Workflow filters use glob syntax; the shell guard below enforces exact SemVer.
       - 'v[0-9]*.[0-9]*.[0-9]*'
 
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild and publish (vX.Y.Z)
+        required: true
+        type: string
+
 permissions:
   contents: read
 
@@ -13,35 +20,45 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     outputs:
+      release-tag: ${{ steps.validate.outputs.tag }}
       validated-sha: ${{ steps.validate.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Validate tag, version, and provenance
         id: validate
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Invalid release tag: $GITHUB_REF_NAME" >&2
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG" >&2
             exit 1
           fi
 
           pubspec_version="$(awk '$1 == "version:" { print $2 }' pubspec.yaml)"
           release_version="${pubspec_version%%+*}"
-          if [[ "$GITHUB_REF_NAME" != "v$release_version" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match pubspec.yaml version $pubspec_version" >&2
+          if [[ "$RELEASE_TAG" != "v$release_version" ]]; then
+            echo "Tag $RELEASE_TAG does not match pubspec.yaml version $pubspec_version" >&2
             exit 1
           fi
 
           git fetch --no-tags origin main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+          tagged_sha="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          validated_sha="$(git rev-parse "HEAD^{commit}")"
+          if [[ "$tagged_sha" != "$validated_sha" ]]; then
+            echo "Checkout does not match release tag" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$validated_sha" "origin/main"; then
             echo "Release tag commit is not an ancestor of origin/main" >&2
             exit 1
           fi
 
-          validated_sha="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "sha=$validated_sha" >> "$GITHUB_OUTPUT"
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -100,11 +117,10 @@ jobs:
 
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
+          # v3 defaults its token input to github.token, overriding GITHUB_TOKEN.
+          token: ${{ secrets.RELEASE_TOKEN }}
+          tag_name: ${{ needs.preflight.outputs.release-tag }}
           files: build/app/outputs/flutter-apk/app-*-release.apk
           fail_on_unmatched_files: true
           # Release Please already created the changelog-based release notes;
           # this action only attaches the built APKs.
-        env:
-          # The organization enforces a read-only GITHUB_TOKEN, so publishing
-          # uses a repository-scoped PAT only in this action.
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
