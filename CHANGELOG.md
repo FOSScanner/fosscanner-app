@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.1](https://github.com/FOSScanner/fosscanner-app/compare/v1.5.0...v1.5.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* expand the corner-editing canvas ([01a6910](https://github.com/FOSScanner/fosscanner-app/commit/01a6910ebb33626d1b6dc3d91cd3277d1ab6121f))
+* give corner editing priority in responsive layouts ([ca7692b](https://github.com/FOSScanner/fosscanner-app/commit/ca7692b88f47df3f9078b61759ad310c4686919c))
+* pass release token explicitly and support tagged retries ([3196795](https://github.com/FOSScanner/fosscanner-app/commit/319679533b405273692f38166f21d22d45d54630))
+* release expanded corner editor in 1.5.1 ([9077fa7](https://github.com/FOSScanner/fosscanner-app/commit/9077fa799f089aa5a7c8804e7caef8bdb148f055))
+* repair release uploads and allow tagged recovery ([f5a8d9c](https://github.com/FOSScanner/fosscanner-app/commit/f5a8d9cee3ea042d9e45a1ab9fc8f93c907595c6))
+
 ## [1.5.0](https://github.com/FOSScanner/fosscanner-app/compare/v1.4.0...v1.5.0) (2026-11-16)
 
 
