@@ -139,7 +139,7 @@ void main() {
       expect(before.width, greaterThan(configuration.size.width * 0.5));
 
       // Scrolling controls must not shrink or move the crop canvas.
-      for (final label in ['Use full image', 'Skip image', 'Preview page']) {
+      for (final label in ['Skip image', 'Preview page']) {
         await tester.ensureVisible(find.text(label));
         await tester.pumpAndSettle();
         expect(find.text(label).hitTestable(), findsOneWidget);
@@ -218,7 +218,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<Slider>(sliders.first).value, 0);
     expect(tester.widget<Slider>(sliders.last).value, 1);
-    await tester.tap(find.text('Adjust crop'));
+    await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
     expect(
       tester.widget<CornerOverlay>(find.byType(CornerOverlay)).corners,
@@ -227,39 +227,22 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('reset restores saved crop after dragging or using full image', (
-    tester,
-  ) async {
-    await openFilterStep(tester);
-    await tester.tap(find.text('Adjust crop'));
-    await tester.pumpAndSettle();
-    final overlay = find.byType(CornerOverlay);
-    final original = List<Offset>.of(
-      tester.widget<CornerOverlay>(overlay).corners,
-    );
-    tester.widget<CornerOverlay>(overlay).onChanged(const [
-      Offset(10, 10),
-      Offset(90, 10),
-      Offset(90, 90),
-      Offset(10, 90),
-    ]);
-    await tester.pumpAndSettle();
-    expect(tester.widget<CornerOverlay>(overlay).corners, isNot(original));
-    await tester.tap(find.text('Reset crop'));
-    await tester.pumpAndSettle();
-    expect(tester.widget<CornerOverlay>(overlay).corners, original);
-    await tester.tap(find.text('Use full image'));
-    await tester.pumpAndSettle();
-    expect(tester.widget<CornerOverlay>(overlay).corners, const [
-      Offset.zero,
-      Offset(99, 0),
-      Offset(99, 99),
-      Offset(0, 99),
-    ]);
-    await tester.tap(find.text('Reset crop'));
-    await tester.pumpAndSettle();
-    expect(tester.widget<CornerOverlay>(overlay).corners, original);
-  });
+  testWidgets(
+    'corner editor omits persistent guidance and crop utility buttons',
+    (tester) async {
+      await openFilterStep(tester);
+      expect(find.text('Adjust crop'), findsNothing);
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Drag the corners to match the page edges.'),
+        findsNothing,
+      );
+      expect(find.text('Reset crop'), findsNothing);
+      expect(find.text('Use full image'), findsNothing);
+      expect(find.byType(CornerOverlay), findsOneWidget);
+    },
+  );
 
   testWidgets('failed detection explains the fallback and offers recovery', (
     tester,
@@ -277,12 +260,71 @@ void main() {
       find.text('No page edges detected. Full image selected.'),
       findsOneWidget,
     );
-    expect(find.text('Reset crop'), findsOneWidget);
-    expect(find.text('Use full image'), findsOneWidget);
+    expect(find.text('Reset crop'), findsNothing);
+    expect(find.text('Use full image'), findsNothing);
     await tester.tap(find.text('Preview page'));
     await tester.pumpAndSettle();
     expect(find.text('Add page'), findsOneWidget);
   });
+
+  testWidgets('filters open on demand and retain selection after dismissal', (
+    tester,
+  ) async {
+    await openFilterStep(tester);
+    expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
+    expect(find.text('Adjust crop'), findsNothing);
+    final preview = tester.getRect(
+      find.byKey(const Key('adjusted_page_preview')),
+    );
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Grayscale'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Close filters'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
+    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(const Key('adjusted_page_preview'))),
+      preview,
+    );
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    final semantics = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(find.byKey(const ValueKey('filter_grayscale')))
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected,
+      Tristate.isTrue,
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
+    semantics.dispose();
+  });
+
+  for (final size in [const Size(320, 568), const Size(640, 300)]) {
+    testWidgets('on-demand filters fit $size with large text', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await openFilterStep(tester, textScaler: const TextScaler.linear(2));
+      await tester.tap(find.byTooltip('Filters'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Black & white'));
+      await tester.pumpAndSettle();
+      expect(find.text('Black & white').hitTestable(), findsOneWidget);
+      expect(find.text('Adjust crop'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Adjust appearance'), findsOneWidget);
+    });
+  }
 
   testWidgets('corner initialization hides raw exception details', (
     tester,
@@ -308,6 +350,9 @@ void main() {
     final semantics = tester.ensureSemantics();
     await openFilterStep(tester);
 
+    expect(find.byKey(const ValueKey('filter_original')), findsNothing);
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
     final original = tester.getSemantics(
       find.byKey(const ValueKey('filter_original')),
     );

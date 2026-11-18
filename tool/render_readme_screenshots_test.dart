@@ -250,6 +250,17 @@ void main() {
     expect(find.text('Add page'), findsOneWidget);
     expect(find.text('Brightness: 0'), findsOneWidget);
     await save('ui-adjust-appearance');
+    expect(find.text('Adjust crop'), findsNothing);
+    expect(find.byKey(const ValueKey('filter_original')), findsNothing);
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    for (final element in find.byType(Image).evaluate()) {
+      await tester.runAsync(
+        () => precacheImage((element.widget as Image).image, element),
+      );
+    }
+    await tester.pumpAndSettle();
+    await save('ui-filters-panel');
     debugDisableShadows = previousShadows;
   });
 }

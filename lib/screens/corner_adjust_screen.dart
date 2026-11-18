@@ -91,7 +91,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
   bool _showFullImageNotice = false;
-  List<Offset>? _resetCorners;
   bool _isProcessing = false;
   bool _isLeaving = false;
   String? _error;
@@ -162,9 +161,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _imageSize = size;
         _corners = corners;
         _showFullImageNotice = !hasCorners;
-        _resetCorners = List<Offset>.of(corners);
-        if (widget.startWithAdjustments && hasCorners) _step = _Step.filter;
       });
+      if (widget.startWithAdjustments && hasCorners) _enterFilterStep();
       unawaited(_updatePreviews());
     } catch (error) {
       if (kDebugMode) {
@@ -313,6 +311,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       await _updatePreviews();
       if (!mounted || _isLeaving || _filterPreviews == null) return;
     }
+    _enterFilterStep();
+  }
+
+  void _enterFilterStep() {
     setState(() => _step = _Step.filter);
     if (_filterHistoryEntry != null) return;
     late final LocalHistoryEntry entry;
@@ -328,15 +330,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
     _filterHistoryEntry = entry;
     ModalRoute.of(context)?.addLocalHistoryEntry(entry);
-  }
-
-  void _leaveFilterStep() {
-    final entry = _filterHistoryEntry;
-    if (entry != null) {
-      entry.remove();
-    } else if (_step == _Step.filter) {
-      setState(() => _step = _Step.corners);
-    }
   }
 
   bool get _canConfirm =>
@@ -438,12 +431,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         appBar: AppBar(
           title: Text(_appBarTitle),
           actions: [
-            if (_step == _Step.filter)
+            if (_step == _Step.filter) ...[
+              IconButton(
+                icon: const Icon(Icons.filter_alt_outlined),
+                tooltip: 'Filters',
+                onPressed: _isProcessing ? null : _showFilters,
+              ),
               IconButton(
                 icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
                 tooltip: 'Rotate',
                 onPressed: _isProcessing ? null : _rotate,
               ),
+            ],
           ],
         ),
         body: !ready
@@ -481,23 +480,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final actions = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text('Drag the corners to match the page edges.'),
-        ),
-        Wrap(
-          alignment: WrapAlignment.center,
-          children: [
-            TextButton(
-              onPressed: () => _setCrop(List<Offset>.of(_resetCorners!)),
-              child: const Text('Reset crop'),
-            ),
-            TextButton(
-              onPressed: () => _setCrop(_fullBoundsCorners(imageSize)),
-              child: const Text('Use full image'),
-            ),
-          ],
-        ),
         if (_showFullImageNotice)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -655,8 +637,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 onChanged: (value) => _contrast = value,
               ),
               _resetAdjustmentsButton(),
-              _filterStrip(context, height: 92),
-              _filterActions(scrollable: false),
+              _filterActions(),
             ],
           );
         }
@@ -665,8 +646,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           120.0,
           280.0,
         );
-        final stripHeight =
-            72 + MediaQuery.textScalerOf(context).scale(12) * 1.4;
         return SingleChildScrollView(
           key: const Key('filter_step_scroll_view'),
           child: Column(
@@ -690,8 +669,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 onChanged: (value) => _contrast = value,
               ),
               _resetAdjustmentsButton(),
-              _filterStrip(context, height: stripHeight),
-              _filterActions(scrollable: true),
+              _filterActions(),
             ],
           ),
         );
@@ -768,18 +746,64 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Widget _filterStrip(BuildContext context, {required double height}) =>
-      SizedBox(
-        height: height,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          children: [
-            for (final filter in PageFilter.values)
-              _filterChip(context, filter),
-          ],
+  Future<void> _showFilters() async {
+    if (_isProcessing || _isLeaving || _step != _Step.filter) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+          ),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                16 + MediaQuery.viewPaddingOf(context).bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Filters',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close filters',
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                      ),
+                    ],
+                  ),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 16,
+                    children: [
+                      for (final filter in PageFilter.values)
+                        _filterChip(
+                          context,
+                          filter,
+                          onSelected: () => updateSheet(() {}),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-      );
+      ),
+    );
+  }
 
   Widget _previewFeedback() {
     final message = switch (_previewStatus) {
@@ -812,11 +836,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Widget _filterActions({required bool scrollable}) {
-    final back = OutlinedButton(
-      onPressed: _isProcessing ? null : _leaveFilterStep,
-      child: const Text('Adjust crop'),
-    );
+  Widget _filterActions() {
     final confirm = FilledButton(
       onPressed: _canConfirm ? _confirm : null,
       child: _isProcessing
@@ -836,26 +856,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_previewStatus != _PreviewStatus.ready) _previewFeedback(),
-            if (scrollable)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [back, const SizedBox(height: 8), confirm],
-              )
-            else
-              Row(
-                children: [
-                  Expanded(child: back),
-                  const SizedBox(width: 16),
-                  Expanded(child: confirm),
-                ],
-              ),
+            confirm,
           ],
         ),
       ),
     );
   }
 
-  Widget _filterChip(BuildContext context, PageFilter filter) {
+  Widget _filterChip(
+    BuildContext context,
+    PageFilter filter, {
+    required VoidCallback onSelected,
+  }) {
     final selected = _selectedFilter == filter;
     final previewBytes = _filterPreviews?[filter];
     final primary = Theme.of(context).colorScheme.primary;
@@ -874,6 +886,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               : () {
                   if (!mounted || _isProcessing) return;
                   setState(() => _selectedFilter = filter);
+                  onSelected();
                   unawaited(_updateFinalPreview());
                 },
           child: Column(

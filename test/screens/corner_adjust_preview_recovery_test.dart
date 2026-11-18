@@ -177,7 +177,11 @@ void main() {
       case 'rotation':
         await tester.tap(find.byTooltip('Rotate'));
       case 'filter':
+        await tester.tap(find.byTooltip('Filters'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Grayscale'));
+        await tester.tap(find.byTooltip('Close filters'));
+        await tester.pump();
       case 'brightness' || 'contrast':
         final slider = tester.widget<Slider>(
           adjustment == 'brightness'

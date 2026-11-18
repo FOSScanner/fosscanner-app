@@ -96,7 +96,7 @@ void main() {
   }
 
   testWidgets(
-    'saved appearance opens directly and back cancels without saving',
+    'saved appearance back visits corners before cancelling without saving',
     (tester) async {
       ScannedPage? result;
       await openAdjuster(
@@ -107,6 +107,10 @@ void main() {
         onResult: (page) => result = page,
       );
       expect(find.text('Save changes'), findsOneWidget);
+      expect(find.text('Adjust crop'), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Edit page'), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.text('Open'), findsOneWidget);
@@ -125,7 +129,7 @@ void main() {
       startWithAdjustments: true,
       onResult: (page) => result = page,
     );
-    await tester.tap(find.text('Adjust crop'));
+    await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
     expect(find.text('Edit page'), findsOneWidget);
     await tester.tap(find.text('Preview page'));
@@ -164,7 +168,7 @@ void main() {
 
     await tester.tap(find.text('Preview page'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Adjust crop'));
+    await tester.tap(find.byTooltip('Back'));
     await tester.pump();
     expect(find.text('Edit page'), findsOneWidget);
     expect(
@@ -184,6 +188,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Edit page'), findsNothing);
     expect(find.text('Open'), findsOneWidget);
+  });
+
+  testWidgets('filter selection survives closing the panel and saving', (
+    tester,
+  ) async {
+    ScannedPage? result;
+    await openAdjuster(
+      tester,
+      _Operations(imageBytes),
+      imageBytes,
+      startWithAdjustments: true,
+      onResult: (page) => result = page,
+    );
+    expect(find.text('Adjust crop'), findsNothing);
+    expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Grayscale'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Close filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(result?.filter, PageFilter.grayscale);
+    expect(find.text('Open'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('route pop is blocked while final processing is active', (

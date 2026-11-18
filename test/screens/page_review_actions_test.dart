@@ -315,7 +315,7 @@ void main() {
       await tester.tap(find.byTooltip('Edit page'));
       await tester.pumpAndSettle();
       expect(find.text('Adjust appearance'), findsOneWidget);
-      await tester.tap(find.text('Adjust crop'));
+      await tester.pageBack();
       await tester.pumpAndSettle();
       expect(find.text('Edit page'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
