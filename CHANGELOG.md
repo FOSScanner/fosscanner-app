@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.2](https://github.com/FOSScanner/fosscanner-app/compare/v1.5.1...v1.5.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* release simplified editor controls in 1.5.2 ([510d192](https://github.com/FOSScanner/fosscanner-app/commit/510d192fc614a311f905b04f6bafa3c2ae1cedb6))
+* simplify crop tools and show filters on demand ([bd22a5c](https://github.com/FOSScanner/fosscanner-app/commit/bd22a5c1caf09c0e5a7102849421c8ed041a6a25))
+* simplify the editor and show filters on demand ([7774d4a](https://github.com/FOSScanner/fosscanner-app/commit/7774d4a25fe93d39aeffa5f5ec066eadcbe075dd))
+
 ## [1.5.1](https://github.com/FOSScanner/fosscanner-app/compare/v1.5.0...v1.5.1) (2026-11-17)
 
 
