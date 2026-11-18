@@ -287,7 +287,12 @@ void main() {
     await _waitForFinalStart(tester, operations, 0);
     await tester.tap(find.text('Preview page'));
     await tester.pump();
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.tap(find.text('Grayscale'));
+    await tester.tap(find.byTooltip('Close filters'));
+    await tester.pump();
     await tester.pump();
     await tester.pump();
     await tester.tap(find.text('Save changes'));
@@ -358,6 +363,8 @@ void main() {
     // Finish the route transitions while leaving the worker pending.
     await tester.pump(const Duration(seconds: 1));
     await tester.pageBack();
+    await tester.pump();
+    await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.byType(Card).at(1));
     await tester.pumpAndSettle();
@@ -377,6 +384,8 @@ void main() {
     operations.previewResults[1].complete(_previews(bytes));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    await tester.pageBack();
+    await tester.pump();
     await tester.pageBack();
     await tester.pumpAndSettle();
   });

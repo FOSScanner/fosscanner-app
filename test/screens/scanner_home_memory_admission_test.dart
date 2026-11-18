@@ -318,6 +318,8 @@ void main() {
     await tester.pump();
     expect(share.calls, 0);
     await tester.pageBack();
+    await tester.pump();
+    await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.text('Export PDF (2 pages)'));
     await tester.pump();
@@ -336,6 +338,8 @@ void main() {
     operations.pendingPreview = Completer<Map<PageFilter, Uint8List>>();
     await pumpHome(tester);
     await editFirstPage(tester);
+    await tester.pageBack();
+    await tester.pump();
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.text('Export PDF (2 pages)'));

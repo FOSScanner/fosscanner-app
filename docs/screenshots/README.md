@@ -1,6 +1,6 @@
 # Documentation screenshots
 
-The README's six document-workflow images are generated from the current
+The README's document-workflow images are generated from the current
 Flutter widgets with a synthetic document. They are **UI renders, not device
 screenshots**, and do not establish native camera, OpenCV, OCR, or PDF output
 quality.
@@ -12,7 +12,8 @@ quality.
 | `ui-home-pages-dark.png` | The same document in the dark theme |
 | `ui-export-options.png` | Android searchable-text export options |
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
-| `ui-adjust-appearance.png` | Neutral brightness/contrast, filters, and Add page |
+| `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |
+| `ui-filters-panel.png` | Filter choices opened explicitly from the Filters icon |
 
 ## Reproduce
 
