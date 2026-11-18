@@ -26,15 +26,15 @@ No account, no cloud processing, no tracking.
 ## A simple scanning workflow
 
 1. **Add pages** with the camera button or import photos from your gallery.
-2. **Check the crop.** Drag the corners to the page edges. Use **Reset crop**
-   to restore the initial selection or **Use full image** to include the whole
-   photo. If detection fails, the full image is selected rather than trimmed.
-3. **Preview and adjust.** Choose **Preview page**, then select a filter,
-   rotate, or adjust brightness and contrast. **Reset adjustments** restores
+2. **Check the crop.** Drag the corners to the page edges. If detection fails,
+   the full image is selected rather than trimmed.
+3. **Preview and adjust.** Choose **Preview page**, then tap the **Filters** icon
+   to open filter choices, rotate, or adjust brightness and contrast. **Reset adjustments** restores
    neutral brightness/contrast without changing your crop, filter, or rotation.
 4. **Build your document.** Choose **Add page**, then scan more pages. Tap a
-   page to zoom in, choose Edit to change its appearance, or **Adjust crop**
-   to revisit its edges. Save an edit with **Save changes**.
+   page to zoom in and choose Edit to change its appearance. Use the editor’s
+   back arrow to revisit the crop; back again leaves the editor without saving.
+   Save an edit with **Save changes**.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
    On Android, **PDF export options** lets you turn searchable text on or off.
 
@@ -48,8 +48,8 @@ capture or single-image review adds no page.
 <table>
   <tr>
     <td align="center"><img src="docs/screenshots/ui-home-pages.png" width="260" alt="Document overview with three page previews, temporary-draft guidance, and compact PDF export controls"><br>Review your document</td>
-    <td align="center"><img src="docs/screenshots/crop-full-image-fallback.png" width="260" alt="Crop editor with draggable corners, Reset crop, Use full image, and full-image fallback guidance"><br>Check the crop</td>
-    <td align="center"><img src="docs/screenshots/ui-adjust-appearance.png" width="260" alt="Appearance editor showing a page preview, numeric brightness and contrast, reset controls, filters, and Add page"><br>Adjust the appearance</td>
+    <td align="center"><img src="docs/screenshots/crop-full-image-fallback.png" width="260" alt="Minimal crop editor with draggable corners and full-image fallback guidance"><br>Check the crop</td>
+    <td align="center"><img src="docs/screenshots/ui-adjust-appearance.png" width="260" alt="Appearance editor showing a larger page preview, numeric adjustments, a Filters icon, and Add page"><br>Adjust the appearance</td>
   </tr>
 </table>
 
