@@ -691,6 +691,7 @@ void main() {
       );
       for (final command in [
         'flutter pub get',
+        'dart format --output=none --set-exit-if-changed lib test',
         'flutter analyze',
         'flutter test',
       ]) {
@@ -794,6 +795,29 @@ void main() {
 
     expect(_runner(jobWith('flutter analyze')), 'ubuntu-latest');
     expect(_runner(jobWith('flutter build apk --debug')), 'ubuntu-latest');
+    expect(
+      jobWith('dart format --output=none --set-exit-if-changed lib test').name,
+      jobWith('flutter analyze').name,
+      reason: 'the format check belongs to the quality job',
+    );
+
+    final androidJob = jobWith('flutter build apk --debug');
+    final androidSteps = _workflowSteps(androidJob.source);
+    final apkBuildIndex = androidSteps.indexWhere(
+      (step) => step.run?.contains('flutter build apk --debug') ?? false,
+    );
+    final kotlinTestIndex = androidSteps.indexWhere(
+      (step) => step.run == './gradlew :app:testDebugUnitTest',
+    );
+    expect(
+      kotlinTestIndex,
+      greaterThan(apkBuildIndex),
+      reason: 'Kotlin unit tests must run after the Flutter build',
+    );
+    expect(
+      androidSteps[kotlinTestIndex].source,
+      matches(RegExp(r'^\s+working-directory:\s*android\s*$', multiLine: true)),
+    );
     expect(_runner(jobWith('flutter build ios --no-codesign')), 'macos-latest');
     expect(source, isNot(contains('flutter build web')));
     expect(source, isNot(contains('flutter build linux')));

@@ -123,10 +123,9 @@ void main() {
     const pollsBeforeAssemblyEnds = 2;
     var polls = 0;
     await expectLater(
-      createImageOnlyPdf(
-        [page],
-        isCancelled: () => polls++ >= pollsBeforeAssemblyEnds,
-      ),
+      createImageOnlyPdf([
+        page,
+      ], isCancelled: () => polls++ >= pollsBeforeAssemblyEnds),
       throwsA(isA<ImagePdfCancelledException>()),
     );
     expect(polls, pollsBeforeAssemblyEnds + 1);
