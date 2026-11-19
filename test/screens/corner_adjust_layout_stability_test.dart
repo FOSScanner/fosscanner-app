@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import 'package:fosscanner/services/adjustment_scale.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
 
 import '../support/layout_stability.dart';
@@ -209,8 +210,9 @@ void main() {
         await openAdjustments(tester);
       }, reason: 'open');
       final slider = tester.widget<Slider>(find.byType(Slider).last);
-      slider.onChanged!(1.5);
-      slider.onChangeEnd!(1.5);
+      final position = contrastToSliderPosition(1.5);
+      slider.onChanged!(position);
+      slider.onChangeEnd!(position);
       await tester.pump();
       await tester.pump();
       operations.finalPreviews.last.complete(bytes);

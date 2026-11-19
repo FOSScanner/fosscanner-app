@@ -273,4 +273,59 @@ void main() {
       }
     }
   });
+
+  test('black & white leaves no dark remnants along the crop border', () async {
+    // A page cropped slightly outside its edge: a thin band of dark
+    // background and a soft shadow run along every side of the crop, and
+    // one real stroke sits inside the page.
+    final input = await _drawPng(400, 300, (canvas) {
+      canvas.drawColor(const Color(0xff303030), BlendMode.src);
+      canvas.drawRect(
+        const Rect.fromLTRB(2, 2, 398, 298),
+        Paint()..color = const Color(0xff9a9a9a),
+      );
+      canvas.drawRect(
+        const Rect.fromLTRB(3, 3, 397, 297),
+        Paint()..color = const Color(0xfff0f0f0),
+      );
+      canvas.drawRect(
+        const Rect.fromLTRB(100, 140, 300, 146),
+        Paint()..color = const Color(0xff101010),
+      );
+    });
+
+    for (final corners in const [
+      [Offset.zero, Offset(399, 0), Offset(399, 299), Offset(0, 299)],
+      [Offset(0, 1), Offset(399, 0), Offset(398, 299), Offset(1, 298)],
+    ]) {
+      final output = processDocument(
+        input,
+        corners,
+        filter: PageFilter.blackAndWhite,
+        rotationQuarterTurns: 0,
+        brightness: 0,
+        contrast: 1,
+      );
+      final gray = cv.imdecode(output, cv.IMREAD_GRAYSCALE);
+      try {
+        final border = blackAndWhiteBorder(gray.cols, gray.rows);
+        var dark = 0;
+        for (var y = 0; y < gray.rows; y++) {
+          for (var x = 0; x < gray.cols; x++) {
+            final edge =
+                x < border + 2 ||
+                y < border + 2 ||
+                x >= gray.cols - border - 2 ||
+                y >= gray.rows - border - 2;
+            if (edge && gray.at<int>(y, x) < 128) dark++;
+          }
+        }
+        expect(dark, 0, reason: 'border remnants for $corners');
+        // Real content is untouched.
+        expect(gray.at<int>(143, 200), lessThan(128), reason: '$corners');
+      } finally {
+        gray.dispose();
+      }
+    }
+  });
 }

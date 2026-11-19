@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../models/scanned_page.dart';
+import '../services/adjustment_scale.dart';
 import '../services/corner_adjust_operations.dart';
 import '../services/corner_geometry.dart';
 import '../services/gesture_exclusion.dart';
@@ -587,14 +588,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  bool get _showsBatchProgressTitle =>
-      _step == _Step.corners && _hasBatchProgress;
+  /// Batch position stays in the title on both steps, so the context and
+  /// the title's place never change while reviewing an image.
+  bool get _showsBatchProgressTitle => _hasBatchProgress;
 
   String get _appBarTitle {
-    if (_step == _Step.filter) return 'Appearance';
     if (_showsBatchProgressTitle) {
       return 'Image ${widget.batchPosition} of ${widget.batchCount}';
     }
+    if (_step == _Step.filter) return 'Appearance';
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
@@ -965,17 +967,19 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  /// [value], [min] and [max] are slider positions; [describe] turns a
+  /// position into the value shown, [announce] into the value read aloud.
   Widget _adjustmentSlider({
     required String label,
     required double value,
     required double min,
     required double max,
+    required String Function(double position) describe,
+    required String Function(double position) announce,
     required ValueChanged<double> onChanged,
     required VoidCallback onSheetChanged,
   }) {
-    final displayValue = label == 'Brightness'
-        ? '${value > 0 ? '+' : ''}${value.round()}'
-        : '${value.toStringAsFixed(2)}×';
+    final displayValue = describe(value);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -991,9 +995,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                   value: value,
                   min: min,
                   max: max,
-                  semanticFormatterCallback: (v) => label == 'Brightness'
-                      ? '${v.round()}, neutral 0'
-                      : '${v.toStringAsFixed(2)} times, neutral 1',
+                  semanticFormatterCallback: announce,
                   onChanged: _isProcessing
                       ? null
                       : (newValue) {
@@ -1023,6 +1025,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      // No scrim: the preview behind shows the effect while choosing.
+      barrierColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, updateSheet) => ConstrainedBox(
           constraints: BoxConstraints(
@@ -1086,6 +1090,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      // No scrim: the preview behind shows the effect while choosing.
+      barrierColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, updateSheet) {
           void refreshSheet() => updateSheet(() {});
@@ -1128,15 +1134,24 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                       value: _brightness,
                       min: -100,
                       max: 100,
+                      describe: (v) => '${v > 0 ? '+' : ''}${v.round()}',
+                      announce: (v) => '${v.round()}, neutral 0',
                       onChanged: (value) => _brightness = value,
                       onSheetChanged: refreshSheet,
                     ),
                     _adjustmentSlider(
                       label: 'Contrast',
-                      value: _contrast,
-                      min: 0.5,
-                      max: 2.0,
-                      onChanged: (value) => _contrast = value,
+                      // Log scale: neutral 1.0× sits in the middle.
+                      value: contrastToSliderPosition(_contrast),
+                      min: -1,
+                      max: 1,
+                      describe: (position) =>
+                          '${sliderPositionToContrast(position).toStringAsFixed(2)}×',
+                      announce: (position) =>
+                          '${sliderPositionToContrast(position).toStringAsFixed(2)} '
+                          'times, neutral 1',
+                      onChanged: (position) =>
+                          _contrast = sliderPositionToContrast(position),
                       onSheetChanged: refreshSheet,
                     ),
                     Align(

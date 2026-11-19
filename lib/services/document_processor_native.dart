@@ -143,7 +143,14 @@ Uint8List warpDocument(
       ]);
       try {
         final transform = track(cv.getPerspectiveTransform(srcPts, dstPts));
-        final warped = track(cv.warpPerspective(src, transform, (outW, outH)));
+        // Replicate edge pixels rather than blending in black where the
+        // crop runs along the photo's bounds.
+        final warped = track(
+          cv.warpPerspective(src, transform, (
+            outW,
+            outH,
+          ), borderMode: cv.BORDER_REPLICATE),
+        );
 
         final (success, encoded) = cv.imencode('.jpg', warped);
         if (!success) {
@@ -197,8 +204,15 @@ Uint8List applyFilter(Uint8List warpedBytes, PageFilter filter) {
 /// Classic "scanned page" look: grayscale + adaptive threshold, so text
 /// comes out crisp black-on-white regardless of uneven lighting in the
 /// original photo. Block size scales with image size (must stay odd).
+///
+/// The crop's outermost pixels usually hold a sliver of background, a page
+/// edge shadow or interpolation fringe; thresholded, they become dashed lines
+/// along the border. They are replaced by the nearest inner pixels first.
 cv.Mat _blackAndWhite(cv.Mat src, cv.Mat Function(cv.Mat) track) {
-  final gray = track(cv.cvtColor(src, cv.COLOR_BGR2GRAY));
+  final gray = _replicateBorder(
+    track(cv.cvtColor(src, cv.COLOR_BGR2GRAY)),
+    track,
+  );
   final blockSize = ((src.cols / 20).round() | 1).clamp(3, 9999);
   return cv.adaptiveThreshold(
     gray,
@@ -207,6 +221,37 @@ cv.Mat _blackAndWhite(cv.Mat src, cv.Mat Function(cv.Mat) track) {
     cv.THRESH_BINARY,
     blockSize,
     10,
+  );
+}
+
+/// Border width replaced before thresholding: 1% of the short side (about
+/// 2 mm on A4), so previews and full-resolution exports clean the same
+/// proportion of what is almost always blank page margin.
+int blackAndWhiteBorder(int width, int height) =>
+    (math.min(width, height) * 0.01).round().clamp(3, 32);
+
+/// Returns [gray] with its outer [blackAndWhiteBorder] pixels replaced by
+/// copies of the nearest inner row/column. Images too small to keep an
+/// inner area are returned unchanged.
+cv.Mat _replicateBorder(cv.Mat gray, cv.Mat Function(cv.Mat) track) {
+  final border = blackAndWhiteBorder(gray.cols, gray.rows);
+  if (gray.cols <= border * 4 || gray.rows <= border * 4) return gray;
+  final inner = track(
+    gray.region(
+      cv.Rect(border, border, gray.cols - 2 * border, gray.rows - 2 * border),
+    ),
+  );
+  return track(
+    cv.copyMakeBorder(
+      inner,
+      border,
+      border,
+      border,
+      border,
+      // Without ISOLATED, OpenCV reads the original pixels around the ROI
+      // and would rebuild the very border being replaced.
+      cv.BORDER_REPLICATE | cv.BORDER_ISOLATED,
+    ),
   );
 }
 

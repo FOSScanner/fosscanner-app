@@ -213,14 +213,17 @@ void main() {
       contains('neutral 1'),
     );
     tester.widget<Slider>(sliders.first).onChanged!(100);
-    tester.widget<Slider>(sliders.last).onChanged!(2);
+    // The contrast slider's end (log scale) is 2.00×.
+    tester.widget<Slider>(sliders.last).onChanged!(1);
     await tester.pump();
     expect(find.text('Brightness: +100'), findsOneWidget);
     expect(find.text('Contrast: 2.00×'), findsOneWidget);
     await tester.tap(find.text('Reset adjustments'));
     await tester.pumpAndSettle();
     expect(tester.widget<Slider>(sliders.first).value, 0);
-    expect(tester.widget<Slider>(sliders.last).value, 1);
+    // Neutral contrast sits in the middle of the track.
+    expect(tester.widget<Slider>(sliders.last).value, 0);
+    expect(find.text('Contrast: 1.00×'), findsOneWidget);
     await tester.tap(find.byTooltip('Close adjustments'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Back'));

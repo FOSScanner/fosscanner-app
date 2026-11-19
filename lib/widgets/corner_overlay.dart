@@ -272,6 +272,12 @@ class _CornerOverlayState extends State<CornerOverlay> {
                     painter: _QuadPainter(
                       displayCorners,
                       Theme.of(context).colorScheme.primary,
+                      Rect.fromLTWH(
+                        offsetX,
+                        offsetY,
+                        displaySize.width,
+                        displaySize.height,
+                      ),
                     ),
                   ),
                 ),
@@ -466,16 +472,26 @@ class _CornerOverlayState extends State<CornerOverlay> {
   }
 }
 
+/// Dims the image outside the crop and outlines it. The kept area is left
+/// untinted so the document stays readable, in light and dark themes alike.
 class _QuadPainter extends CustomPainter {
-  _QuadPainter(this.corners, this.primary);
+  _QuadPainter(this.corners, this.primary, this.imageRect);
+
+  /// Dark in both themes: the scrim sits on the photo, not on the surface.
+  static const scrimColor = Color(0x8C000000);
 
   final List<Offset> corners;
   final Color primary;
+  final Rect imageRect;
 
   @override
   void paint(Canvas canvas, Size size) {
     final path = Path()..addPolygon(corners, true);
-    canvas.drawPath(path, Paint()..color = primary.withValues(alpha: 0.2));
+    final outside = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(imageRect)
+      ..addPolygon(corners, true);
+    canvas.drawPath(outside, Paint()..color = scrimColor);
     canvas.drawPath(
       path,
       Paint()
@@ -488,5 +504,6 @@ class _QuadPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _QuadPainter oldDelegate) =>
       oldDelegate.primary != primary ||
+      oldDelegate.imageRect != imageRect ||
       !listEquals(oldDelegate.corners, corners);
 }
