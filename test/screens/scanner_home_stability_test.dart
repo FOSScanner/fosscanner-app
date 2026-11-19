@@ -34,11 +34,16 @@ class _Store implements DraftStore {
 }
 
 class _CameraPicker extends ImagePickerPlatform {
+  _CameraPicker({this.camera = true});
+
+  final bool camera;
+
   /// While set, gallery selection stays open until it completes.
   Completer<List<XFile>>? gallery;
 
   @override
-  bool supportsImageSource(ImageSource source) => true;
+  bool supportsImageSource(ImageSource source) =>
+      camera || source != ImageSource.camera;
 
   @override
   Future<LostDataResponse> getLostData() async => LostDataResponse.empty();
@@ -50,6 +55,8 @@ class _CameraPicker extends ImagePickerPlatform {
 }
 
 final _thumbnail = find.byKey(const ValueKey('page_thumbnail_0'));
+final _undo = find.widgetWithText(SnackBarAction, 'Undo');
+final _camera = find.byType(FloatingActionButton);
 
 /// Matrix entries at the default and the maximum supported text scale.
 final _defaultAndLargeText = [
@@ -211,11 +218,10 @@ void main() {
         expect(tester.getRect(camera), emptyCamera);
       }
 
-      // Deleting the last page shows Undo, which the camera button may rise
-      // above like any snackbar; nothing else may move. After Undo everything
-      // is back where it was.
+      // Deleting the last page shows Undo above the camera button; nothing
+      // moves, and after Undo everything is still where it was.
       await expectStableRects(tester, controls, () async {
-        await expectStableRects(tester, fixedControls(camera: false), () async {
+        await expectStableRects(tester, controls, () async {
           pressIconButton(tester, 'Delete page 1');
           await tester.pumpAndSettle();
           expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
@@ -243,7 +249,7 @@ void main() {
       await expectStableRects(tester, fixedControls(), () async {
         pressIconButton(tester, 'Delete page 1');
         await tester.pumpAndSettle();
-        await tester.pump(const Duration(seconds: 5));
+        await tester.pump(const Duration(seconds: 11));
         await tester.pumpAndSettle();
         expect(find.byType(SnackBar), findsNothing);
       });
@@ -344,4 +350,73 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   }, cases: _defaultAndLargeText);
+
+  // #156
+  testLayoutMatrix(
+    'Undo and the camera button keep their places from delete to expiry',
+    (tester, layoutCase) async {
+      await pumpHome(tester, layoutCase, pageCount: 1);
+      await tester.pumpAndSettle();
+      final camera = tester.getRect(_camera);
+      pressIconButton(tester, 'Delete page 1');
+      await tester.pump();
+      // Undo is reachable while it slides in, and never over the button.
+      await tester.pump(const Duration(milliseconds: 100));
+      final undo = tester.getRect(_undo);
+      expect(undo.bottom, lessThanOrEqualTo(camera.top));
+      expect(tester.getRect(_camera), camera);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_undo), undo);
+      expect(tester.getRect(_camera), camera);
+
+      await tester.pump(const Duration(seconds: 6));
+      expect(tester.getRect(_undo), undo);
+      // Expiry: Undo fades out where it was, and the button stays below it.
+      await tester.pump(const Duration(seconds: 4));
+      for (var frame = 0; frame < 30 && _undo.evaluate().isNotEmpty; frame++) {
+        expect(tester.getRect(_undo), undo, reason: 'exit frame $frame');
+        expect(tester.getRect(_camera), camera, reason: 'exit frame $frame');
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pumpAndSettle();
+      expect(_undo, findsNothing);
+      expect(tester.getRect(_camera), camera);
+      expect(tester.takeException(), isNull);
+    },
+    cases: _defaultAndLargeText,
+  );
+
+  for (final camera in [true, false]) {
+    testLayoutMatrix(
+      'Undo appears in one place whether or not the last page was deleted '
+      '(camera: $camera)',
+      (tester, layoutCase) async {
+        ImagePickerPlatform.instance = _CameraPicker(camera: camera);
+        await pumpHome(tester, layoutCase, pageCount: 2);
+        await tester.pumpAndSettle();
+        expect(_camera, camera ? findsOneWidget : findsNothing);
+
+        pressIconButton(tester, 'Delete page 2');
+        await tester.pumpAndSettle();
+        final undo = tester.getRect(_undo);
+        await tester.pump(const Duration(seconds: 11));
+        await tester.pumpAndSettle();
+        expect(_undo, findsNothing);
+
+        pressIconButton(tester, 'Delete page 1');
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
+        expect(tester.getRect(_undo), undo);
+
+        await expectStableRects(tester, {'Undo': _undo}, () async {
+          await tester.tap(_undo);
+          await tester.pump();
+        }, reason: 'Undo tapped');
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('pdf_export_bar')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+      cases: _defaultAndLargeText,
+    );
+  }
 }

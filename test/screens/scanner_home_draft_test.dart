@@ -214,33 +214,65 @@ void main() {
     expect(find.byTooltip('Delete page 2'), findsOneWidget);
   });
 
-  for (final accessibleNavigation in [false, true]) {
-    for (final pageCount in [1, 2]) {
-      testWidgets('deletion Undo expires after four seconds '
-          '($pageCount pages, accessibleNavigation=$accessibleNavigation)', (
+  for (final pageCount in [1, 2]) {
+    testWidgets('deletion Undo expires after ten seconds ($pageCount pages)', (
+      tester,
+    ) async {
+      final store = _DraftStore();
+      await pumpHome(
         tester,
-      ) async {
-        final store = _DraftStore();
-        await pumpHome(
-          tester,
-          store,
-          pages: [for (var i = 1; i <= pageCount; i++) page(i)],
-          accessibleNavigation: accessibleNavigation,
-        );
-        await tapDelete(tester, 1);
-        await tester.pumpAndSettle();
-        expect(find.text('Page deleted.'), findsOneWidget);
-        expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
-        await tester.pump(const Duration(seconds: 3));
-        expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
-        await tester.pump(const Duration(seconds: 2));
-        await tester.pumpAndSettle();
-        expect(find.text('Page deleted.'), findsNothing);
-        expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
-        expect(store.saves.single, hasLength(pageCount - 1));
-        expect(tester.takeException(), isNull);
-      });
-    }
+        store,
+        pages: [for (var i = 1; i <= pageCount; i++) page(i)],
+      );
+      await tapDelete(tester, 1);
+      await tester.pumpAndSettle();
+      expect(find.text('Page deleted.'), findsOneWidget);
+      expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 9));
+      expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(find.text('Page deleted.'), findsNothing);
+      expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
+      expect(store.saves.single, hasLength(pageCount - 1));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Undo still restores the page after six seconds '
+        '($pageCount pages)', (tester) async {
+      final store = _DraftStore();
+      final pages = [for (var i = 1; i <= pageCount; i++) page(i)];
+      await pumpHome(tester, store, pages: pages);
+      await tapDelete(tester, 1);
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 6));
+      await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
+      await tester.pumpAndSettle();
+      expect(store.saves.last, orderedEquals(pages));
+      expect(find.byTooltip('Delete page $pageCount'), findsOneWidget);
+    });
+
+    testWidgets('with a screen reader, Undo stays until it is closed '
+        '($pageCount pages)', (tester) async {
+      final store = _DraftStore();
+      await pumpHome(
+        tester,
+        store,
+        pages: [for (var i = 1; i <= pageCount; i++) page(i)],
+        accessibleNavigation: true,
+      );
+      await tapDelete(tester, 1);
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(minutes: 2));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(find.text('Page deleted.'), findsNothing);
+      expect(store.saves.single, hasLength(pageCount - 1));
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets('two rapid deletes expose only the newest Undo', (tester) async {
@@ -654,7 +686,7 @@ void main() {
     ImagePickerPlatform.instance = _FailingPicker();
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 11));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
     expect(find.text('Could not open the photo gallery.'), findsOneWidget);

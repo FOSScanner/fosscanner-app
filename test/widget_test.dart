@@ -571,7 +571,7 @@ void main() {
           .onPressed,
       isNull,
     );
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 10));
     await tester.pumpAndSettle();
     expect(find.text('Image intake help'), findsNothing);
     expect(

@@ -62,7 +62,7 @@ Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
 **Move later** (disabled while the document has a single page), or long-press
 and drag pages to reorder them. The page grid adds columns on tablets and in
 landscape. Deleting a page
-offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
+offers **Undo** for ten seconds. In a multi-image gallery import, **Skip image** skips only the
 current photo; remaining images are still reviewed. The review title shows
 the position (for example *Image 2 of 5*), and **Stop importing** (or Back)
 ends the batch while keeping pages already added. Canceling an unsaved

@@ -1497,6 +1497,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  /// Long enough to notice a mistaken delete and reach Undo.
+  static const _undoDuration = Duration(seconds: 10);
+
   void _removePage(int index) {
     if (_isDocumentInteractionLocked || index < 0 || index >= _pages.length) {
       return;
@@ -1508,13 +1511,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     messenger.clearSnackBars();
     setState(() => _pages.removeAt(index));
     _queueDraftSave();
+    // Screen-reader users reach Undo at their own pace: it stays until they
+    // use or close it.
+    final persist = MediaQuery.accessibleNavigationOf(context);
     final controller = messenger.showSnackBar(
       SnackBar(
         content: const Text('Page deleted.'),
+        // Floating snackbars sit above the camera button instead of lifting
+        // it. The button never moves, so Undo keeps one position while it
+        // appears, while it is reachable and while it leaves, whether or not
+        // the export bar is shown; the button cannot slide into its place.
+        behavior: SnackBarBehavior.floating,
         // Flutter otherwise makes action snackbars persistent by default.
-        // Explicitly opt into expiry even though Undo provides an action.
-        persist: false,
-        duration: const Duration(seconds: 4),
+        persist: persist,
+        showCloseIcon: persist,
+        duration: _undoDuration,
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
@@ -2252,6 +2263,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   double _reservedExportBarHeight(BuildContext context) =>
       _exportBarHeight(context) + 16;
 
+  /// Holds the export bar's space while there are no pages, so the page
+  /// area, the camera button and snackbars keep their positions when the
+  /// first page is added or the last one removed.
+  Widget _buildExportBarSpace(BuildContext context) => SafeArea(
+    key: const Key('export_bar_space'),
+    top: false,
+    child: SizedBox(height: _reservedExportBarHeight(context)),
+  );
+
   bool get _canClearPages =>
       _pages.isNotEmpty && !_isClearingDraft && !_isGeneratingPdf;
 
@@ -2635,7 +2655,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             )
           : null,
       floatingActionButtonLocation: _fabLocation,
-      bottomNavigationBar: _pages.isEmpty ? null : _buildExportBar(),
+      bottomNavigationBar: _pages.isEmpty
+          ? _buildExportBarSpace(context)
+          : _buildExportBar(),
     );
   }
 }
