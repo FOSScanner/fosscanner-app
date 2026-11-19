@@ -8,6 +8,7 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import 'package:fosscanner/widgets/corner_overlay.dart';
 
 const _skipNotice =
     'Skip this image only. Any remaining images will still be reviewed.';
@@ -254,7 +255,7 @@ void main() {
       skip();
       next();
       await waitForEditor(tester, previousBytes: first.originalBytes);
-      expect(find.text('Adjust corners'), findsOneWidget);
+      expect(find.text('Image 2 of 3'), findsOneWidget);
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
       await accept(tester);
       await waitForEditor(tester);
@@ -372,6 +373,148 @@ void main() {
     );
   }
 
+  IconButton stopButton(WidgetTester tester) => tester.widget<IconButton>(
+    find.widgetWithIcon(IconButton, Icons.stop_circle_outlined),
+  );
+
+  testWidgets(
+    'batch review shows its position and Stop keeps accepted pages only',
+    (tester) async {
+      final files = [for (var i = 0; i < 4; i++) photo('stop-$i')];
+      picker.galleryPhotos = files.map((file) => XFile(file.path)).toList();
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester);
+      expect(find.text('Image 1 of 4'), findsOneWidget);
+      final first = tester.widget<CornerAdjustScreen>(
+        find.byType(CornerAdjustScreen),
+      );
+      await accept(tester);
+
+      await waitForEditor(tester, previousBytes: first.originalBytes);
+      expect(find.text('Image 2 of 4'), findsOneWidget);
+      final stop = stopButton(tester).onPressed!;
+      stop();
+      stop();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(find.byType(Card), findsOneWidget);
+      expect(operations.exports, 1);
+      expect(
+        find.text(
+          'Import stopped. Pages already added were kept; the remaining '
+          'images were not added.',
+        ),
+        findsOneWidget,
+      );
+      // Gallery originals belong to the user and must never be deleted.
+      expect(files.every((file) => file.existsSync()), isTrue);
+
+      picker.galleryPhotos = [];
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await tester.pumpAndSettle();
+      expect(picker.galleryCalls, 2);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'Back during batch review stops the import instead of skipping',
+    (tester) async {
+      final files = [for (var i = 0; i < 3; i++) photo('back-$i')];
+      picker.galleryPhotos = files.map((file) => XFile(file.path)).toList();
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester);
+      final first = tester.widget<CornerAdjustScreen>(
+        find.byType(CornerAdjustScreen),
+      );
+      await accept(tester);
+      await waitForEditor(tester, previousBytes: first.originalBytes);
+      expect(find.text('Image 2 of 3'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(find.byType(Card), findsOneWidget);
+      expect(find.textContaining('Import stopped.'), findsOneWidget);
+      expect(picker.galleryCalls, 1);
+      expect(files.every((file) => file.existsSync()), isTrue);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'the last batch image keeps Stop in place but disabled',
+    (tester) async {
+      picker.galleryPhotos = [
+        XFile(photo('only-first').path),
+        XFile(photo('only-last').path),
+      ];
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester);
+      expect(stopButton(tester).onPressed, isNotNull);
+      final stopRect = tester.getRect(find.byTooltip('Stop importing'));
+      final canvasRect = tester.getRect(find.byType(CornerOverlay));
+      final first = tester.widget<CornerAdjustScreen>(
+        find.byType(CornerAdjustScreen),
+      );
+      await tester.tap(find.text('Skip image'));
+      await waitForEditor(tester, previousBytes: first.originalBytes);
+      expect(find.text('Image 2 of 2'), findsOneWidget);
+      // Disabled rather than removed, so the app bar does not change on the
+      // last image; Skip image still ends the batch.
+      expect(stopButton(tester).onPressed, isNull);
+      expect(tester.getRect(find.byTooltip('Stop importing')), stopRect);
+      expect(tester.getRect(find.byType(CornerOverlay)), canvasRect);
+      expect(find.text('Skip image'), findsOneWidget);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'stopping a recovered batch deletes the remaining app-owned files',
+    (tester) async {
+      final files = [for (var i = 0; i < 3; i++) photo('recovered-stop-$i')];
+      picker.recoveredPhotos = files.map((file) => XFile(file.path)).toList();
+      await pumpHome(tester);
+      await waitForEditor(tester);
+      expect(find.text('Image 1 of 3'), findsOneWidget);
+      await tester.tap(find.byTooltip('Stop importing'));
+      // Cleanup is real file IO, which needs real event-loop turns.
+      for (var i = 0; i < 50 && files.any((file) => file.existsSync()); i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(find.byType(Card), findsNothing);
+      expect(files.every((file) => !file.existsSync()), isTrue);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets(
+    'single-image review shows no batch progress or Stop',
+    (tester) async {
+      picker.galleryPhotos = [XFile(photo('single').path)];
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester);
+      expect(find.byKey(const Key('batch_progress')), findsNothing);
+      expect(find.byTooltip('Stop importing'), findsNothing);
+      expect(find.text('Adjust corners'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
   for (final size in [const Size(320, 568), const Size(640, 300)]) {
     testWidgets('batch guidance fits $size at 200% text', (tester) async {
       tester.view.physicalSize = size;
@@ -390,12 +533,18 @@ void main() {
             originalBytes: bytes,
             source: PageReviewSource.gallery,
             isBatchImport: true,
+            batchPosition: 2,
+            batchCount: 5,
+            onStopImport: () {},
             operations: operations,
           ),
         ),
       );
       await tester.pumpAndSettle();
       expect(find.text(_skipNotice), findsOneWidget);
+      // The position scales down instead of being ellipsized beside Stop.
+      expect(find.text('Image 2 of 5').hitTestable(), findsOneWidget);
+      expect(find.byTooltip('Stop importing').hitTestable(), findsOneWidget);
       expect(find.text('Skip image'), findsOneWidget);
       await tester.ensureVisible(find.text('Skip image'));
       await tester.pumpAndSettle();
