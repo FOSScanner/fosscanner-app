@@ -16,6 +16,7 @@ import 'package:fosscanner/screens/page_preview_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
+import 'support/home_menu.dart';
 import 'support/worker_isolates.dart';
 
 class _FakeImagePickerPlatform extends ImagePickerPlatform {
@@ -239,7 +240,7 @@ void main() {
     expect(find.byIcon(Icons.camera_alt), findsWidgets);
 
     // No captured pages yet, so there's nothing to clear or export.
-    expect(find.byIcon(Icons.clear_all), findsNothing);
+    expect(await isClearAllPagesEnabled(tester), isFalse);
     expect(find.textContaining('Export PDF'), findsNothing);
   });
 

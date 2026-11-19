@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 
+import '../support/home_menu.dart';
 import '../support/layout_stability.dart';
 
 class _Store implements DraftStore {
@@ -67,6 +69,15 @@ void main() {
     processedBytes: imageBytes,
     corners: const [],
   );
+
+  void pressIconButton(WidgetTester tester, String tooltip) => tester
+      .widget<IconButton>(
+        find.ancestor(
+          of: find.byTooltip(tooltip),
+          matching: find.byType(IconButton),
+        ),
+      )
+      .onPressed!();
 
   /// Pumps the home page without settling, so a pending restore stays visible.
   Future<void> pumpHome(
@@ -151,4 +162,109 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  // #151
+  const appBarActions = {
+    'QR button': 'Scan QR/barcode',
+    'gallery button': 'Import from gallery',
+    'overflow button': 'More options',
+  };
+  Map<String, Finder> fixedControls({bool camera = true}) => {
+    for (final entry in appBarActions.entries)
+      entry.key: find.byTooltip(entry.value),
+    if (camera) 'camera button': find.byType(FloatingActionButton),
+  };
+
+  testLayoutMatrix(
+    'app-bar actions and the camera button stay put from 0 to 1 to 0 pages',
+    (tester, layoutCase) async {
+      final restore = Completer<List<ScannedPage>>();
+      await pumpHome(tester, layoutCase, store: _Store(loaded: restore.future));
+      expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
+      final controls = fixedControls();
+      final camera = find.byType(FloatingActionButton);
+      final emptyCamera = tester.getRect(camera);
+
+      await expectStableRects(tester, fixedControls(camera: false), () async {
+        restore.complete([page()]);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('pdf_export_bar')), findsOneWidget);
+      }, reason: '0 -> 1 page');
+      // Before the first export bar was laid out, the camera button reserves
+      // the bar's one-line height. Where this branch's bar label still wraps
+      // (#152 gives the bar that fixed height) the button rises above the bar
+      // once; every later empty/non-empty change keeps it in place.
+      final bar = tester.getRect(find.byKey(const Key('pdf_export_bar')));
+      expect(tester.getRect(camera).bottom, lessThanOrEqualTo(bar.top - 16));
+      final oneLineBar =
+          math.max(56, layoutCase.textScale * 14 * 1.43 + 32) + 16;
+      if ((bar.height - oneLineBar).abs() < 0.5) {
+        expect(tester.getRect(camera), emptyCamera);
+      }
+
+      // Deleting the last page shows Undo, which the camera button may rise
+      // above like any snackbar; nothing else may move. After Undo everything
+      // is back where it was.
+      await expectStableRects(tester, controls, () async {
+        await expectStableRects(tester, fixedControls(camera: false), () async {
+          pressIconButton(tester, 'Delete page 1');
+          await tester.pumpAndSettle();
+          expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
+        }, reason: 'delete');
+        await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('pdf_export_bar')), findsOneWidget);
+      }, reason: 'delete + Undo');
+
+      await expectStableRects(tester, controls, () async {
+        await tapClearAllPages(tester);
+        await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
+      }, reason: 'clear');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testLayoutMatrix(
+    'the camera button does not move when the deleted page is not undone',
+    (tester, layoutCase) async {
+      await pumpHome(tester, layoutCase, pageCount: 1);
+      await tester.pumpAndSettle();
+      await expectStableRects(tester, fixedControls(), () async {
+        pressIconButton(tester, 'Delete page 1');
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(find.byType(SnackBar), findsNothing);
+      });
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testLayoutMatrix('the empty-state title stays put when restoring ends', (
+    tester,
+    layoutCase,
+  ) async {
+    final restore = Completer<List<ScannedPage>>();
+    await pumpHome(tester, layoutCase, store: _Store(loaded: restore.future));
+    expect(find.text('Restoring draft...'), findsOneWidget);
+    final title = find.byKey(const Key('empty_state_title'));
+    final restoringTitle = tester.getRect(title);
+    await expectStableRects(
+      tester,
+      {'icon': find.byKey(const Key('empty_state_icon'))},
+      () async {
+        restore.complete(const []);
+        await tester.pumpAndSettle();
+        expect(find.text('Ready to Scan'), findsOneWidget);
+      },
+    );
+    // The text differs, so only its height may: it starts at the same place
+    // and spans the same width.
+    final readyTitle = tester.getRect(title);
+    expect(readyTitle.topLeft, restoringTitle.topLeft);
+    expect(readyTitle.width, restoringTitle.width);
+    expect(tester.takeException(), isNull);
+  });
 }

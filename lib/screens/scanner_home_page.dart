@@ -67,6 +67,79 @@ enum _ExportAction { share, save }
 
 typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
 
+/// [FloatingActionButtonLocation.endFloat], but always floating above the
+/// space the export bar takes, whether or not the bar is shown.
+///
+/// The export bar only exists while the document has pages, so the standard
+/// location would make the camera button jump when the first page is added
+/// and back when the last one is removed. The page sets the estimated bar
+/// height on every build; the tallest bar actually laid out for the same width
+/// and estimate is remembered, so a bar taller than the estimate moves the
+/// button at most once instead of on every empty/non-empty change.
+class _ExportBarFabLocation extends StandardFabLocation with FabEndOffsetX {
+  /// Estimated export bar height, excluding the bottom safe-area padding.
+  double estimatedBarHeight = 0;
+
+  ({double width, double estimate, double height})? _measured;
+
+  @override
+  double getOffsetY(ScaffoldPrelayoutGeometry geometry, double adjustment) {
+    final scaffoldHeight = geometry.scaffoldSize.height;
+    final width = geometry.scaffoldSize.width;
+    final barHeight = scaffoldHeight - geometry.contentBottom;
+    var reserved = estimatedBarHeight + geometry.minViewPadding.bottom;
+    final measured = _measured;
+    if (measured != null &&
+        measured.width == width &&
+        measured.estimate == estimatedBarHeight) {
+      reserved = math.max(reserved, measured.height);
+    }
+    if (barHeight > reserved) {
+      _measured = (
+        width: width,
+        estimate: estimatedBarHeight,
+        height: barHeight,
+      );
+      reserved = barHeight;
+    }
+    // Same as FabFloatOffsetY, with the content bottom raised to the reserved
+    // bar top even while the bar is absent.
+    final contentBottom = math.min(
+      geometry.contentBottom,
+      scaffoldHeight - reserved,
+    );
+    final fabHeight = geometry.floatingActionButtonSize.height;
+    final snackBarHeight = geometry.snackBarSize.height;
+    final bottomSheetHeight = geometry.bottomSheetSize.height;
+    final safeMargin = math.max(
+      kFloatingActionButtonMargin,
+      geometry.minViewPadding.bottom -
+          (scaffoldHeight - contentBottom) +
+          kFloatingActionButtonMargin,
+    );
+    var fabY = contentBottom - fabHeight - safeMargin;
+    if (snackBarHeight > 0) {
+      fabY = math.min(
+        fabY,
+        geometry.contentBottom -
+            snackBarHeight -
+            fabHeight -
+            kFloatingActionButtonMargin,
+      );
+    }
+    if (bottomSheetHeight > 0) {
+      fabY = math.min(
+        fabY,
+        geometry.contentBottom - bottomSheetHeight - fabHeight / 2,
+      );
+    }
+    return fabY + adjustment;
+  }
+
+  @override
+  String toString() => 'FloatingActionButtonLocation.exportBarEndFloat';
+}
+
 class ScannerHomePage extends StatefulWidget {
   const ScannerHomePage({
     super.key,
@@ -128,6 +201,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   // Set once the user changes a preference, so a slow initial load cannot
   // overwrite a choice made while it was still reading.
   bool _preferencesChanged = false;
+  final _fabLocation = _ExportBarFabLocation();
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
   _ExportAction _exportAction = _ExportAction.share;
@@ -1326,9 +1400,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear all pages?'),
         content: const Text(
-          'This removes every page from the current draft. '
-          'Drafts are temporary app-cache data, not saved PDFs. '
-          'PDFs already shared are not removed.',
+          'All pages in this draft will be deleted. '
+          'PDFs you already exported are not affected.',
         ),
         actions: [
           TextButton(
@@ -1865,6 +1938,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// Height of the export bar (plus its 8 px vertical padding), excluding the
+  /// bottom safe area. The camera button floats above this space even while
+  /// the bar is absent, so adding the first page never moves it.
+  double _reservedExportBarHeight(BuildContext context) =>
+      _exportBarHeight(context) + 16;
+
+  bool get _canClearPages =>
+      _pages.isNotEmpty && !_isClearingDraft && !_isGeneratingPdf;
+
   static const _draftSaveFailureMessage =
       'Could not save the latest draft changes. Keep the app open and retry.';
 
@@ -1950,40 +2032,72 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Widget _buildEmptyState(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isRestoringDraft)
-              const CircularProgressIndicator()
-            else
-              Icon(
-                _cameraSupported
-                    ? Icons.camera_alt
-                    : Icons.photo_library_outlined,
-                size: 80,
-                color: muted,
-              ),
-            const SizedBox(height: 16),
-            Text(
-              _isRestoringDraft ? 'Restoring draft...' : 'Ready to Scan',
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final textScaler = MediaQuery.textScalerOf(context);
+    // Nominal height of the ready state (icon, one-line title and two lines
+    // of copy). The top inset centers that block, but
+    // depends only on the viewport: the restoring and ready states start at
+    // the same place, so the icon and title never move between them.
+    final readyHeight =
+        80 + 16 + textScaler.scale(32) + 8 + textScaler.scale(40);
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          32,
+          math.max(32, (constraints.maxHeight - readyHeight) / 2),
+          32,
+          32,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // The spinner gets the icon's 80 px square.
+                Center(
+                  child: SizedBox.square(
+                    key: const Key('empty_state_icon'),
+                    dimension: 80,
+                    child: _isRestoringDraft
+                        ? const Center(child: CircularProgressIndicator())
+                        : Icon(
+                            _cameraSupported
+                                ? Icons.camera_alt
+                                : Icons.photo_library_outlined,
+                            size: 80,
+                            color: muted,
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _isRestoringDraft ? 'Restoring draft...' : 'Ready to Scan',
+                  key: const Key('empty_state_title'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _isRestoringDraft
+                      ? 'Your saved pages will appear here.'
+                      : _cameraSupported
+                      ? 'Tap the camera button to add your first document. '
+                            'FOSS & Privacy-first: everything is processed '
+                            'on your device.'
+                      : 'Import from your gallery to add your first '
+                            'document. FOSS & Privacy-first: everything is '
+                            'processed on your device.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: muted),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              _isRestoringDraft
-                  ? 'Your saved pages will appear here.'
-                  : _cameraSupported
-                  ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
-                  : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: muted),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2099,9 +2213,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   @override
   Widget build(BuildContext context) {
     if (_draftRestoreFailed) return _buildDraftRestoreFailure();
+    _fabLocation.estimatedBarHeight = _reservedExportBarHeight(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('FOSScanner'),
+        // The same actions in the same places whether or not the document has
+        // pages; clearing lives in the always-present overflow menu.
         actions: [
           if (supportsBarcodeCamera(
             platform: defaultTargetPlatform,
@@ -2122,24 +2239,34 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 : _importFromGallery,
             tooltip: 'Import from gallery',
           ),
-          if (_pages.isNotEmpty)
-            IconButton(
-              icon: _isClearingDraft
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.clear_all),
-              onPressed: _isClearingDraft || _isGeneratingPdf
-                  ? null
-                  : _clearPages,
-              tooltip: 'Clear all',
-            ),
           PopupMenuButton<String>(
             tooltip: 'More options',
-            onSelected: (_) => _showAppInfo(),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'about', child: Text('About FOSScanner')),
+            onSelected: (action) {
+              if (action == 'clear') {
+                _clearPages();
+              } else {
+                _showAppInfo();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'clear',
+                enabled: _canClearPages,
+                child: ListTile(
+                  enabled: _canClearPages,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.delete_sweep_outlined),
+                  title: const Text('Clear all pages'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'about',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.info_outline),
+                  title: Text('About FOSScanner'),
+                ),
+              ),
             ],
           ),
         ],
@@ -2182,6 +2309,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               child: const Icon(Icons.camera_alt),
             )
           : null,
+      floatingActionButtonLocation: _fabLocation,
       bottomNavigationBar: _pages.isEmpty ? null : _buildExportBar(),
     );
   }

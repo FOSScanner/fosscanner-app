@@ -9,6 +9,8 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
+import '../support/home_menu.dart';
+
 class _Store implements DraftStore {
   final saves = <List<ScannedPage>>[];
   Completer<void>? clearing;
@@ -211,8 +213,7 @@ void main() {
     await pumpHome(tester);
     final staleMove = menu(tester, 2).onSelected!;
     store.clearing = Completer<void>();
-    await tester.tap(find.byTooltip('Clear all'));
-    await tester.pumpAndSettle();
+    await tapClearAllPages(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

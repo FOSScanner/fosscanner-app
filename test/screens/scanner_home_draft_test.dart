@@ -10,6 +10,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 
+import '../support/home_menu.dart';
 import '../support/worker_isolates.dart';
 
 class _DraftStore implements DraftStore {
@@ -342,8 +343,7 @@ void main() {
     final store = _DraftStore();
     await pumpHome(tester, store, pages: [page(1), page(2)]);
 
-    await tester.tap(find.byTooltip('Clear all'));
-    await tester.pumpAndSettle();
+    await tapClearAllPages(tester);
     expect(find.text('Clear all pages?'), findsOneWidget);
     expect(store.clearCalls, 0);
     expect(find.text('Export PDF (2 pages)'), findsOneWidget);
@@ -352,8 +352,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.clearCalls, 0);
 
-    await tester.tap(find.byTooltip('Clear all'));
-    await tester.pumpAndSettle();
+    await tapClearAllPages(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
     await tester.pump();
@@ -376,8 +375,7 @@ void main() {
       final staleReorder = tester
           .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
           .onAcceptWithDetails!;
-      await tester.tap(find.byTooltip('Clear all'));
-      await tester.pumpAndSettle();
+      await tapClearAllPages(tester);
       await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
       await tester.pump();
 
@@ -433,8 +431,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Clear all'));
-    await tester.pumpAndSettle();
+    await tapClearAllPages(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
     expect(find.text('Clearing draft...'), findsOneWidget);
@@ -461,8 +458,7 @@ void main() {
     final store = _DraftStore(clearError: StateError('injected clear failure'));
     await pumpHome(tester, store, pages: [page(1), page(2)]);
 
-    await tester.tap(find.byTooltip('Clear all'));
-    await tester.pumpAndSettle();
+    await tapClearAllPages(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
     await tester.pump();
@@ -472,7 +468,7 @@ void main() {
     expect(find.text('Could not clear the saved draft.'), findsOneWidget);
     expect(find.text('Clearing draft...'), findsNothing);
     expect(iconButton(tester, 'Delete page 1').onPressed, isNotNull);
-    expect(iconButton(tester, 'Clear all').onPressed, isNotNull);
+    expect(await isClearAllPagesEnabled(tester), isTrue);
   });
 
   testWidgets('PDF failures hide raw exception details', (tester) async {
@@ -563,15 +559,13 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
       expect(store.clearCalls, 0);
       // Cleanup is explicit and still requires confirmation.
-      await tester.tap(find.byTooltip('Clear all'));
-      await tester.pumpAndSettle();
+      await tapClearAllPages(tester);
       expect(find.text('Clear all pages?'), findsOneWidget);
       expect(store.clearCalls, 0);
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pumpAndSettle();
       expect(find.text('Export PDF (1 page)'), findsOneWidget);
-      await tester.tap(find.byTooltip('Clear all'));
-      await tester.pumpAndSettle();
+      await tapClearAllPages(tester);
       await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
       await tester.pumpAndSettle();
       expect(store.clearCalls, 1);

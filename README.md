@@ -170,9 +170,10 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 
 - A draft contains original and processed page images plus editing settings.
   Atomic saves can retain the current and one previous draft generation.
-- Sharing keeps the draft by default. Use the **Clear all** toolbar action and
-  confirm when you want to start over. Clearing app storage or uninstalling also
-  removes draft data; Android OS backups do not include it.
+- Sharing keeps the draft by default. Choose **Clear all pages** in the ⋮ (More
+  options) menu and confirm when you want to start over. Clearing app storage
+  or uninstalling also removes draft data; Android OS backups do not include
+  it.
 - If restoration fails, adding images and draft saves are paused so they cannot
   silently replace the cached draft. Use **Retry restoration** after checking
   storage access. **Discard saved draft** requires confirmation and deletes both

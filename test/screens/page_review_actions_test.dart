@@ -11,6 +11,8 @@ import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
 
+import '../support/home_menu.dart';
+
 // Removed as filler: Image n of m plus Skip/Stop say enough.
 const _skipHint =
     'Skip this image only. Any remaining images will still be reviewed.';
@@ -576,8 +578,7 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Clear all'));
-      await tester.pumpAndSettle();
+      await tapClearAllPages(tester);
       await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
       await tester.pumpAndSettle();
       expect(find.byType(Card), findsNothing);
