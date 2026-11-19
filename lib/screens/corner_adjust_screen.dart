@@ -791,6 +791,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  // Preview status is layered over the preview instead of being inserted
+  // into the column, so the preview, adjustment controls and confirm buttons
+  // never move or resize while a preview is pending, updating or failed.
   Widget _filterPreview(Uint8List? previewBytes) => Padding(
     key: const Key('adjusted_page_preview'),
     padding: const EdgeInsets.all(16),
@@ -803,15 +806,85 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             fit: BoxFit.contain,
             maxDimension: _fullPreviewDecodeSize,
           ),
-        if (previewBytes == null)
-          Center(
-            child: _previewStatus == _PreviewStatus.updating
-                ? const CircularProgressIndicator()
-                : const Icon(Icons.image_not_supported_outlined, size: 48),
-          ),
+        Positioned.fill(child: _previewStatusOverlay(previewBytes != null)),
       ],
     ),
   );
+
+  String? _previewStatusMessage({required bool hasPreview}) =>
+      switch (_previewStatus) {
+        _PreviewStatus.pending || _PreviewStatus.ready => null,
+        _PreviewStatus.updating => 'Updating preview…',
+        _PreviewStatus.failed =>
+          hasPreview
+              ? 'Preview could not be updated. Previous result shown.'
+              : 'Preview unavailable.',
+      };
+
+  Widget _previewStatusOverlay(bool hasPreview) {
+    final message = _previewStatusMessage(hasPreview: hasPreview);
+    final failed = _previewStatus == _PreviewStatus.failed;
+    final scheme = Theme.of(context).colorScheme;
+    final Widget? pill = message == null
+        ? null
+        : Material(
+            key: const Key('preview_status'),
+            color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
+            elevation: 1,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(message, textAlign: TextAlign.center),
+                  ),
+                  if (failed)
+                    TextButton.icon(
+                      onPressed: _isProcessing ? null : _updateFinalPreview,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry preview'),
+                    ),
+                ],
+              ),
+            ),
+          );
+    final Widget? status = pill == null || failed
+        ? pill
+        : IgnorePointer(child: pill);
+    if (!hasPreview) {
+      // Nothing to protect yet: centre the placeholder with the status under
+      // it. Scrolls (instead of overflowing) in very short previews.
+      return Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_previewStatus == _PreviewStatus.updating)
+                const CircularProgressIndicator()
+              else
+                const Icon(Icons.image_not_supported_outlined, size: 48),
+              if (status != null) ...[const SizedBox(height: 8), status],
+            ],
+          ),
+        ),
+      );
+    }
+    if (status == null) return const SizedBox.shrink();
+    // Top-aligned so it stays visible above the Filters/Adjust sheets.
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(8),
+        child: status,
+      ),
+    );
+  }
 
   Widget _adjustmentSlider({
     required String label,
@@ -919,37 +992,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Widget _previewFeedback() {
-    final message = switch (_previewStatus) {
-      _PreviewStatus.pending => 'Release the slider to update the preview.',
-      _PreviewStatus.updating =>
-        _finalPreviewBytes == null
-            ? 'Updating preview...'
-            : 'Updating preview. Previous result shown.',
-      _PreviewStatus.failed =>
-        _finalPreviewBytes == null
-            ? 'Preview unavailable. Retry to review this page.'
-            : 'Preview could not be updated. Previous result shown.',
-      _PreviewStatus.ready => '',
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Semantics(liveRegion: true, child: Text(message)),
-        if (_previewStatus == _PreviewStatus.failed)
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: TextButton.icon(
-              onPressed: _isProcessing ? null : _updateFinalPreview,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry preview'),
-            ),
-          ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-
   Widget _filterActions() {
     Widget label(String text, {required bool busy}) => busy
         ? const SizedBox(
@@ -997,10 +1039,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_previewStatus != _PreviewStatus.ready) _previewFeedback(),
-            ...buttons,
-          ],
+          children: [...buttons],
         ),
       ),
     );

@@ -205,10 +205,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(previewImage(), findsNothing);
-    expect(
-      find.text('Preview unavailable. Retry to review this page.'),
-      findsOneWidget,
-    );
+    expect(find.text('Preview unavailable.'), findsOneWidget);
     expect(find.textContaining('private path'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(confirm(tester).onPressed, isNull);
@@ -232,10 +229,7 @@ void main() {
         await change(tester, adjustment);
         expect(operations.requests, hasLength(2));
         expect(previewBytes(tester), same(previous));
-        expect(
-          find.text('Updating preview. Previous result shown.'),
-          findsOneWidget,
-        );
+        expect(find.text('Updating preview…'), findsOneWidget);
         expect(confirm(tester).onPressed, isNull);
         staleConfirm();
         await tester.pump();
@@ -293,10 +287,8 @@ void main() {
       await change(tester, 'brightness', release: false);
       expect(operations.requests, hasLength(1));
       expect(previewBytes(tester), same(previous));
-      expect(
-        find.text('Release the slider to update the preview.'),
-        findsOneWidget,
-      );
+      // Pending changes only disable confirmation; no hint is inserted.
+      expect(find.byKey(const Key('preview_status')), findsNothing);
       expect(confirm(tester).onPressed, isNull);
       staleConfirm();
       await tester.pump();
@@ -322,10 +314,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(previewBytes(tester), same(previous));
       expect(confirm(tester).onPressed, isNull);
-      expect(
-        find.text('Release the slider to update the preview.'),
-        findsOneWidget,
-      );
+      // Pending changes only disable confirmation; no hint is inserted.
+      expect(find.byKey(const Key('preview_status')), findsNothing);
 
       tester.widget<Slider>(find.byType(Slider).first).onChangeEnd!(35);
       await pumpWork(tester);
