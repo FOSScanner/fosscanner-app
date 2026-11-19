@@ -178,8 +178,10 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
   storage access. **Discard saved draft** requires confirmation and deletes both
   cached generations, including potentially recoverable pages; exported PDFs
   are not removed. A valid backup is recovered automatically when possible.
-- If saving fails, a persistent warning offers **Retry saving draft**. Keep the
-  app open and retry; the retry saves your current pages, not an old snapshot.
+- If saving fails, the line above your pages shows **Draft not saved** with
+  **Retry** until a save succeeds (tap the message for the full explanation).
+  Keep the app open and retry; the retry saves your current pages, not an old
+  snapshot.
 - Unrelated notifications wait while deletion Undo is available. A new deletion
   replaces the previous Undo; export or confirmed clearing discards it.
 

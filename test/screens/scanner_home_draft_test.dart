@@ -590,10 +590,17 @@ void main() {
     await pumpHome(tester, store, pages: [first, second, third]);
     await tapDelete(tester, 1);
     await tester.pumpAndSettle();
-    final failure = find.textContaining(
-      'Could not save the latest draft changes.',
+    // The fixed status slot shows a short error; the full explanation is the
+    // live-region announcement.
+    final failure = find.bySemanticsLabel(
+      'Could not save the latest draft changes. Keep the app open and retry.',
     );
     expect(failure, findsOneWidget);
+    expect(find.text('Draft not saved'), findsOneWidget);
+    expect(
+      find.text('Drafts are temporary. Export a PDF to keep a copy.'),
+      findsNothing,
+    );
     expect(find.textContaining('private file path'), findsNothing);
     expect(
       tester
@@ -607,7 +614,7 @@ void main() {
     await tester.pump(const Duration(seconds: 10));
     await tester.pumpAndSettle();
     expect(failure, findsOneWidget);
-    await tester.tap(find.text('Retry saving draft'));
+    await tester.tap(find.byKey(const Key('retry_draft_save')));
     await tester.pumpAndSettle();
     expect(store.saves, hasLength(2));
     expect(failure, findsOneWidget);
@@ -616,7 +623,7 @@ void main() {
     await tapDelete(tester, 1);
     await tester.pumpAndSettle();
     store.saveError = null;
-    await tester.tap(find.text('Retry saving draft'));
+    await tester.tap(find.byKey(const Key('retry_draft_save')));
     await tester.pumpAndSettle();
     expect(store.saves.last, orderedEquals([third]));
     expect(failure, findsNothing);
