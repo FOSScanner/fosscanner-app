@@ -2000,7 +2000,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           : 'Opening share sheet...';
     }
     if (_pdfProgress == null) return 'Preparing PDF...';
-    return 'Generating PDF ${(_pdfProgress! * 100).round()}%';
+    final percent = (_pdfProgress! * 100).round();
+    // The searchable renderer reports pages as Tesseract finishes them.
+    return _pdfExporter == _PdfExporter.searchable
+        ? 'Recognizing text $percent%'
+        : 'Generating PDF $percent%';
   }
 
   String get _exportOptionsSummary => [
@@ -2017,16 +2021,26 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         : 'Export PDF ($pages)';
   }
 
-  /// One height for the idle and busy bar, so starting or finishing an export
-  /// never shifts the page grid. It follows the button's label line height,
-  /// which grows with the user's text size.
+  /// One height for every export state and page count, so starting,
+  /// progressing or finishing an export never shifts the page grid or the
+  /// camera button. It reserves two lines of the label style at the user's
+  /// text size, so a label or status that wraps at large text still fits;
+  /// at the default size this is the standard 56 px.
   double _exportBarHeight(BuildContext context) {
     final style = Theme.of(context).textTheme.labelLarge;
     final lineHeight =
         MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 14) *
         (style?.height ?? 1.43);
-    return math.max(56, lineHeight + 32);
+    return math.max(56, 2 * lineHeight + 8);
   }
+
+  /// Whether the Cancel button in the busy bar responds. Its slot stays for
+  /// the whole job so the status text never changes width.
+  bool get _canCancelExport =>
+      _isGeneratingPdf &&
+      !_isCancellingPdf &&
+      !_isSharingPdf &&
+      _pdfProgress != null;
 
   Widget _buildExportBar() {
     final busy = _isGeneratingPdf || _isClearingDraft;
@@ -2054,16 +2068,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         liveRegion: true,
                         child: Text(
                           _exportStatus,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
-                    if (_isGeneratingPdf && _pdfProgress != null)
+                    if (_isGeneratingPdf)
                       TextButton(
-                        onPressed: _isCancellingPdf
-                            ? null
-                            : _cancelPdfGeneration,
+                        onPressed: _canCancelExport
+                            ? _cancelPdfGeneration
+                            : null,
                         child: const Text('Cancel'),
                       ),
                   ]
@@ -2077,11 +2091,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ),
                         onPressed: _canExport ? _generateAndSharePdf : null,
                         icon: const Icon(Icons.picture_as_pdf),
-                        // Large text truncates rather than wrapping or
-                        // overflowing; semantics keep the full label.
+                        // Up to two lines fit the reserved bar height;
+                        // longer labels truncate and semantics keep them.
                         label: Text(
                           _exportLabel,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -2399,6 +2413,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   @override
   Widget build(BuildContext context) {
     if (_draftRestoreFailed) return _buildDraftRestoreFailure();
+    // System Back must not finish the activity and silently drop a running
+    // export or text copy; the visible Cancel is the way out.
+    return PopScope(canPop: !_isGeneratingPdf, child: _buildScaffold(context));
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     _fabLocation.estimatedBarHeight = _reservedExportBarHeight(context);
     return Scaffold(
       appBar: AppBar(

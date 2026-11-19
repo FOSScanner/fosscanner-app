@@ -124,7 +124,11 @@ quality depends on the document, language, lighting, and image quality.
 The editor keeps the last successful preview visible while processing a new
 adjustment. If it fails, retry the preview before saving. PDF generation shows
 progress and offers cancellation; document editing and intake pause during
-generation and sharing to avoid overlapping memory-heavy operations.
+generation and sharing to avoid overlapping memory-heavy operations. The export
+bar keeps one height for every state, page count and text size, so the page
+grid and the camera button never move while exporting. Searchable exports show
+**Recognizing text** while pages are recognized. System Back does nothing while
+an export runs; use **Cancel** to stop it.
 
 Barcode results are selectable and can be copied in full. For HTTP/HTTPS links,
 you can inspect the destination hostname before choosing to open the browser.

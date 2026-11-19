@@ -1238,7 +1238,7 @@ void main() {
       );
       staleDelete();
       await tester.pump();
-      expect(find.text('Generating PDF 0%'), findsOneWidget);
+      expect(find.text('Recognizing text 0%'), findsOneWidget);
 
       finish.complete();
       await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
@@ -1300,12 +1300,17 @@ void main() {
     expect(find.text('Searchable export failed'), findsOneWidget);
     expect(find.text('Share image-only PDF'), findsOneWidget);
     // The OCR job has ended; the fallback cannot cancel a native OCR job.
+    // Cancel keeps its slot (so the status never changes width) but is off.
     expect(
-      find.descendant(
-        of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
-        matching: find.byType(TextButton, skipOffstage: false),
-      ),
-      findsNothing,
+      tester
+          .widget<TextButton>(
+            find.descendant(
+              of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
+              matching: find.byType(TextButton, skipOffstage: false),
+            ),
+          )
+          .onPressed,
+      isNull,
     );
 
     await tester.tap(find.text('Share image-only PDF'));
