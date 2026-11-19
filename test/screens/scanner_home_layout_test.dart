@@ -121,8 +121,8 @@ void main() {
     await pumpHome(tester);
     await openOptions(tester);
     expect(find.text('Searchable text'), findsOneWidget);
-    expect(find.textContaining('Latin-script'), findsOneWidget);
-    expect(find.textContaining('entirely on your device'), findsOneWidget);
+    expect(find.textContaining('Latin-script'), findsNothing);
+    expect(find.textContaining('entirely on your device'), findsNothing);
     expect(
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
       isFalse,
@@ -236,7 +236,7 @@ void main() {
       const Size(1024, 768),
     ]) {
       testWidgets(
-        'reorder controls and menu fit $size at 200% text in $brightness',
+        'top-right delete controls fit $size at 200% text in $brightness',
         (tester) async {
           setViewport(tester, size);
           tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
@@ -247,9 +247,9 @@ void main() {
             textScale: 2,
             brightness: brightness,
           );
-          final reorder = find.byTooltip('Reorder page 8');
+          final delete = find.byTooltip('Delete page 8');
           await tester.scrollUntilVisible(
-            reorder,
+            delete,
             200,
             maxScrolls: 50,
             scrollable: find.descendant(
@@ -259,23 +259,18 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
+          final card = tester.getRect(
+            find.byKey(const ValueKey('page_semantics_7')),
+          );
+          final button = tester.getRect(delete);
+          expect(button.top - card.top, lessThanOrEqualTo(8));
+          expect(card.right - button.right, lessThanOrEqualTo(8));
           final preview = find.descendant(
             of: find.byKey(const ValueKey('page_semantics_7')),
             matching: find.byType(Image),
           );
-          expect(
-            tester.getRect(preview).overlaps(tester.getRect(reorder)),
-            isFalse,
-          );
-          await tester.tap(reorder);
-          await tester.pumpAndSettle();
-          await tester.ensureVisible(find.text('Move earlier'));
-          await tester.pumpAndSettle();
-          expect(find.text('Move earlier').hitTestable(), findsOneWidget);
-          expect(tester.takeException(), isNull);
-          await tester.binding.handlePopRoute();
-          await tester.pumpAndSettle();
-          expect(find.text('Move earlier'), findsNothing);
+          expect(tester.getRect(preview).overlaps(button), isFalse);
+          expect(find.byIcon(Icons.swap_vert), findsNothing);
         },
       );
     }

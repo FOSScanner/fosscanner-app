@@ -82,164 +82,105 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> openMenu(WidgetTester tester, int page) async {
-    final menu = find.byTooltip('Reorder page $page');
-    await tester.scrollUntilVisible(
-      menu,
-      200,
-      maxScrolls: 50,
-      scrollable: find.descendant(
-        of: find.byType(GridView),
-        matching: find.byType(Scrollable),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(menu);
-    await tester.pumpAndSettle();
-  }
-
-  PopupMenuButton<int> menu(WidgetTester tester, int page) =>
-      tester.widget<PopupMenuButton<int>>(
-        find.byWidgetPredicate(
-          (widget) =>
-              widget is PopupMenuButton<int> &&
-              widget.tooltip == 'Reorder page $page',
+  DragTarget<int> target(WidgetTester tester, int index) =>
+      tester.widget<DragTarget<int>>(
+        find.descendant(
+          of: find.byKey(ValueKey('page_semantics_$index')),
+          matching: find.byType(DragTarget<int>),
         ),
       );
 
-  testWidgets(
-    'visible earlier/later actions preserve pages and persist order',
-    (tester) async {
-      await pumpHome(tester);
-      await openMenu(tester, 2);
-      await tester.tap(find.text('Move earlier'));
-      await tester.pumpAndSettle();
-      expect(store.saves.last, orderedEquals([pages[1], pages[0], pages[2]]));
-      expect(find.byType(PagePreviewScreen), findsNothing);
-
-      await openMenu(tester, 1);
-      expect(
-        tester
-            .widget<PopupMenuItem<int>>(
-              find.ancestor(
-                of: find.text('Move earlier'),
-                matching: find.byType(PopupMenuItem<int>),
-              ),
-            )
-            .enabled,
-        isFalse,
-      );
-      await tester.tap(find.text('Move later'));
-      await tester.pumpAndSettle();
-      expect(store.saves.last, orderedEquals(pages));
-      expect(store.saves, hasLength(2));
-      expect(find.byType(PagePreviewScreen), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'last-page bounds and cancelling the menu do not change a draft',
-    (tester) async {
-      await pumpHome(tester);
-      await openMenu(tester, 3);
-      expect(
-        tester
-            .widget<PopupMenuItem<int>>(
-              find.ancestor(
-                of: find.text('Move later'),
-                matching: find.byType(PopupMenuItem<int>),
-              ),
-            )
-            .enabled,
-        isFalse,
-      );
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-      expect(store.saves, isEmpty);
-      expect(find.byType(PagePreviewScreen), findsNothing);
-      await openMenu(tester, 3);
-      await tester.tap(find.text('Move earlier'));
-      await tester.pumpAndSettle();
-      expect(store.saves.last, orderedEquals([pages[0], pages[2], pages[1]]));
-    },
-  );
-
-  testWidgets('a reordered draft restores in the saved order', (tester) async {
+  testWidgets('cards omit reorder arrows and the persistent draft sentence', (
+    tester,
+  ) async {
     await pumpHome(tester);
-    await openMenu(tester, 2);
-    await tester.tap(find.text('Move earlier'));
+    expect(find.byIcon(Icons.swap_vert), findsNothing);
+    expect(find.byType(PopupMenuButton<int>), findsNothing);
+    expect(
+      find.text('Drafts are temporary. Export a PDF to keep a copy.'),
+      findsNothing,
+    );
+    await tester.tap(find.byTooltip('Delete page 1'));
     await tester.pumpAndSettle();
-    await tester.pumpWidget(const SizedBox());
-    await pumpHome(tester, initial: []);
-    // Moving the restored first page later must recover the original order.
-    await openMenu(tester, 1);
-    await tester.tap(find.text('Move later'));
+    expect(store.saves.last, orderedEquals([pages[1], pages[2]]));
+    expect(find.byType(PagePreviewScreen), findsNothing);
+    await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
     expect(store.saves.last, orderedEquals(pages));
   });
 
-  testWidgets('single-page drafts need no reorder menu', (tester) async {
-    await pumpHome(tester, initial: [pages.first]);
-    expect(find.byTooltip('Reorder page 1'), findsNothing);
-    expect(find.byTooltip('Delete page 1'), findsOneWidget);
+  testWidgets('a reordered draft restores in the saved order', (tester) async {
+    await pumpHome(tester);
+    target(tester, 0).onAcceptWithDetails!(
+      DragTargetDetails(data: 1, offset: Offset.zero),
+    );
+    await tester.pumpAndSettle();
+    expect(store.saves.last, orderedEquals([pages[1], pages[0], pages[2]]));
+    await tester.pumpWidget(const SizedBox());
+    await pumpHome(tester, initial: []);
+    final image = tester.widget<Image>(
+      find.descendant(
+        of: find.byKey(const ValueKey('page_semantics_0')),
+        matching: find.byType(Image),
+      ),
+    );
+    expect(
+      (image.image as ResizeImage).imageProvider,
+      MemoryImage(pages[1].processedBytes),
+    );
+    target(tester, 1).onAcceptWithDetails!(
+      DragTargetDetails(data: 0, offset: Offset.zero),
+    );
+    await tester.pumpAndSettle();
+    expect(store.saves.last, orderedEquals(pages));
   });
 
-  testWidgets('picker locks visible menus and stale selections cannot mutate', (
+  testWidgets('picker locks dragging and stale callbacks cannot mutate', (
     tester,
   ) async {
     await pumpHome(tester);
-    final staleMove = menu(tester, 2).onSelected!;
+    final staleMove = target(tester, 0).onAcceptWithDetails!;
     picker.selection = Completer<List<XFile>>();
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pumpAndSettle();
-    expect(menu(tester, 2).enabled, isFalse);
-    staleMove(-1);
+    expect(
+      tester
+          .widget<LongPressDraggable<int>>(
+            find.byType(LongPressDraggable<int>).first,
+          )
+          .maxSimultaneousDrags,
+      0,
+    );
+    staleMove(DragTargetDetails(data: 1, offset: Offset.zero));
     await tester.pump();
     expect(store.saves, isEmpty);
     picker.selection!.complete([]);
     await tester.pumpAndSettle();
-    expect(menu(tester, 2).enabled, isTrue);
-    await openMenu(tester, 2);
-    await tester.tap(find.text('Move earlier'));
+    staleMove(DragTargetDetails(data: 1, offset: Offset.zero));
     await tester.pumpAndSettle();
     expect(store.saves.last, orderedEquals([pages[1], pages[0], pages[2]]));
   });
 
-  testWidgets('clearing locks menus and invalidates saved menu callbacks', (
+  testWidgets('clearing locks dragging and invalidates saved callbacks', (
     tester,
   ) async {
     await pumpHome(tester);
-    final staleMove = menu(tester, 2).onSelected!;
+    final staleMove = target(tester, 0).onAcceptWithDetails!;
     store.clearing = Completer<void>();
     await tester.tap(find.byTooltip('Clear all'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(menu(tester, 2).enabled, isFalse);
-    staleMove(-1);
+    staleMove(DragTargetDetails(data: 1, offset: Offset.zero));
     await tester.pump();
     expect(store.saves, isEmpty);
     store.clearing!.complete();
     await tester.pumpAndSettle();
-    staleMove(-1);
+    staleMove(DragTargetDetails(data: 1, offset: Offset.zero));
     await tester.pumpAndSettle();
     expect(store.saves, isEmpty);
     expect(find.text('Ready to Scan'), findsOneWidget);
-  });
-
-  testWidgets('stale selections cannot move the wrong page after a reorder', (
-    tester,
-  ) async {
-    await pumpHome(tester);
-    final staleMove = menu(tester, 1).onSelected!;
-    await openMenu(tester, 2);
-    await tester.tap(find.text('Move earlier'));
-    await tester.pumpAndSettle();
-    staleMove(1);
-    await tester.pumpAndSettle();
-    expect(store.saves, hasLength(1));
-    expect(store.saves.last, orderedEquals([pages[1], pages[0], pages[2]]));
   });
 
   testWidgets('cancelling a drag leaves order and persistence unchanged', (

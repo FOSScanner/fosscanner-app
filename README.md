@@ -38,9 +38,9 @@ No account, no cloud processing, no tracking.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
    On Android, **PDF export options** lets you turn searchable text on or off.
 
-Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
-**Move later**, or long-press and drag pages to reorder them. Deleting a page
-offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
+Long-press and drag pages to reorder them; screen-reader move actions remain
+available. Use the trash button at the top-right of a page card to delete it.
+Deleting a page offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
 current photo; remaining images are still reviewed. Canceling an unsaved
 capture or single-image review adds no page.
 
@@ -48,7 +48,7 @@ capture or single-image review adds no page.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/ui-home-pages.png" width="260" alt="Document overview with three page previews, temporary-draft guidance, and compact PDF export controls"><br>Review your document</td>
+    <td align="center"><img src="docs/screenshots/ui-home-pages.png" width="260" alt="Document overview with three page previews, top-right delete buttons, and compact PDF export controls"><br>Review your document</td>
     <td align="center"><img src="docs/screenshots/crop-full-image-fallback.png" width="260" alt="Minimal crop editor with draggable corners and full-image fallback guidance"><br>Check the crop</td>
     <td align="center"><img src="docs/screenshots/ui-adjust-appearance.png" width="260" alt="Appearance editor showing a larger page preview, numeric adjustments, a Filters icon, and Add page"><br>Adjust the appearance</td>
   </tr>

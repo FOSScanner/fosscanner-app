@@ -967,38 +967,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  Widget _pageReorderMenu(int index, ScannedPage page) => PopupMenuButton<int>(
-    tooltip: 'Reorder page ${index + 1}',
-    icon: const Icon(Icons.swap_vert),
-    enabled: !_isDocumentInteractionLocked,
-    onSelected: (direction) {
-      // A menu callback must not move a different page if the document changed
-      // while it was open. _reorderPage also rechecks the operation lock.
-      if (index >= _pages.length || !identical(_pages[index], page)) return;
-      _reorderPage(index, index + direction);
-    },
-    itemBuilder: (_) => [
-      PopupMenuItem(
-        value: -1,
-        enabled: index > 0,
-        child: const ListTile(
-          leading: Icon(Icons.arrow_upward),
-          title: Text('Move earlier'),
-          contentPadding: EdgeInsets.zero,
-        ),
-      ),
-      PopupMenuItem(
-        value: 1,
-        enabled: index < _pages.length - 1,
-        child: const ListTile(
-          leading: Icon(Icons.arrow_downward),
-          title: Text('Move later'),
-          contentPadding: EdgeInsets.zero,
-        ),
-      ),
-    ],
-  );
-
   void _reorderPage(int fromIndex, int toIndex) {
     if (_isDocumentInteractionLocked ||
         fromIndex < 0 ||
@@ -1296,11 +1264,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     updateSheet(() {});
                   },
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Text recognition supports Latin-script text and runs '
-                  'entirely on your device. Your scans stay private.',
-                ),
                 const SizedBox(height: 16),
                 Align(
                   alignment: AlignmentDirectional.centerEnd,
@@ -1445,34 +1408,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       body: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
-            if (_imageIntakeStatus != null || _pages.isNotEmpty)
+            if (_imageIntakeStatus != null)
               ConstrainedBox(
                 constraints: BoxConstraints(
                   maxHeight: constraints.maxHeight * 0.4,
                 ),
                 child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_imageIntakeStatus != null)
-                        TextButton.icon(
-                          onPressed: _showImageIntakeStatus,
-                          icon: const Icon(Icons.info_outline),
-                          label: const Text('Image intake help'),
-                        ),
-                      if (_pages.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            'Drafts are temporary. Export a PDF to keep a copy.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                    ],
+                  child: TextButton.icon(
+                    onPressed: _showImageIntakeStatus,
+                    icon: const Icon(Icons.info_outline),
+                    label: const Text('Image intake help'),
                   ),
                 ),
               ),
@@ -1576,13 +1521,20 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                 : () => _openPage(index),
                             child: Column(
                               children: [
+                                Align(
+                                  alignment: Alignment.topRight,
+                                  child: IconButton(
+                                    icon: const Icon(Icons.delete_outline),
+                                    tooltip: 'Delete page ${index + 1}',
+                                    onPressed: _isDocumentInteractionLocked
+                                        ? null
+                                        : () => _removePage(index),
+                                  ),
+                                ),
                                 Expanded(
                                   child: Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      8,
-                                      8,
-                                      8,
-                                      0,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
                                     ),
                                     child: Image(
                                       image: ResizeImage(
@@ -1596,41 +1548,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                   ),
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 12,
-                                    right: 4,
-                                  ),
-                                  child: Wrap(
-                                    alignment: WrapAlignment.spaceBetween,
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    children: [
-                                      ExcludeSemantics(
-                                        child: Text(
-                                          'Page ${index + 1}',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.labelLarge,
-                                        ),
-                                      ),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (_pages.length > 1)
-                                            _pageReorderMenu(index, page),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                            ),
-                                            tooltip: 'Delete page ${index + 1}',
-                                            onPressed:
-                                                _isDocumentInteractionLocked
-                                                ? null
-                                                : () => _removePage(index),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                  padding: const EdgeInsets.all(12),
+                                  child: ExcludeSemantics(
+                                    child: Text(
+                                      'Page ${index + 1}',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelLarge,
+                                    ),
                                   ),
                                 ),
                               ],
