@@ -280,9 +280,39 @@ void main() {
         tester
             .widget<CornerAdjustScreen>(find.byType(CornerAdjustScreen))
             .source,
-        PageReviewSource.recovered,
+        PageReviewSource.resumedCapture,
       );
       expect(find.text('Scan next'), findsNothing);
+    }, variant: _iOS);
+
+    testWidgets('asks before a resumed camera photo is discarded', (
+      tester,
+    ) async {
+      await tester.runAsync(() => journal.keep('camera', [image()]));
+      await pumpHome(tester);
+      store.loaded.complete([]);
+      await waitFor(tester, find.byType(AlertDialog));
+      await tester.tap(find.text('Continue'));
+      await waitForEditor(tester, 'Preview page');
+      // Killed again, it would be resumed as a capture again.
+      expect(journal.keptSources.last, 'resumedCapture');
+
+      // Cancel asks, like a fresh capture; Keep editing stays.
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Discard this scan?'), findsOneWidget);
+      await tester.tap(find.text('Keep editing'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CornerAdjustScreen), findsOneWidget);
+
+      // System Back asks too, and Discard leaves without a page.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Discard this scan?'), findsOneWidget);
+      await tester.tap(find.text('Discard'));
+      await settle(tester);
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(find.byType(Card), findsNothing);
     }, variant: _iOS);
 
     testWidgets('of gallery images is reported, not resumed', (tester) async {

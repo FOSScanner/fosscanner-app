@@ -42,6 +42,11 @@ enum PageReviewSource {
   camera,
   gallery,
   recovered,
+
+  /// A camera capture continued after the app was killed during its review.
+  /// It is reviewed on its own, without the camera loop, and its only copy
+  /// is deleted when the review ends.
+  resumedCapture,
   shared,
 
   /// A page rendered from an imported PDF.
@@ -571,7 +576,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     // An unreadable image has nothing to lose, and leaving it moves on.
     if (_error != null) return null;
     if (_canStopImport) return _LeaveConfirmation.stopImport;
-    if (_isNewCameraCapture) return _LeaveConfirmation.discardScan;
+    if (_isUnrepeatableCapture) return _LeaveConfirmation.discardScan;
     if (_hasUnsavedChanges) return _LeaveConfirmation.discardChanges;
     return null;
   }
@@ -652,6 +657,13 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   bool get _isNewCameraCapture =>
       !_isEditingExistingPage && widget.source == PageReviewSource.camera;
+
+  /// A new capture that exists nowhere else once this review is left,
+  /// including one resumed after the app was killed. Leaving asks first.
+  bool get _isUnrepeatableCapture =>
+      _isNewCameraCapture ||
+      (!_isEditingExistingPage &&
+          widget.source == PageReviewSource.resumedCapture);
 
   bool get _canScanNext => _isNewCameraCapture && widget.onScanNext != null;
 

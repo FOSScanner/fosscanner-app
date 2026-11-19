@@ -1594,7 +1594,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             : null,
         // The camera loop is not resumed: a capture is reviewed on its own.
         source: source == PageReviewSource.camera
-            ? PageReviewSource.recovered
+            ? PageReviewSource.resumedCapture
             : source,
         deleteAfterRead: true,
         documentGeneration: documentGeneration,
