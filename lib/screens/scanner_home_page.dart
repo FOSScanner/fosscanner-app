@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
+import '../services/app_preferences.dart';
 import '../services/document_memory.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
@@ -69,6 +70,7 @@ class ScannerHomePage extends StatefulWidget {
     this.cornerAdjustOperations = const DefaultCornerAdjustOperations(),
     this.sourceImageSizeReader = readEncodedImageSize,
     this.sharedImageInbox,
+    this.preferencesStore,
   });
 
   final List<ScannedPage> initialPages;
@@ -81,6 +83,9 @@ class ScannerHomePage extends StatefulWidget {
   /// Images shared into the app by other apps (Android only); null disables
   /// share intake.
   final SharedImageInbox? sharedImageInbox;
+
+  /// Where export choices persist; defaults to memory only.
+  final AppPreferencesStore? preferencesStore;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -103,7 +108,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   var _documentGeneration = 0;
   var _undoGeneration = 0;
   final GlobalKey _shareButtonKey = GlobalKey();
-  bool _useOcr = false;
+  late final AppPreferencesStore _preferencesStore;
+  AppPreferences _preferences = const AppPreferences();
+  // Set once the user changes a preference, so a slow initial load cannot
+  // overwrite a choice made while it was still reading.
+  bool _preferencesChanged = false;
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
   bool _isCancellingPdf = false;
@@ -129,6 +138,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     super.initState();
     _pages = [...widget.initialPages];
     _sharePlus = widget.sharePlus ?? SharePlus.instance;
+    _preferencesStore = widget.preferencesStore ?? MemoryAppPreferencesStore();
+    unawaited(_loadPreferences());
     _cameraSupported = _picker.supportsImageSource(ImageSource.camera);
     _isRestoringDraft = _pages.isEmpty;
     _initialDraftRestore = _isRestoringDraft
@@ -254,6 +265,30 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _resumeSharedImageIntake();
     }
   }
+
+  Future<void> _loadPreferences() async {
+    final loaded = await _preferencesStore.load();
+    if (!mounted || _preferencesChanged) return;
+    setState(() => _preferences = loaded);
+  }
+
+  void _updatePreferences(AppPreferences next) {
+    if (next == _preferences) return;
+    _preferencesChanged = true;
+    setState(() => _preferences = next);
+    unawaited(
+      _preferencesStore.save(next).catchError((Object error) {
+        // The choice still applies for this session; only persistence failed.
+        if (kDebugMode) {
+          debugPrint('Could not save preferences (${error.runtimeType}).');
+        }
+      }),
+    );
+  }
+
+  /// Whether the next export is searchable. Platforms without OCR ignore the
+  /// stored choice rather than clearing it.
+  bool get _exportsSearchable => _ocrSupported && _preferences.searchablePdf;
 
   Future<void> _restoreDraft() async {
     final revision = _draftRevision;
@@ -1449,7 +1484,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _deferredMessage = null;
     ScaffoldMessenger.of(context).clearSnackBars();
     final pages = List<ScannedPage>.of(_pages, growable: false);
-    final useOcr = _ocrSupported && _useOcr;
+    final useOcr = _exportsSearchable;
     // Capture the required iPad popover anchor before awaiting worker results.
     final shareOrigin = _shareOrigin;
 
@@ -1534,16 +1569,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Searchable text'),
                   subtitle: Text(
-                    _useOcr
+                    _preferences.searchablePdf
                         ? 'Recognize text so you can search and select it in the PDF.'
                         : 'Image-only PDF without text recognition.',
                   ),
-                  value: _useOcr,
+                  value: _preferences.searchablePdf,
                   onChanged: (value) {
                     if (!mounted || !_canExport || !sheetContext.mounted) {
                       return;
                     }
-                    setState(() => _useOcr = value);
+                    _updatePreferences(
+                      _preferences.copyWith(searchablePdf: value),
+                    );
                     updateSheet(() {});
                   },
                 ),
@@ -1576,15 +1613,34 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return 'Generating PDF ${(_pdfProgress! * 100).round()}%';
   }
 
+  String get _exportLabel {
+    final pages = '${_pages.length} ${_pages.length == 1 ? 'page' : 'pages'}';
+    return _exportsSearchable
+        ? 'Export searchable PDF ($pages)'
+        : 'Export PDF ($pages)';
+  }
+
+  /// One height for the idle and busy bar, so starting or finishing an export
+  /// never shifts the page grid. It follows the button's label line height,
+  /// which grows with the user's text size.
+  double _exportBarHeight(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelLarge;
+    final lineHeight =
+        MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 14) *
+        (style?.height ?? 1.43);
+    return math.max(56, lineHeight + 32);
+  }
+
   Widget _buildExportBar() {
     final busy = _isGeneratingPdf || _isClearingDraft;
+    final height = _exportBarHeight(context);
     return SafeArea(
       key: const Key('pdf_export_bar'),
       top: false,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 56),
+        child: SizedBox(
+          height: height,
           child: Row(
             children: busy
                 ? [
@@ -1599,7 +1655,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     Expanded(
                       child: Semantics(
                         liveRegion: true,
-                        child: Text(_exportStatus),
+                        child: Text(
+                          _exportStatus,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                     if (_isGeneratingPdf && _pdfProgress != null)
@@ -1615,20 +1675,24 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       child: FilledButton.icon(
                         key: _shareButtonKey,
                         style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          minimumSize: Size.fromHeight(height),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
                         ),
                         onPressed: _canExport ? _generateAndSharePdf : null,
                         icon: const Icon(Icons.picture_as_pdf),
+                        // Large text truncates rather than wrapping or
+                        // overflowing; semantics keep the full label.
                         label: Text(
-                          'Export PDF (${_pages.length} '
-                          '${_pages.length == 1 ? 'page' : 'pages'})',
+                          _exportLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
                     if (_ocrSupported) ...[
                       const SizedBox(width: 8),
                       Semantics(
-                        value: _useOcr
+                        value: _exportsSearchable
                             ? 'Searchable text enabled'
                             : 'Image-only PDF',
                         child: IconButton.filledTonal(

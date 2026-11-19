@@ -1212,7 +1212,7 @@ void main() {
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       final expectedAnchor = tester.getRect(find.byType(FilledButton));
-      await tester.tap(find.text('Export PDF (1 page)'));
+      await tester.tap(find.text('Export searchable PDF (1 page)'));
       await pumpUntil(tester, () => started.isCompleted, settle: false);
       expect(find.byType(SwitchListTile), findsNothing);
       expect(find.byTooltip('PDF export options'), findsNothing);
@@ -1282,7 +1282,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export searchable PDF (1 page)'));
     await pumpUntilFound(
       tester,
       find.text('Searchable export failed'),

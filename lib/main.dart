@@ -3,13 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/scanner_home_page.dart';
+import 'services/app_preferences.dart';
 import 'services/draft_store.dart';
 import 'services/shared_image_inbox.dart';
 import 'widgets/draft_session_gate.dart';
 
 void main() {
   registerBundledLicenses();
-  runApp(FOSScannerApp(draftStore: createDraftStore()));
+  runApp(
+    FOSScannerApp(
+      draftStore: createDraftStore(),
+      preferencesStore: FileAppPreferencesStore(),
+    ),
+  );
 }
 
 /// Adds the bundled OCR components to Flutter's license registry so they are
@@ -26,9 +32,10 @@ void registerBundledLicenses() {
 }
 
 class FOSScannerApp extends StatelessWidget {
-  const FOSScannerApp({super.key, this.draftStore});
+  const FOSScannerApp({super.key, this.draftStore, this.preferencesStore});
 
   final DraftStore? draftStore;
+  final AppPreferencesStore? preferencesStore;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +47,7 @@ class FOSScannerApp extends StatelessWidget {
           !kIsWeb && defaultTargetPlatform == TargetPlatform.android
           ? MethodChannelSharedImageInbox.instance
           : null,
+      preferencesStore: preferencesStore,
     );
     return MaterialApp(
       title: 'FOSScanner',
