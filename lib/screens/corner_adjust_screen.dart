@@ -234,7 +234,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       }
       if (!mounted) return;
       setState(() {
-        _error = 'Could not read this photo.';
+        _error = 'Could not read this image.';
       });
     }
   }
@@ -315,7 +315,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     } catch (_) {
       if (!mounted || generation != _previewGeneration) return;
       setState(() => _isGeneratingPreviews = false);
-      _showError('Could not process this photo. Try another image.');
+      _showError('Could not process this image. Try another one.');
     }
   }
 
@@ -452,7 +452,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _isProcessing = false;
         _isScanNextRequested = false;
       });
-      _showError('Could not process this page. Try another image.');
+      _showError('Could not process this page. Try again.');
     }
   }
 
@@ -630,18 +630,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               ),
             if (_step == _Step.filter) ...[
               IconButton(
-                icon: const Icon(Icons.filter_alt_outlined),
+                icon: const Icon(Icons.photo_filter_outlined),
                 tooltip: 'Filters',
                 onPressed: _isProcessing ? null : _showFilters,
               ),
               IconButton(
-                icon: const Icon(Icons.tune),
+                icon: const Icon(Icons.tune_outlined),
                 tooltip: 'Adjust',
                 onPressed: _isProcessing ? null : _showAdjustments,
               ),
               IconButton(
                 icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
-                tooltip: 'Rotate',
+                tooltip: 'Rotate clockwise',
                 onPressed: _isProcessing ? null : _rotate,
               ),
             ],
@@ -845,7 +845,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       '${switch (problem) {
         CropProblem.cornersCross => 'Corners cross each other.',
         CropProblem.cornerInside => 'A corner is inside the crop.',
-        CropProblem.areaTooSmall => 'Area too small.',
+        CropProblem.areaTooSmall => 'Crop is too small.',
       }} Double-tap the image to reset.';
 
   /// A pill over the top of the canvas. It never takes layout space and
@@ -1018,8 +1018,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _PreviewStatus.updating => 'Updating preview…',
         _PreviewStatus.failed =>
           hasPreview
-              ? 'Preview could not be updated. Previous result shown.'
-              : 'Preview unavailable.',
+              ? 'Could not update the preview. Showing the previous one.'
+              : 'Preview unavailable',
       };
 
   Widget _previewStatusOverlay(bool hasPreview) {
@@ -1173,7 +1173,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Close filters',
+                        tooltip: 'Close',
                         icon: const Icon(Icons.close),
                         onPressed: () => Navigator.of(sheetContext).pop(),
                       ),
@@ -1242,7 +1242,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                             ),
                           ),
                           IconButton(
-                            tooltip: 'Close adjustments',
+                            tooltip: 'Close',
                             icon: const Icon(Icons.close),
                             onPressed: () => Navigator.of(sheetContext).pop(),
                           ),

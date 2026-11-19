@@ -221,7 +221,7 @@ void main() {
     // Neutral contrast sits in the middle of the track.
     expect(tester.widget<Slider>(sliders.last).value, 0);
     expect(find.text('Contrast: 1.00×'), findsOneWidget);
-    await tester.tap(find.byTooltip('Close adjustments'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
@@ -285,7 +285,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Grayscale'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Close filters'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
     expect(find.text('Appearance'), findsOneWidget);
@@ -359,7 +359,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<Slider>(find.byType(Slider).first).value, 40);
     expect(find.text('Brightness: +40'), findsOneWidget);
-    await tester.tap(find.byTooltip('Close adjustments'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     expect(find.byType(Slider), findsNothing);
     expect(find.text('Appearance'), findsOneWidget);
@@ -409,7 +409,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Could not read this photo.'), findsOneWidget);
+    expect(find.text('Could not read this image.'), findsOneWidget);
     expect(find.textContaining('private file path'), findsNothing);
   });
 

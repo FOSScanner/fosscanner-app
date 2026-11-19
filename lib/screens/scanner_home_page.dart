@@ -369,8 +369,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       );
       if (batch.truncated) {
         report.end(
-          'Some shared images were not added: a document can have up to '
-          '$maxDocumentPages pages.',
+          'Some shared images were not added: page limit reached '
+          '($maxDocumentPages pages).',
         );
       }
       _showIntakeReport(report);
@@ -740,9 +740,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         Uri.parse(_sourceCodeUrl),
         mode: LaunchMode.externalApplication,
       );
-      if (!launched) _showMessage('Could not open the source code link.');
+      if (!launched) _showMessage('Could not open the link.');
     } catch (_) {
-      _showMessage('Could not open the source code link.');
+      _showMessage('Could not open the link.');
     }
   }
 
@@ -775,17 +775,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'A privacy-first, free and open-source document scanner. '
-                'Scan documents with your camera, auto-crop and dewarp them, '
-                'and export a PDF — all on-device. No accounts, no cloud, '
-                'no tracking.',
+                'Free and open-source document scanner. Scanning, text '
+                'recognition and PDF export run on your device. No accounts, '
+                'no cloud, no tracking.',
               ),
               const SizedBox(height: 20),
               const Divider(height: 1),
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: _openSourceCode,
-                icon: const Icon(Icons.code),
+                icon: const Icon(Icons.code_outlined),
                 label: const Text('View source code'),
               ),
               TextButton.icon(
@@ -1065,7 +1064,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       }
       _showIntakeReport(report);
     } catch (_) {
-      _showMessage('Could not open the photo gallery.');
+      _showMessage('Could not open the gallery.');
     } finally {
       // Copies of images that were skipped or not reached. Nothing is being
       // picked now, and a new pick takes far longer than this sweep.
@@ -1085,7 +1084,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       PopupMenuItem(
         value: _importPdfMenuValue,
         enabled: !_isPickingImages && !_isClearingDraft && _canStartImagePick,
-        child: const Text('Import from PDF'),
+        child: ListTile(
+          enabled: !_isPickingImages && !_isClearingDraft && _canStartImagePick,
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.file_open_outlined),
+          title: const Text('Import from PDF'),
+        ),
       ),
   ];
 
@@ -1154,18 +1158,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (batch.truncated) {
         report.end(
           batch.pageCount > request.maxPages
-              ? 'Some PDF pages were not added: a document can have up to '
-                    '$maxDocumentPages pages.'
-              : 'Some PDF pages were not added: the document memory limit '
-                    'was reached.',
+              ? 'Some PDF pages were not added: page limit reached '
+                    '($maxDocumentPages pages).'
+              : 'Some PDF pages were not added: document memory limit '
+                    'reached.',
         );
       }
       _showIntakeReport(report);
     } on PdfImportException catch (error) {
       if (mounted) {
         _showMessage(switch (error.failure) {
-          PdfImportFailure.unreadable => "This PDF can't be opened.",
-          PdfImportFailure.cancelled => 'PDF import cancelled.',
+          PdfImportFailure.unreadable => 'Could not open this PDF.',
+          PdfImportFailure.cancelled => 'PDF import canceled',
           PdfImportFailure.failed => 'Could not import the PDF.',
         });
       }
@@ -1301,7 +1305,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   static const _discardedIntakeMessage =
-      'Import cancelled because the pages were cleared.';
+      'Import canceled because the pages were cleared.';
 
   /// Debug builds only: why an intake item was not added. Never logs paths
   /// or image content.
@@ -1455,11 +1459,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       ),
     );
     if (stopRequested) {
-      return end(
-        'stopped',
-        'Import stopped. Pages already added were kept; the remaining '
-            '${report.noun}s were not added.',
-      );
+      return end('stopped', 'Import stopped. Pages already added were kept.');
     }
     if (retakeRequested && result == null) {
       onRetake?.call(bytes);
@@ -1613,7 +1613,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final persist = MediaQuery.accessibleNavigationOf(context);
     final controller = messenger.showSnackBar(
       SnackBar(
-        content: const Text('Page deleted.'),
+        content: const Text('Page deleted'),
         // Floating snackbars sit above the camera button instead of lifting
         // it. The button never moves, so Undo keeps one position while it
         // appears, while it is reachable and while it leaves, whether or not
@@ -1785,7 +1785,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _revealPage(toIndex);
     SemanticsService.sendAnnouncement(
       View.of(context),
-      'Page moved to position ${toIndex + 1} of ${_pages.length}.',
+      'Page moved to position ${toIndex + 1} of ${_pages.length}',
       Directionality.of(context),
     );
   }
@@ -1877,15 +1877,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   Future<bool> _confirmImageOnlyFallback() async {
     if (!mounted) return false;
-    final verb = _exportAction == _ExportAction.save ? 'Save' : 'Share';
     final fallback = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Searchable export failed'),
-        content: Text(
-          'OCR could not create a searchable PDF for this document. '
-          '$verb an image-only PDF instead?',
-        ),
+        content: const Text('Export an image-only PDF instead?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -1893,7 +1889,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text('$verb image-only PDF'),
+            child: const Text('Export image-only PDF'),
           ),
         ],
       ),
@@ -1945,7 +1941,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       await ocr_service.cancelOcrJob();
     } catch (error) {
       if (mounted && !ocr_service.isCancellation(error)) {
-        _showMessage('Could not cancel PDF generation.');
+        _showMessage('Could not cancel the export.');
       }
     }
   }
@@ -2085,7 +2081,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     } catch (error) {
       if (ocr_service.isCancellation(error) ||
           error is image_pdf.ImagePdfCancelledException) {
-        if (mounted) _showMessage('PDF generation cancelled.');
+        if (mounted) _showMessage('Export canceled');
       } else {
         if (kDebugMode) {
           debugPrint('PDF export failed (${error.runtimeType}).');
@@ -2093,8 +2089,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         if (mounted) {
           _showMessage(
             action == _ExportAction.share
-                ? 'Could not generate or share the PDF.'
-                : 'Could not save the PDF. Try again or choose another '
+                ? 'Could not export the PDF. Try again.'
+                : 'Could not save the PDF. Try again, or choose another '
                       'location.',
           );
         }
@@ -2219,7 +2215,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.content_copy),
+                    leading: const Icon(Icons.content_copy_outlined),
                     title: const Text('Copy text'),
                     onTap: () {
                       if (!canChange(sheetContext)) return;
@@ -2327,20 +2323,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   String get _exportStatus {
-    if (_isClearingDraft) return 'Clearing draft...';
+    if (_isClearingDraft) return 'Clearing draft…';
     if (_exportAction == _ExportAction.copyText) {
       if (_isCancellingPdf) return 'Canceling…';
       if (_pdfProgress == null) return 'Recognizing text…';
       return 'Recognizing text ${(_pdfProgress! * 100).round()}%';
     }
-    if (_isCancellingPdf) return 'Cancelling PDF...';
+    if (_isCancellingPdf) return 'Canceling…';
     if (_isSharingPdf) {
-      if (_exportAction != _ExportAction.save) return 'Opening share sheet...';
-      return _saveTargetName == null
-          ? 'Choose where to save...'
-          : 'Saving PDF…';
+      if (_exportAction != _ExportAction.save) return 'Opening share sheet…';
+      return _saveTargetName == null ? 'Choose where to save…' : 'Saving PDF…';
     }
-    if (_pdfProgress == null) return 'Preparing PDF...';
+    if (_pdfProgress == null) return 'Preparing PDF…';
     final percent = (_pdfProgress! * 100).round();
     // The searchable renderer reports pages as Tesseract finishes them.
     return _pdfExporter == _PdfExporter.searchable
@@ -2431,7 +2425,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                         ),
                         onPressed: _canExport ? _generateAndSharePdf : null,
-                        icon: const Icon(Icons.picture_as_pdf),
+                        icon: const Icon(Icons.picture_as_pdf_outlined),
                         // Up to two lines fit the reserved bar height;
                         // longer labels truncate and semantics keep them.
                         label: Text(
@@ -2448,7 +2442,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       IconButton.filledTonal(
                         onPressed: _canExport ? _generateAndSavePdf : null,
                         tooltip: 'Save PDF to device',
-                        icon: const Icon(Icons.save_alt),
+                        icon: const Icon(Icons.save_alt_outlined),
                       ),
                     ],
                     const SizedBox(width: 8),
@@ -2457,7 +2451,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       child: IconButton.filledTonal(
                         onPressed: _canExport ? _showExportOptions : null,
                         tooltip: 'PDF export options',
-                        icon: const Icon(Icons.tune),
+                        icon: const Icon(Icons.tune_outlined),
                       ),
                     ),
                   ],
@@ -2602,7 +2596,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ? const Center(child: CircularProgressIndicator())
                         : Icon(
                             _cameraSupported
-                                ? Icons.camera_alt
+                                ? Icons.camera_alt_outlined
                                 : Icons.photo_library_outlined,
                             size: 80,
                             color: muted,
@@ -2865,11 +2859,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             isWeb: kIsWeb,
           ))
             IconButton(
-              icon: const Icon(Icons.qr_code_scanner),
+              icon: const Icon(Icons.qr_code_scanner_outlined),
               onPressed: _isRestoringDraft || _isDocumentInteractionLocked
                   ? null
                   : _openBarcodeScanner,
-              tooltip: 'Scan QR/barcode',
+              tooltip: 'Scan QR code or barcode',
             ),
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
@@ -2926,8 +2920,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   _isPickingImages || _isClearingDraft || !_canStartImagePick
                   ? null
                   : _captureImage,
-              tooltip: 'Capture Image',
-              child: const Icon(Icons.camera_alt),
+              tooltip: 'Scan a page',
+              child: const Icon(Icons.camera_alt_outlined),
             )
           : null,
       floatingActionButtonLocation: _fabLocation,

@@ -150,7 +150,7 @@ void main() {
     ),
   );
 
-  for (final tooltip in ['Capture Image', 'Import from gallery']) {
+  for (final tooltip in ['Scan a page', 'Import from gallery']) {
     testWidgets(
       '$tooltip waits for draft restoration before opening the picker',
       (tester) async {
@@ -235,7 +235,7 @@ void main() {
       expect(find.text('Could not restore the saved draft'), findsOneWidget);
       expect(find.textContaining('PRIVATE'), findsNothing);
       expect(find.byTooltip('Import from gallery'), findsNothing);
-      expect(find.byTooltip('Capture Image'), findsNothing);
+      expect(find.byTooltip('Scan a page'), findsNothing);
       expect(store.saves, isEmpty);
       expect(
         picker.galleryCalls + picker.cameraCalls + picker.lostDataCalls,

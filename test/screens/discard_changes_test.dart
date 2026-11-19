@@ -170,9 +170,9 @@ void main() {
     tester,
   ) async {
     final result = await openEditor(tester, existingPage: true);
-    await tester.tap(find.byTooltip('Rotate'));
+    await tester.tap(find.byTooltip('Rotate clockwise'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Rotate'));
+    await tester.tap(find.byTooltip('Rotate clockwise'));
     await tester.pumpAndSettle();
 
     // Back returns to the crop step without asking: nothing is lost yet.

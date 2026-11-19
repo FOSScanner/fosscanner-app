@@ -237,7 +237,7 @@ void main() {
 
     expect(find.text('FOSScanner'), findsOneWidget);
     expect(find.text('Ready to scan'), findsOneWidget);
-    expect(find.byIcon(Icons.camera_alt), findsWidgets);
+    expect(find.byIcon(Icons.camera_alt_outlined), findsWidgets);
 
     // No captured pages yet, so there's nothing to clear or export.
     expect(await isClearAllPagesEnabled(tester), isFalse);
@@ -254,7 +254,7 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Capture Image'), findsNothing);
+      expect(find.byTooltip('Scan a page'), findsNothing);
       expect(
         find.text('Import from your gallery to add your first page.'),
         findsOneWidget,
@@ -395,7 +395,7 @@ void main() {
 
       await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await tester.pumpAndSettle();
       debugDefaultTargetPlatformOverride = null;
 
@@ -403,7 +403,7 @@ void main() {
       expect(find.text('Import images'), findsOneWidget);
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Capture Image'), findsNothing);
+      expect(find.byTooltip('Scan a page'), findsNothing);
       expect(find.textContaining('Import from your gallery'), findsOneWidget);
     },
   );
@@ -425,7 +425,7 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
     await tester.pump();
-    await tester.tap(find.byTooltip('Capture Image'));
+    await tester.tap(find.byTooltip('Scan a page'));
     for (var i = 0; i < 20 && file.existsSync(); i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
@@ -487,7 +487,10 @@ void main() {
     expect(
       tester
           .widget<FloatingActionButton>(
-            find.widgetWithIcon(FloatingActionButton, Icons.camera_alt),
+            find.widgetWithIcon(
+              FloatingActionButton,
+              Icons.camera_alt_outlined,
+            ),
           )
           .onPressed,
       isNull,
@@ -679,7 +682,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('file is too large'), findsOneWidget);
+    expect(find.textContaining('image is too large'), findsOneWidget);
     expect(find.textContaining('Choose a file under'), findsOneWidget);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
@@ -711,8 +714,8 @@ void main() {
 
     expect(
       find.text(
-        'This image needs too much temporary memory to process safely. '
-        'Remove pages or choose a smaller image.',
+        'Not enough memory for this image. Remove pages or choose a smaller '
+        'image.',
       ),
       findsOneWidget,
     );
@@ -850,8 +853,8 @@ void main() {
       expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
       expect(
         find.text(
-          'This image needs too much temporary memory to process safely. '
-          'Remove pages or choose a smaller image.',
+          'Not enough memory for this image. Remove pages or choose a smaller '
+          'image.',
         ),
         findsOneWidget,
       );
@@ -1295,7 +1298,7 @@ void main() {
       settle: false,
     );
     expect(find.text('Searchable export failed'), findsOneWidget);
-    expect(find.text('Share image-only PDF'), findsOneWidget);
+    expect(find.text('Export image-only PDF'), findsOneWidget);
     // The OCR job has ended; the fallback cannot cancel a native OCR job.
     // Cancel keeps its slot (so the status never changes width) but is off.
     expect(
@@ -1310,7 +1313,7 @@ void main() {
       isNull,
     );
 
-    await tester.tap(find.text('Share image-only PDF'));
+    await tester.tap(find.text('Export image-only PDF'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
     debugDefaultTargetPlatformOverride = null;
 

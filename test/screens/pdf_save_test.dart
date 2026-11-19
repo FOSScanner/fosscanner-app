@@ -159,7 +159,7 @@ void main() {
       matches(RegExp(r'^Scan \d{4}-\d\d-\d\d \d\d-\d\d\.pdf$')),
     );
     expect(saver.exportExistedAtPick, isFalse);
-    expect(find.text('Choose where to save...'), findsOneWidget);
+    expect(find.text('Choose where to save…'), findsOneWidget);
     expect(saveButton(), findsNothing);
 
     saver.picked.complete(true);
@@ -206,7 +206,7 @@ void main() {
       settle: false,
     );
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
-    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    await pumpUntilFound(tester, find.text('Export canceled'));
     expect(saver.target!.path, isNull);
     expect(saver.target!.discarded, 1);
     expect(exportsRemain(), isFalse);
@@ -227,7 +227,7 @@ void main() {
     await pumpUntilFound(
       tester,
       find.text(
-        'Could not save the PDF. Try again or choose another location.',
+        'Could not save the PDF. Try again, or choose another location.',
       ),
     );
     expect(find.textContaining('/data'), findsNothing);

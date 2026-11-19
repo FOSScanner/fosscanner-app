@@ -277,8 +277,7 @@ void main() {
 
       expectOnlyMessage(
         "1 of 3 images couldn't be added: 1 not an image. Import stopped. "
-        'Pages already added were kept; the remaining images were not '
-        'added.',
+        'Pages already added were kept.',
       );
     },
     variant: _iOS,
@@ -416,7 +415,7 @@ void main() {
       await settle(tester);
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expectOnlyMessage('Import cancelled because the pages were cleared.');
+      expectOnlyMessage('Import canceled because the pages were cleared.');
     },
     variant: _iOS,
   );
@@ -434,7 +433,7 @@ void main() {
       await settle(tester);
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expectOnlyMessage('Import cancelled because the pages were cleared.');
+      expectOnlyMessage('Import canceled because the pages were cleared.');
       expect(File(shared).existsSync(), isFalse);
     },
     variant: _iOS,

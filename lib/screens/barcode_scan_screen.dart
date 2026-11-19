@@ -356,7 +356,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                     child: ExcludeSemantics(
                       child: OutlinedButton.icon(
                         onPressed: _copyResult,
-                        icon: const Icon(Icons.copy),
+                        icon: const Icon(Icons.content_copy_outlined),
                         label: const Text('Copy'),
                       ),
                     ),
@@ -391,7 +391,9 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     final cameraAttempt = _cameraAttempt;
     return Scaffold(
       appBar: AppBar(
-        title: Text(result == null ? 'Scan QR / Barcode' : 'Scanned result'),
+        title: Text(
+          result == null ? 'Scan QR code or barcode' : 'Scanned result',
+        ),
         actions: [
           if (result == null)
             IconButton(
@@ -402,7 +404,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
           if (result != null)
             IconButton(
               onPressed: _dismissResult,
-              icon: const Icon(Icons.qr_code_scanner),
+              icon: const Icon(Icons.qr_code_scanner_outlined),
               tooltip: 'Scan another',
             ),
         ],

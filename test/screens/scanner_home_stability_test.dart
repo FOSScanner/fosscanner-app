@@ -181,7 +181,7 @@ void main() {
 
   // #151
   const appBarActions = {
-    'QR button': 'Scan QR/barcode',
+    'QR button': 'Scan QR code or barcode',
     'gallery button': 'Import from gallery',
     'overflow button': 'More options',
   };

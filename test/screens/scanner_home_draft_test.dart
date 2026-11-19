@@ -204,7 +204,7 @@ void main() {
 
     await tapDelete(tester, 2);
     expect(store.saves.single, orderedEquals([first, third]));
-    expect(find.text('Page deleted.'), findsOneWidget);
+    expect(find.text('Page deleted'), findsOneWidget);
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
@@ -226,13 +226,13 @@ void main() {
       );
       await tapDelete(tester, 1);
       await tester.pumpAndSettle();
-      expect(find.text('Page deleted.'), findsOneWidget);
+      expect(find.text('Page deleted'), findsOneWidget);
       expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
       await tester.pump(const Duration(seconds: 9));
       expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
-      expect(find.text('Page deleted.'), findsNothing);
+      expect(find.text('Page deleted'), findsNothing);
       expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
       expect(store.saves.single, hasLength(pageCount - 1));
       expect(tester.takeException(), isNull);
@@ -269,7 +269,7 @@ void main() {
 
       await tester.tap(find.byTooltip('Close'));
       await tester.pumpAndSettle();
-      expect(find.text('Page deleted.'), findsNothing);
+      expect(find.text('Page deleted'), findsNothing);
       expect(store.saves.single, hasLength(pageCount - 1));
       expect(tester.takeException(), isNull);
     });
@@ -285,7 +285,7 @@ void main() {
     await tapDelete(tester, 1);
     await tapDelete(tester, 1);
 
-    expect(find.text('Page deleted.'), findsOneWidget);
+    expect(find.text('Page deleted'), findsOneWidget);
     expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
@@ -412,7 +412,7 @@ void main() {
       await tester.pump();
 
       expect(store.clearCalls, 0);
-      expect(find.text('Clearing draft...'), findsOneWidget);
+      expect(find.text('Clearing draft…'), findsOneWidget);
       expect(iconButton(tester, 'Import from gallery').onPressed, isNull);
       expect(iconButton(tester, 'Delete page 1').onPressed, isNull);
       expect(
@@ -432,14 +432,14 @@ void main() {
       await tester.pump();
 
       expect(store.saves, hasLength(1));
-      expect(find.text('Clearing draft...'), findsOneWidget);
+      expect(find.text('Clearing draft…'), findsOneWidget);
 
       store.firstSave.complete();
       await tester.pump();
       await tester.pump();
       expect(store.clearCalls, 1);
       expect(store.saves, hasLength(1));
-      expect(find.text('Clearing draft...'), findsOneWidget);
+      expect(find.text('Clearing draft…'), findsOneWidget);
 
       clearCompleter.complete();
       await tester.pump();
@@ -466,7 +466,7 @@ void main() {
     await tapClearAllPages(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
-    expect(find.text('Clearing draft...'), findsOneWidget);
+    expect(find.text('Clearing draft…'), findsOneWidget);
 
     clearCompleter.complete();
     await tester.pump();
@@ -498,7 +498,7 @@ void main() {
     expect(store.clearCalls, 1);
     expect(find.text('Export PDF (2 pages)'), findsOneWidget);
     expect(find.text('Could not clear the saved draft.'), findsOneWidget);
-    expect(find.text('Clearing draft...'), findsNothing);
+    expect(find.text('Clearing draft…'), findsNothing);
     expect(iconButton(tester, 'Delete page 1').onPressed, isNotNull);
     expect(await isClearAllPagesEnabled(tester), isTrue);
   });
@@ -518,10 +518,10 @@ void main() {
     await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntilFound(
       tester,
-      find.text('Could not generate or share the PDF.'),
+      find.text('Could not export the PDF. Try again.'),
     );
 
-    expect(find.text('Could not generate or share the PDF.'), findsOneWidget);
+    expect(find.text('Could not export the PDF. Try again.'), findsOneWidget);
     expect(find.textContaining('private share provider details'), findsNothing);
   });
 
@@ -671,11 +671,11 @@ void main() {
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
-    expect(find.text('Could not open the photo gallery.'), findsNothing);
+    expect(find.text('Could not open the gallery.'), findsNothing);
     await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
     await tester.pumpAndSettle();
     expect(store.saves.last, orderedEquals([first, second]));
-    expect(find.text('Could not open the photo gallery.'), findsOneWidget);
+    expect(find.text('Could not open the gallery.'), findsOneWidget);
   });
 
   testWidgets('deferred feedback appears after Undo expires', (tester) async {
@@ -689,7 +689,7 @@ void main() {
     await tester.pump(const Duration(seconds: 11));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(SnackBarAction, 'Undo'), findsNothing);
-    expect(find.text('Could not open the photo gallery.'), findsOneWidget);
+    expect(find.text('Could not open the gallery.'), findsOneWidget);
     expect(store.saves, hasLength(1));
   });
 }

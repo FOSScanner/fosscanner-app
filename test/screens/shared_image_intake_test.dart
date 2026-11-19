@@ -362,8 +362,8 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsNothing);
       expect(
         find.text(
-          'Some shared images were not added: a document can have up to '
-          '$maxDocumentPages pages.',
+          'Some shared images were not added: page limit reached '
+          '($maxDocumentPages pages).',
         ),
         findsOneWidget,
       );

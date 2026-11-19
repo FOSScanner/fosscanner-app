@@ -193,7 +193,7 @@ void main() {
       final camera = tester
           .widget<FloatingActionButton>(find.byType(FloatingActionButton))
           .onPressed!;
-      final barcode = button(tester, 'Scan QR/barcode').onPressed!;
+      final barcode = button(tester, 'Scan QR code or barcode').onPressed!;
       final delete = button(tester, 'Delete page 1').onPressed!;
       final menu = tester
           .widget<PopupMenuButton<String>>(find.byType(PopupMenuButton<String>))
@@ -232,7 +232,7 @@ void main() {
       for (final tooltip in [
         'Import from gallery',
         'Delete page 1',
-        'Scan QR/barcode',
+        'Scan QR code or barcode',
       ]) {
         expect(button(tester, tooltip).onPressed, isNull);
       }
@@ -386,7 +386,7 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(share.calls, 0);
-    expect(find.text('PDF generation cancelled.'), findsOneWidget);
+    expect(find.text('Export canceled'), findsOneWidget);
     expect(button(tester, 'Import from gallery').onPressed, isNotNull);
   });
 
@@ -396,7 +396,7 @@ void main() {
     await tester.tap(find.text('Export PDF (2 pages)'));
     await pumpUntilFound(
       tester,
-      find.text('Could not generate or share the PDF.'),
+      find.text('Could not export the PDF. Try again.'),
     );
     expect(button(tester, 'Import from gallery').onPressed, isNotNull);
     expect(button(tester, 'Delete page 1').onPressed, isNotNull);
@@ -436,12 +436,18 @@ void main() {
     await tester.pumpAndSettle();
     await editFirstPage(tester);
     expect(operations.previewCalls, 0);
-    expect(find.textContaining('too much temporary memory'), findsNothing);
+    expect(
+      find.textContaining('Not enough memory for this image'),
+      findsNothing,
+    );
     expect(find.byType(CornerAdjustScreen), findsNothing);
     expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
     await tester.pump(const Duration(seconds: 11));
     await tester.pumpAndSettle();
-    expect(find.textContaining('too much temporary memory'), findsOneWidget);
+    expect(
+      find.textContaining('Not enough memory for this image'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('dismissing Undo releases image-processing headroom', (
@@ -493,7 +499,7 @@ void main() {
         await editFirstPage(tester);
         expect(operations.previewCalls, 0);
         expect(
-          find.textContaining('too much temporary memory'),
+          find.textContaining('Not enough memory for this image'),
           findsOneWidget,
         );
 

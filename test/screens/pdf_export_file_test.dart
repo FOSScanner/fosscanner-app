@@ -127,7 +127,7 @@ void main() {
     await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntilFound(
       tester,
-      find.text('Could not generate or share the PDF.'),
+      find.text('Could not export the PDF. Try again.'),
     );
     await pumpUntil(tester, () => exportDirectories().isEmpty);
     expect(find.textContaining('/x/y'), findsNothing);
@@ -140,7 +140,7 @@ void main() {
     await tester.tap(find.text('Export PDF (2 pages)'));
     await tester.pump();
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
-    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    await pumpUntilFound(tester, find.text('Export canceled'));
     await pumpUntil(tester, () => exportDirectories().isEmpty);
     expect(share.params, isNull);
   });

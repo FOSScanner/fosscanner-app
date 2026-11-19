@@ -53,7 +53,7 @@ void main() {
   Future<void> openCamera(WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Capture Image'));
+    await tester.tap(find.byTooltip('Scan a page'));
     await tester.pumpAndSettle();
   }
 
@@ -82,7 +82,7 @@ void main() {
           await tester.tap(find.text('Import images'));
           await tester.pumpAndSettle();
           expect(picker.galleryCalls, 1);
-          expect(find.byTooltip('Capture Image'), findsOneWidget);
+          expect(find.byTooltip('Scan a page'), findsOneWidget);
         },
         variant: TargetPlatformVariant({platform}),
       );
@@ -141,7 +141,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Open settings'));
       await tester.pumpAndSettle();

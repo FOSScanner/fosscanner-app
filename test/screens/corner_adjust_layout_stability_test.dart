@@ -215,7 +215,7 @@ void main() {
       operations.finalPreviews.last.complete(bytes);
       await tester.pumpAndSettle();
       await expectStableRects(tester, previewAndConfirm, () async {
-        await tester.tap(find.byTooltip('Close adjustments'));
+        await tester.tap(find.byTooltip('Close'));
         await tester.pumpAndSettle();
       }, reason: 'close');
       await expectStableRects(tester, previewAndConfirm, () async {

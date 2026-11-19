@@ -9,7 +9,7 @@ import 'package:fosscanner/screens/corner_adjust_screen.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 const _oldResultMessage =
-    'Preview could not be updated. Previous result shown.';
+    'Could not update the preview. Showing the previous one.';
 
 typedef _Request = ({
   Uint8List bytes,
@@ -175,12 +175,12 @@ void main() {
   }) async {
     switch (adjustment) {
       case 'rotation':
-        await tester.tap(find.byTooltip('Rotate'));
+        await tester.tap(find.byTooltip('Rotate clockwise'));
       case 'filter':
         await tester.tap(find.byTooltip('Filters'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Grayscale'));
-        await tester.tap(find.byTooltip('Close filters'));
+        await tester.tap(find.byTooltip('Close'));
         await tester.pump();
       case 'brightness' || 'contrast':
         if (find.byType(Slider).evaluate().isEmpty) {
@@ -198,7 +198,7 @@ void main() {
           slider.onChangeEnd!(value);
           // A released slider leaves the sheet free to close; the preview
           // updates behind it either way.
-          await tester.tap(find.byTooltip('Close adjustments'));
+          await tester.tap(find.byTooltip('Close'));
         }
     }
     await pumpWork(tester);
@@ -214,7 +214,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(previewImage(), findsNothing);
-    expect(find.text('Preview unavailable.'), findsOneWidget);
+    expect(find.text('Preview unavailable'), findsOneWidget);
     expect(find.textContaining('private path'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(confirm(tester).onPressed, isNull);

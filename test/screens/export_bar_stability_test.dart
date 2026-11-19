@@ -179,7 +179,7 @@ void main() {
       final idle = captureRects(tester, frame);
       void expectFrame(String state) => expectRects(tester, frame, idle, state);
       Future<void> startExport() async {
-        await tester.tap(find.byIcon(Icons.picture_as_pdf));
+        await tester.tap(find.byIcon(Icons.picture_as_pdf_outlined));
         await tester.pump();
       }
 
@@ -201,10 +201,10 @@ void main() {
       expectFrame('generating with progress');
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pump();
-      expect(find.text('Cancelling PDF...'), findsOneWidget);
+      expect(find.text('Canceling…'), findsOneWidget);
       expectFrame('cancelling');
       ocr.gate!.complete();
-      await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+      await pumpUntilFound(tester, find.text('Export canceled'));
       await dismissMessages(tester);
       expectFrame('idle after cancel');
 
@@ -214,12 +214,12 @@ void main() {
       await startExport();
       await pumpUntilFound(
         tester,
-        find.text('Opening share sheet...'),
+        find.text('Opening share sheet…'),
         settle: false,
       );
       expectFrame('sharing');
       share.gate!.complete();
-      await pumpUntilFound(tester, find.byIcon(Icons.picture_as_pdf));
+      await pumpUntilFound(tester, find.byIcon(Icons.picture_as_pdf_outlined));
       expectFrame('idle after sharing');
 
       // Preparing: the OCR job failed and the fallback is being offered.
@@ -230,7 +230,7 @@ void main() {
         find.text('Searchable export failed'),
         settle: false,
       );
-      expect(find.text('Preparing PDF...'), findsOneWidget);
+      expect(find.text('Preparing PDF…'), findsOneWidget);
       expectFrame('preparing');
       await tester.tap(
         find.descendant(
@@ -272,7 +272,7 @@ void main() {
       final ocr = _FakeOcr()..fail = true;
       messenger.setMockMethodCallHandler(_ocrChannel, ocr.handle);
       await pumpHome(tester, layoutMatrix.first, pages: 1, share: _Share());
-      await tester.tap(find.byIcon(Icons.picture_as_pdf));
+      await tester.tap(find.byIcon(Icons.picture_as_pdf_outlined));
       await pumpUntilFound(
         tester,
         find.text('Searchable export failed'),
@@ -335,14 +335,14 @@ void main() {
       }
 
       await pumpHome(tester, layoutMatrix.first, pages: 1, share: _Share());
-      await tester.tap(find.byIcon(Icons.picture_as_pdf));
+      await tester.tap(find.byIcon(Icons.picture_as_pdf_outlined));
       await pumpUntil(tester, () => ocr.jobs == 1, settle: false);
       await pressBack();
       expect(exits, isEmpty);
       expect(find.text('Recognizing text 0%'), findsOneWidget);
 
       ocr.gate!.complete();
-      await pumpUntilFound(tester, find.byIcon(Icons.picture_as_pdf));
+      await pumpUntilFound(tester, find.byIcon(Icons.picture_as_pdf_outlined));
       await pressBack();
       expect(exits, hasLength(1));
     },

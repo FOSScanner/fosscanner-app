@@ -50,8 +50,8 @@ class _PdfImportProgressDialogState extends State<PdfImportProgressDialog> {
   }
 
   String _status(PdfImportProgress? progress) {
-    if (_cancelling) return 'Cancelling...';
-    if (progress == null || progress.total <= 0) return 'Opening PDF...';
+    if (_cancelling) return 'Canceling…';
+    if (progress == null || progress.total <= 0) return 'Opening PDF…';
     final page = progress.completed < progress.total
         ? progress.completed + 1
         : progress.total;

@@ -145,7 +145,7 @@ void main() {
       matchesSemantics(
         label: 'Top-left corner',
         value: '90, 10 pixels',
-        hint: 'Use the directional actions to adjust this corner',
+        hint: 'Use actions to move this corner',
         customActions: const [
           CustomSemanticsAction(label: 'Move left'),
           CustomSemanticsAction(label: 'Move right'),
@@ -218,7 +218,7 @@ void main() {
     );
 
     expect(
-      find.text('Area too small. Double-tap the image to reset.'),
+      find.text('Crop is too small. Double-tap the image to reset.'),
       findsOneWidget,
     );
     expect(previewButton(tester).onPressed, isNull);

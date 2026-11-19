@@ -314,10 +314,7 @@ void main() {
     expect(find.byType(CornerAdjustScreen), findsNothing);
     expect(find.text('Export PDF (1 page)'), findsOneWidget);
     expect(
-      find.text(
-        'Import stopped. Pages already added were kept; the remaining '
-        'pages were not added.',
-      ),
+      find.text('Import stopped. Pages already added were kept.'),
       findsOneWidget,
     );
     expect(files.every((file) => !file.existsSync()), isTrue);
@@ -364,8 +361,8 @@ void main() {
     await settle(tester);
     expect(
       find.text(
-        'Some PDF pages were not added: a document can have up to '
-        '$maxDocumentPages pages.',
+        'Some PDF pages were not added: page limit reached '
+        '($maxDocumentPages pages).',
       ),
       findsOneWidget,
     );
@@ -406,7 +403,7 @@ void main() {
 
     await startImport(tester);
     expect(find.text('Importing PDF'), findsOneWidget);
-    expect(find.text('Opening PDF...'), findsOneWidget);
+    expect(find.text('Opening PDF…'), findsOneWidget);
     importer.onProgress!(0, 3);
     await tester.pump();
     expect(find.text('Rendering page 1 of 3'), findsOneWidget);
@@ -422,7 +419,7 @@ void main() {
     expect(importer.cancelCalls, 1);
     expect(find.text('Importing PDF'), findsNothing);
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('PDF import cancelled.'), findsOneWidget);
+    expect(find.text('PDF import canceled'), findsOneWidget);
 
     // Intake is released afterwards.
     importer.pending = null;
@@ -439,7 +436,7 @@ void main() {
     await startImport(tester);
     await tester.binding.handlePopRoute();
     await tester.pump();
-    expect(find.text('Cancelling...'), findsOneWidget);
+    expect(find.text('Canceling…'), findsOneWidget);
     await settle(tester);
     expect(importer.cancelCalls, 1);
     expect(find.text('Importing PDF'), findsNothing);
@@ -452,7 +449,7 @@ void main() {
     await settle(tester);
     await startImport(tester);
     await settle(tester);
-    expect(find.text("This PDF can't be opened."), findsOneWidget);
+    expect(find.text('Could not open this PDF.'), findsOneWidget);
     expect(find.text('Importing PDF'), findsNothing);
     expect(find.byType(CornerAdjustScreen), findsNothing);
   }, variant: _iOS);

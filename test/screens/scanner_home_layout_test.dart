@@ -310,7 +310,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Privacy-first'), findsNothing);
-      expect(find.byTooltip('Capture Image'), findsOneWidget);
+      expect(find.byTooltip('Scan a page'), findsOneWidget);
 
       final import = find.widgetWithText(OutlinedButton, 'Import from gallery');
       expect(import, findsOneWidget);

@@ -262,7 +262,7 @@ void main() {
         );
       }
 
-      await tester.tap(find.byTooltip('Close adjustments'));
+      await tester.tap(find.byTooltip('Close'));
       await tester.pumpAndSettle();
       expect(sent.last, isEmpty);
     });

@@ -53,10 +53,10 @@ String intakeRejectionMessage(IntakeRejection reason) => switch (reason) {
   IntakeRejection.notImage ||
   IntakeRejection.unreadable => 'Could not read this image.',
   IntakeRejection.fileTooLarge =>
-    'This image file is too large. Choose a file under $_maxMegabytes MB.',
+    'This image is too large. Choose a file under $_maxMegabytes MB.',
   IntakeRejection.needsTooMuchMemory =>
-    'This image needs too much temporary memory to process safely. '
-        'Remove pages or choose a smaller image.',
+    'Not enough memory for this image. Remove pages or choose a smaller '
+        'image.',
   IntakeRejection.unavailable =>
     'Could not open the shared file. Share images under $_maxMegabytes MB.',
   IntakeRejection.notRendered => 'This PDF page is too large to add.',

@@ -181,7 +181,7 @@ void main() {
       final second = queueCapture();
       final third = queueCapture();
       await pumpHome(tester);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       var editor = await waitForEditor(tester);
       expect(editor.source, PageReviewSource.camera);
       await preview(tester);
@@ -226,7 +226,7 @@ void main() {
       final first = queueCapture();
       final second = queueCapture();
       await pumpHome(tester);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       final editor = await waitForEditor(tester);
       expect(find.text('Retake'), findsOneWidget);
       expect(find.text('Cancel'), findsNothing);
@@ -247,7 +247,7 @@ void main() {
       expect(second.existsSync(), isFalse);
 
       // The picker lock is released.
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await settleIntake(tester);
       expect(picker.cameraCalls, 3);
     },
@@ -259,7 +259,7 @@ void main() {
     (tester) async {
       final first = queueCapture();
       await pumpHome(tester);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       final editor = await waitForEditor(tester);
 
       // The relaunched camera is canceled: the fake returns null.
@@ -291,7 +291,7 @@ void main() {
     (tester) async {
       queueCapture();
       await pumpHome(tester);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await waitForEditor(tester);
       await preview(tester);
       await tester.tap(find.text('Add & scan next'));
@@ -303,7 +303,7 @@ void main() {
       expect(find.text('Export PDF (1 page)'), findsOneWidget);
       expect(find.byType(SnackBar), findsNothing);
 
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await settleIntake(tester);
       expect(picker.cameraCalls, 3);
     },
@@ -319,7 +319,7 @@ void main() {
         tester,
         pages: List.generate(maxDocumentPages - 1, (_) => savedPage()),
       );
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await waitForEditor(tester);
       await preview(tester);
       await tester.tap(find.text('Add & scan next'));

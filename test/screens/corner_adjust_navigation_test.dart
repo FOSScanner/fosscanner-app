@@ -207,7 +207,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Grayscale'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Close filters'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save changes'));
     await tester.pumpAndSettle();

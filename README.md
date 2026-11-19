@@ -25,7 +25,7 @@ No account, no cloud processing, no tracking.
 
 ## A simple scanning workflow
 
-1. **Add pages** with the camera button, or with **Import from gallery** (in
+1. **Add pages** with **Scan a page** (the camera button), or with **Import from gallery** (in
    the toolbar, and on the empty home screen).
    On Android you can also **share** one or more images to FOSScanner from
    Gallery, Files or a messenger; they are reviewed one by one and appended to
@@ -39,7 +39,7 @@ No account, no cloud processing, no tracking.
 3. **Preview and adjust.** Choose **Preview page**; the page preview fills the
    screen. Tap the **Filters** icon for filter choices, the **Adjust** icon for
    brightness and contrast (the preview updates when you release a slider), or
-   rotate. **Reset adjustments** in the Adjust sheet restores neutral
+   **Rotate clockwise**. **Reset adjustments** in the Adjust sheet restores neutral
    brightness/contrast without changing your crop, filter, or rotation.
 4. **Build your document.** Choose **Add page**, then scan more pages. After a
    camera capture, **Add & scan next** adds the page and reopens the camera
@@ -63,7 +63,7 @@ Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
 and drag pages to reorder them. The page grid adds columns on tablets and in
 landscape. Deleting a page
 offers **Undo** for ten seconds. In a multi-image gallery import, **Skip image** skips only the
-current photo; remaining images are still reviewed. The review title shows
+current image; remaining images are still reviewed. The review title shows
 the position (for example *Image 2 of 5*), and **Stop importing** (or Back)
 ends the batch while keeping pages already added. Canceling an unsaved
 capture or single-image review adds no page.
@@ -103,7 +103,7 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | Offline searchable PDFs with selectable text | Yes — Latin-script OCR | Image-only PDFs |
 | Copy recognized text to the clipboard | Yes — Latin-script OCR | Not yet |
 | Temporary draft restoration after app restart | Yes | Yes |
-| QR/barcode scanning and full-result inspection | Yes | Yes |
+| QR code and barcode scanning with full-result inspection | Yes | Yes |
 | System light/dark theme | Yes | Yes |
 
 **Page size and quality.** *Original* sizes each page from its pixels, as
@@ -126,7 +126,7 @@ quality depends on the document, language, lighting, and image quality.
 page on your device, in page order, and puts it on the clipboard. Progress and
 **Cancel** appear in the export bar, like a PDF export; nothing is copied if you
 cancel. The clipboard entry is marked sensitive, so Android 13 and later (and
-keyboards that honour the flag) do not preview it. The recognized text is never
+keyboards that honor the flag) do not preview it. The recognized text is never
 logged or written to a file, but anything on the clipboard can be read by apps
 you paste into, so clear it when you are done.
 
@@ -193,10 +193,10 @@ retry or discard it, so they never overwrite it.
 access to the chosen file. The PDF is copied into the app's private cache only
 while its pages are rendered, then deleted; each rendered page is deleted once
 read. Rendering stops at the document's page and memory limits, shows a
-cancellable progress dialog, and never reaches the network. Pages become
+cancelable progress dialog, and never reaches the network. Pages become
 images: text, links and vector graphics are not kept, but a searchable export
 recognizes the text again. Password-protected or damaged PDFs are not
-supported (*This PDF can't be opened.*).
+supported (*Could not open this PDF.*).
 
 ### Drafts are temporary, not a backup
 

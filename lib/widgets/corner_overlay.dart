@@ -398,7 +398,7 @@ class _CornerOverlayState extends State<CornerOverlay> {
       child: Semantics(
         label: 'Document corners',
         value: values.join('; '),
-        hint: 'Use the named directional actions to adjust each corner',
+        hint: 'Use actions to move corners',
         customSemanticsActions: _semanticActions(const [
           0,
           1,
@@ -450,7 +450,7 @@ class _CornerOverlayState extends State<CornerOverlay> {
             value:
                 '${_liveCorners[index].dx.round()}, '
                 '${_liveCorners[index].dy.round()} pixels',
-            hint: 'Use the directional actions to adjust this corner',
+            hint: 'Use actions to move this corner',
             customSemanticsActions: _semanticActions([
               index,
             ], includeCornerName: false),

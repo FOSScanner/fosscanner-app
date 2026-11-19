@@ -165,12 +165,12 @@ void main() {
     'canceling the system camera adds nothing and releases the picker lock',
     (tester) async {
       await pumpHome(tester);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await tester.pumpAndSettle();
       expect(picker.cameraCalls, 1);
       expect(find.byType(CornerAdjustScreen), findsNothing);
       expect(find.byType(Card), findsNothing);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await tester.pumpAndSettle();
       expect(picker.cameraCalls, 2);
     },
@@ -183,7 +183,7 @@ void main() {
       final file = photo('capture');
       picker.cameraPhoto = XFile(file.path);
       await pumpHome(tester);
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await waitForEditor(tester);
       final editor = tester.widget<CornerAdjustScreen>(
         find.byType(CornerAdjustScreen),
@@ -200,7 +200,7 @@ void main() {
       expect(operations.exports, 0);
       expect(picker.cameraCalls, 1);
       picker.cameraPhoto = null;
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await tester.pumpAndSettle();
       expect(picker.cameraCalls, 2);
     },
@@ -408,10 +408,7 @@ void main() {
       expect(find.byType(Card), findsOneWidget);
       expect(operations.exports, 1);
       expect(
-        find.text(
-          'Import stopped. Pages already added were kept; the remaining '
-          'images were not added.',
-        ),
+        find.text('Import stopped. Pages already added were kept.'),
         findsOneWidget,
       );
       // Gallery originals belong to the user and must never be deleted.
@@ -528,7 +525,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(ValueKey('filter_${filter.name}')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Close filters'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add page'));
     await tester.pumpAndSettle();
@@ -540,7 +537,7 @@ void main() {
 
   Future<void> capture(WidgetTester tester, String name) async {
     picker.cameraPhoto = XFile(photo(name).path);
-    await tester.tap(find.byTooltip('Capture Image'));
+    await tester.tap(find.byTooltip('Scan a page'));
     await waitForEditor(tester);
   }
 
