@@ -173,6 +173,69 @@ void main() {
     cases: _landscapeCases,
   );
 
+  for (final textScale in const [1.0, 2.0]) {
+    testWidgets('an open panel follows the layout when the phone turns '
+        '[@${textScale}x]', (tester) async {
+      const portrait = LayoutCase(Size(412, 915), 2.0);
+      applyLayoutCase(tester, LayoutCase(portrait.size, textScale));
+      final result = await openAppearance(
+        tester,
+        LayoutCase(portrait.size, textScale),
+      );
+      Future<void> turn(Size size) async {
+        tester.view.physicalSize = size;
+        await tester.pumpAndSettle();
+      }
+
+      // Adjust opens as a sheet top to bottom.
+      await tester.tap(find.byTooltip('Adjust'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsOneWidget);
+      await tester.drag(find.byType(Slider).first, const Offset(60, 0));
+      await tester.pumpAndSettle();
+      final brightness = tester.widget<Slider>(find.byType(Slider).first).value;
+      expect(brightness, isNot(0));
+
+      // Side by side, the sheet becomes the side panel, values kept.
+      await turn(const Size(915, 412));
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(panel, findsOneWidget);
+      expect(find.byType(Slider), findsNWidgets(2));
+      expect(
+        tester.widget<Slider>(find.byType(Slider).first).value,
+        brightness,
+      );
+      expectPreviewAndActionsClear(tester, const Size(915, 412));
+
+      // Switch to Filters in the column, then turn back: a Filters sheet.
+      await tester.tap(find.byTooltip('Filters'));
+      await tester.pumpAndSettle();
+      await turn(portrait.size);
+      expect(panel, findsNothing);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byKey(const ValueKey('filter_original')), findsOneWidget);
+      expect(find.byType(Slider), findsNothing);
+
+      // And once more: one panel, never a sheet and the column together.
+      await turn(const Size(915, 412));
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(panel, findsOneWidget);
+      expect(find.byKey(const ValueKey('filter_original')), findsOneWidget);
+
+      // Back closes the panel, then the page is added with its settings.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(panel, findsNothing);
+      expect(find.text('Appearance'), findsOneWidget);
+      await tester.tap(addPage);
+      await tester.pumpAndSettle();
+      final page = await result;
+      expect(page, isNotNull);
+      expect(page!.brightness, brightness);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('the Close button and a second tap close the panel', (
     tester,
   ) async {

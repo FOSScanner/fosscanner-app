@@ -59,6 +59,33 @@ class CornerOverlay extends StatefulWidget {
   /// accessibility action) to restore the starting corners.
   final VoidCallback? onReset;
 
+  /// How far a handle reaches from its corner, in every direction: half its
+  /// touch target, which also covers the enlarged handle shown while it is
+  /// dragged.
+  static const handleReach = 24.0;
+
+  /// Where an image of [imageSize] is shown in an overlay of [size]: fitted
+  /// and centred, leaving room around it for whole handles at its edges.
+  static Rect imageRectFor(Size imageSize, Size size) {
+    // Reserve space for the entire handle, including its hit region, at
+    // image boundaries. Otherwise its visible outer half cannot be touched.
+    final gutter = math.min(
+      handleReach,
+      math.max(0.0, (size.shortestSide - 2 * handleReach) / 2),
+    );
+    final displaySize = applyBoxFit(
+      BoxFit.contain,
+      imageSize,
+      Size(size.width - 2 * gutter, size.height - 2 * gutter),
+    ).destination;
+    return Rect.fromLTWH(
+      (size.width - displaySize.width) / 2,
+      (size.height - displaySize.height) / 2,
+      displaySize.width,
+      displaySize.height,
+    );
+  }
+
   @override
   State<CornerOverlay> createState() => _CornerOverlayState();
 }
@@ -132,24 +159,14 @@ class _CornerOverlayState extends State<CornerOverlay> {
     assert(_liveCorners.length == 4);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Reserve space for the entire handle, including its hit region, at
-        // image boundaries. Otherwise its visible outer half cannot be touched.
-        final gutter = math.min(
-          24.0,
-          math.max(0.0, (constraints.biggest.shortestSide - 48) / 2),
-        );
-        final fitted = applyBoxFit(
-          BoxFit.contain,
+        final imageRect = CornerOverlay.imageRectFor(
           widget.imageSize,
-          Size(
-            constraints.maxWidth - 2 * gutter,
-            constraints.maxHeight - 2 * gutter,
-          ),
+          constraints.biggest,
         );
-        final displaySize = fitted.destination;
+        final displaySize = imageRect.size;
         final scale = displaySize.width / widget.imageSize.width;
-        final offsetX = (constraints.maxWidth - displaySize.width) / 2;
-        final offsetY = (constraints.maxHeight - displaySize.height) / 2;
+        final offsetX = imageRect.left;
+        final offsetY = imageRect.top;
 
         Offset toDisplay(Offset p) =>
             Offset(p.dx * scale + offsetX, p.dy * scale + offsetY);

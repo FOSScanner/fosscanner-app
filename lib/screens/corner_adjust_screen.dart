@@ -210,6 +210,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   // rather than as bottom sheets, so the preview stays fully visible. Back
   // closes the panel first, like a sheet.
   _Panel? _sidePanel;
+  // The panel open as a bottom sheet (top to bottom), and its route. When
+  // the layout turns side by side it moves into the control column, and
+  // back again, keeping every setting.
+  _Panel? _sheetPanel;
+  ModalRoute<void>? _sheetRoute;
+  int _sheetGeneration = 0;
   LocalHistoryEntry? _panelHistoryEntry;
   // One scroll position per panel, never restored: each panel opens at its
   // top, whatever the other was scrolled to.
@@ -1017,9 +1023,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       : Text(text, textAlign: TextAlign.center);
 
   /// Overlaid on the canvas (never in the column) so the canvas keeps its
-  /// size when the notice fades after the first adjustment. Inset
-  /// horizontally to stay clear of the top corner handles, and ignores
-  /// pointers so a drag that starts beneath it still reaches the canvas.
+  /// size when the notice fades after the first adjustment. Placed clear of
+  /// the corner handles, and ignores pointers so a drag that starts beneath
+  /// it still reaches the canvas.
   Widget _fullImageNotice(BuildContext context) => _canvasNotice(
     context,
     key: const Key('full_image_notice'),
@@ -1040,7 +1046,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         CropProblem.cornersInLine => 'Move the corners apart.',
       }} Double-tap the image to reset.';
 
-  /// A pill over the top of the canvas. It never takes layout space and
+  /// A pill over the canvas that never covers a corner handle of the full
+  /// image: above the image when there is room (as side by side, beside a
+  /// short canvas, there rarely is), below it otherwise, and else over the
+  /// image just below its top handles. It never takes layout space and
   /// ignores pointers, so drags beneath it still reach the handles.
   Widget _canvasNotice(
     BuildContext context, {
@@ -1049,37 +1058,68 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     bool visible = true,
     VoidCallback? onHidden,
   }) {
-    final scheme = Theme.of(context).colorScheme;
-    return Positioned(
-      top: 8,
-      left: 56,
-      right: 56,
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodyMedium;
+    const padding = EdgeInsets.symmetric(horizontal: 12, vertical: 6);
+    const margin = 8.0;
+    const gap = 4.0;
+    final pill = Material(
+      key: key,
+      color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.94),
+      elevation: 1,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: padding,
+        child: Semantics(
+          liveRegion: true,
+          child: Text(message, textAlign: TextAlign.center, style: style),
+        ),
+      ),
+    );
+    return Positioned.fill(
       child: IgnorePointer(
         child: AnimatedOpacity(
           opacity: visible ? 1 : 0,
           duration: const Duration(milliseconds: 200),
           onEnd: onHidden,
-          child: Center(
-            child: Material(
-              key: key,
-              color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
-              elevation: 1,
-              borderRadius: BorderRadius.circular(16),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                child: Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    message,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final canvas = constraints.biggest;
+              final width = math.max(0.0, canvas.width - 2 * margin);
+              final text = TextPainter(
+                text: TextSpan(text: message, style: style),
+                textAlign: TextAlign.center,
+                textDirection: Directionality.of(context),
+                textScaler: MediaQuery.textScalerOf(context),
+              )..layout(maxWidth: math.max(0.0, width - padding.horizontal));
+              final height = text.height + padding.vertical;
+              text.dispose();
+              final image = CornerOverlay.imageRectFor(_imageSize!, canvas);
+              const reach = CornerOverlay.handleReach;
+              final aboveHandles = image.top - reach - gap;
+              final belowHandles = image.bottom + reach + gap;
+              final double top;
+              if (aboveHandles >= height) {
+                top = aboveHandles - height;
+              } else if (canvas.height - belowHandles >= height) {
+                top = belowHandles;
+              } else {
+                // Between the top and bottom handle rows, clear of both
+                // whenever the image is taller than the two rows and the
+                // notice.
+                top = image.top + reach + gap;
+              }
+              return Stack(
+                children: [
+                  Positioned(
+                    left: margin,
+                    width: width,
+                    top: top,
+                    child: Center(child: pill),
                   ),
-                ),
-              ),
-            ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -1157,6 +1197,13 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         // short viewports need to scroll.
         _isSideBySide = constraints.maxWidth > constraints.maxHeight;
         if (_isSideBySide) {
+          // A sheet opened top to bottom would cover the preview and the
+          // confirm buttons: it moves into the control column.
+          if (_sheetPanel != null) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _moveSheetToSide(),
+            );
+          }
           // Side by side: the preview keeps the full height and the confirm
           // buttons stay visible, without scrolling, in the side column.
           // Filters and Adjust open above them, never over the preview.
@@ -1172,10 +1219,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             ],
           );
         }
-        // A panel opened side by side has no place in this layout.
+        // A panel opened side by side has no place in this layout: it
+        // reopens as a bottom sheet.
         if (_sidePanel != null) {
           WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _closeSidePanel(),
+            (_) => _moveSideToSheet(),
           );
         }
         if (constraints.maxHeight >= 480) {
@@ -1479,45 +1527,89 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _toggleSidePanel(panel);
       return;
     }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      // No scrim: the preview behind shows the effect while choosing.
-      barrierColor: Colors.transparent,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, updateSheet) {
-          void refresh() => updateSheet(() {});
-          void close() => Navigator.of(sheetContext).pop();
-          return ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * 0.75,
-            ),
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  top: 16,
-                  bottom: 16 + MediaQuery.viewPaddingOf(context).bottom,
-                ),
-                child: switch (panel) {
-                  _Panel.filters => _filtersContent(
-                    context,
-                    onClose: close,
-                    refresh: refresh,
-                  ),
-                  _Panel.adjust => _adjustContent(
-                    context,
-                    onClose: close,
-                    refresh: refresh,
-                  ),
-                },
-              ),
-            ),
-          );
-        },
-      ),
-    );
+    await _showPanelSheet(panel);
   }
+
+  /// After a rotation to side by side: the open sheet closes and its panel
+  /// opens in the control column.
+  void _moveSheetToSide() {
+    final panel = _sheetPanel;
+    final route = _sheetRoute;
+    if (!mounted || panel == null || !_isSideBySide) return;
+    _sheetPanel = null;
+    _sheetRoute = null;
+    if (route != null && route.isActive) {
+      Navigator.of(context).removeRoute(route);
+    }
+    if (_step == _Step.filter && !_isLeaving && _sidePanel != panel) {
+      _toggleSidePanel(panel);
+    }
+  }
+
+  /// After a rotation to top to bottom: the side panel closes and opens
+  /// again as a bottom sheet.
+  void _moveSideToSheet() {
+    final panel = _sidePanel;
+    if (!mounted || panel == null || _isSideBySide) return;
+    _closeSidePanel();
+    if (_step == _Step.filter && !_isLeaving) {
+      unawaited(_showPanelSheet(panel));
+    }
+  }
+
+  Future<void> _showPanelSheet(_Panel panel) async {
+    final sheet = ++_sheetGeneration;
+    _sheetPanel = panel;
+    _sheetRoute = null;
+    try {
+      await _openPanelSheet(panel);
+    } finally {
+      if (sheet == _sheetGeneration) {
+        _sheetPanel = null;
+        _sheetRoute = null;
+      }
+    }
+  }
+
+  Future<void> _openPanelSheet(_Panel panel) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    // No scrim: the preview behind shows the effect while choosing.
+    barrierColor: Colors.transparent,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (context, updateSheet) {
+        if (_sheetPanel == panel) _sheetRoute ??= ModalRoute.of(sheetContext);
+        void refresh() => updateSheet(() {});
+        void close() => Navigator.of(sheetContext).pop();
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+          ),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: 16,
+                bottom: 16 + MediaQuery.viewPaddingOf(context).bottom,
+              ),
+              child: switch (panel) {
+                _Panel.filters => _filtersContent(
+                  context,
+                  onClose: close,
+                  refresh: refresh,
+                ),
+                _Panel.adjust => _adjustContent(
+                  context,
+                  onClose: close,
+                  refresh: refresh,
+                ),
+              },
+            ),
+          ),
+        );
+      },
+    ),
+  );
 
   void _toggleSidePanel(_Panel panel) {
     if (_sidePanel == panel) {

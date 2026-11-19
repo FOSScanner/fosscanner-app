@@ -344,6 +344,48 @@ void main() {
       cases: const [LayoutCase(Size(390, 844), 2.0)],
     );
 
+    testLayoutMatrix(
+      'the full-image notice never covers a corner handle',
+      (tester, layoutCase) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: withTextScale(layoutCase.textScale),
+            home: CornerAdjustScreen(
+              originalBytes: bytes,
+              source: PageReviewSource.gallery,
+              operations: _Operations(bytes, holdFinalPreviews: false),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final notice = tester.getRect(
+          find.byKey(const Key('full_image_notice')),
+        );
+        expect(tester.getRect(canvas).contains(notice.center), isTrue);
+        for (var i = 0; i < 4; i++) {
+          final handle = tester.getRect(
+            find.byKey(ValueKey('corner-handle-$i')),
+          );
+          expect(
+            notice.overlaps(handle),
+            isFalse,
+            reason: 'notice $notice covers handle $i at $handle',
+          );
+        }
+        expect(tester.takeException(), isNull);
+      },
+      cases: const [
+        LayoutCase(Size(390, 844), 1.0),
+        LayoutCase(Size(390, 844), 2.0),
+        LayoutCase(Size(412, 915), 2.0),
+        LayoutCase(Size(844, 390), 1.0),
+        LayoutCase(Size(844, 390), 2.0),
+        LayoutCase(Size(915, 412), 2.0),
+        LayoutCase(Size(640, 300), 1.0),
+        LayoutCase(Size(640, 300), 1.3),
+      ],
+    );
+
     testLayoutMatrix('canvas and actions match on batch images 1/3 to 3/3', (
       tester,
       layoutCase,
