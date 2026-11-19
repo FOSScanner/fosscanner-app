@@ -397,10 +397,11 @@ void main() {
     variant: _iOS,
   );
 
-  testWidgets('images that need too much memory to process are reported', (
+  testWidgets('a document near its limit still reviews every image', (
     tester,
   ) async {
-    // 250 MB of retained page storage leaves no processing headroom.
+    // 250 MB of retained page storage: processing has its own headroom, so
+    // nothing is refused as too large to process.
     final storage = Uint8List(50 * 5 * 1024 * 1024)
       ..setRange(0, validBytes.length, validBytes);
     final retained = Uint8List.sublistView(storage, 0, validBytes.length);
@@ -408,10 +409,8 @@ void main() {
     await pumpHome(tester, initialPages: List.filled(50, page(retained)));
     await settle(tester);
     await tester.tap(find.byTooltip('Import from gallery'));
-    await settle(tester);
-
-    expect(find.byType(CornerAdjustScreen), findsNothing);
-    expectOnlyMessage("2 images couldn't be added: 2 too large to process.");
+    await waitForEditor(tester, 'Image 1 of 2');
+    expect(find.textContaining('too large to process'), findsNothing);
   }, variant: _iOS);
 
   testWidgets(

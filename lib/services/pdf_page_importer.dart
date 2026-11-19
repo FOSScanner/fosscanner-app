@@ -72,6 +72,12 @@ class PdfImportRequest {
   };
 }
 
+/// Said once after a PDF import whose pages had to be rendered below the
+/// chosen quality.
+const pdfReducedResolutionMessage =
+    'Pages were imported at reduced resolution to fit the document memory '
+    'limit.';
+
 /// The render density for a quality preset: High renders at 300 DPI, which
 /// suits text recognition; the other presets use their own export density.
 int pdfImportDpi(PdfQuality quality) => quality.targetDpi ?? 300;
@@ -99,6 +105,7 @@ class PdfImportBatch {
     this.pageCount = 0,
     this.rejected = 0,
     this.truncated = false,
+    this.reduced = false,
   });
 
   /// One JPEG per page, in order. The receiver deletes each one after reading
@@ -113,6 +120,10 @@ class PdfImportBatch {
 
   /// Rendering stopped early at the page or document memory limit.
   final bool truncated;
+
+  /// Some page was rendered below the chosen quality to fit the document's
+  /// memory limit.
+  final bool reduced;
 }
 
 enum PdfImportFailure {
@@ -219,5 +230,6 @@ PdfImportBatch parsePdfImportBatch(Map<String, Object?>? reply) {
     pageCount: pageCount is int && pageCount > 0 ? pageCount : 0,
     rejected: rejected is int && rejected > 0 ? rejected : 0,
     truncated: reply['truncated'] == true,
+    reduced: reply['reduced'] == true,
   );
 }

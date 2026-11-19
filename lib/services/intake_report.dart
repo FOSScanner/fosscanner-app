@@ -81,6 +81,8 @@ class IntakeReport {
   /// Why the intake ended before every item was reviewed, if it did.
   String? _outcome;
 
+  final _notes = <String>[];
+
   int get rejected => _rejections.values.fold(0, (sum, count) => sum + count);
 
   Map<IntakeRejection, int> get rejections => Map.unmodifiable(_rejections);
@@ -97,6 +99,12 @@ class IntakeReport {
   /// Records why the intake ended early. The first reason wins: later items
   /// are not reviewed after it.
   void end(String message) => _outcome ??= message;
+
+  /// Adds something the user should know about pages that were added, said
+  /// once after the rest of the summary.
+  void note(String message) {
+    if (!_notes.contains(message)) _notes.add(message);
+  }
 
   /// One message for the whole intake, or null when there is nothing to say.
   String? get message {
@@ -128,6 +136,7 @@ class IntakeReport {
       );
     }
     if (_outcome case final outcome?) parts.add(outcome);
+    parts.addAll(_notes);
     return parts.isEmpty ? null : parts.join(' ');
   }
 }

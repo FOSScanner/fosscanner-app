@@ -656,13 +656,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return clearOperation;
   }
 
-  int _retainedImageBytesFor(Iterable<ScannedPage> pages) =>
-      retainedPageImageBytes([
-        ...pages,
-        ...?_activeDraftSnapshot,
-        ...?_pendingDraftSnapshot,
-        ?_undoPage,
-      ]);
+  /// Encoded storage kept alive by [pages], draft writes and Undo, plus the
+  /// [source] image when given and not already among them.
+  int _retainedImageBytesFor(
+    Iterable<ScannedPage> pages, {
+    Uint8List? source,
+  }) => retainedPageImageBytes([
+    ...pages,
+    ...?_activeDraftSnapshot,
+    ...?_pendingDraftSnapshot,
+    ?_undoPage,
+    if (source != null)
+      ScannedPage(
+        originalBytes: source,
+        processedBytes: source,
+        corners: const [],
+      ),
+  ]);
 
   int get _retainedImageBytes => _retainedImageBytesFor(_pages);
 
@@ -744,6 +754,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   void _showDocumentLimit() => _showMessage(_documentLimitMessage);
+
+  static const _editLimitMessage =
+      'This page can\'t be edited while the document is this large. Remove '
+      'some pages and try again.';
 
   /// Adds a reviewed page, or records in [report] why it could not be.
   bool _tryAddPage(
@@ -1306,6 +1320,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         total: paths.length + batch.rejected,
         noun: 'page',
       )..reject(IntakeRejection.notRendered, count: batch.rejected);
+      final pagesBefore = _pages.length;
       nextPath = await _reviewBatch(
         [for (final path in paths) XFile(path)],
         source: PageReviewSource.pdf,
@@ -1323,6 +1338,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               : 'Some PDF pages were not added: document memory limit '
                     'reached.',
         );
+      }
+      if (batch.reduced && _pages.length > pagesBefore) {
+        report.note(pdfReducedResolutionMessage);
       }
       _showIntakeReport(report);
     } on PdfImportException catch (error) {
@@ -1718,15 +1736,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         return;
       }
       if (!requestIsCurrent()) return;
+      // The edit replaces this page, so its storage is released then: count
+      // the rest of the document, plus the source being decoded unless Undo
+      // or a draft write still holds it anyway.
+      final otherPages = List<ScannedPage>.of(_pages)..removeAt(index);
+      final retainedWithoutPage = _retainedImageBytesFor(otherPages);
       if (!canProcessSourceImage(
-        currentRetainedBytes: _retainedImageBytes,
-        // The source is already part of the retained document total.
-        encodedBytes: 0,
+        currentRetainedBytes: retainedWithoutPage,
+        encodedBytes:
+            _retainedImageBytesFor(otherPages, source: page.originalBytes) -
+            retainedWithoutPage,
         size: imageSize,
       )) {
-        _showMessage(
-          intakeRejectionMessage(IntakeRejection.needsTooMuchMemory),
-        );
+        _showMessage(_editLimitMessage);
         return;
       }
 
@@ -1750,7 +1772,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           replacementBytes:
               _retainedImageBytesFor(replacementPages) - retainedWithoutPage,
         )) {
-          _showMessage(_documentMemoryLimitMessage);
+          _showMessage(_editLimitMessage);
           return;
         }
         setState(() => _pages[index] = result);

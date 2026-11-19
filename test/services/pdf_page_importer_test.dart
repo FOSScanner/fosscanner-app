@@ -80,6 +80,18 @@ void main() {
       }
     });
 
+    test('a large photo document still renders A4 pages at 300 DPI', () {
+      // About what 97 photo pages retained when the resolution dropped from
+      // 2478 to 1822 px wide.
+      final request = PdfImportRequest.forDocument(
+        quality: PdfQuality.high,
+        currentPages: 97,
+        retainedBytes: 160 * 1024 * 1024,
+      )!;
+      expect(request.dpi, 300);
+      expect(request.maxPagePixels, greaterThanOrEqualTo(2479 * 3508));
+    });
+
     test('returns null when nothing more fits', () {
       expect(
         PdfImportRequest.forDocument(
@@ -215,11 +227,14 @@ void main() {
         'pageCount': -3,
         'rejected': 'x',
         'truncated': 1,
+        'reduced': 'yes',
       });
       expect(batch.paths, isEmpty);
       expect(batch.pageCount, 0);
       expect(batch.rejected, 0);
       expect(batch.truncated, isFalse);
+      expect(batch.reduced, isFalse);
+      expect(parsePdfImportBatch({'reduced': true}).reduced, isTrue);
     });
   });
 }

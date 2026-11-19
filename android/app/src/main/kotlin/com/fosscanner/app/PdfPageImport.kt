@@ -76,12 +76,18 @@ internal data class PdfImportResult(
     val rejected: Int,
     /** Rendering stopped early at the page or document memory limit. */
     val truncated: Boolean,
+    /**
+     * Some added page was rendered below the requested density because the
+     * document's processing memory capped its pixels.
+     */
+    val reduced: Boolean = false,
 ) {
     fun toChannelMap(): Map<String, Any> = mapOf(
         "paths" to paths,
         "pageCount" to pageCount,
         "rejected" to rejected,
         "truncated" to truncated,
+        "reduced" to reduced,
     )
 }
 
@@ -151,6 +157,7 @@ internal object PdfPageImport {
         val limit = pageLimit(pageCount, request.maxPages)
         var truncated = pageCount > limit
         var rejected = 0
+        var reduced = false
         var totalBytes = 0L
         val files = ArrayList<File>()
         try {
@@ -186,7 +193,13 @@ internal object PdfPageImport {
                             truncated = true
                             break
                         }
-                        else -> totalBytes += length
+                        else -> {
+                            totalBytes += length
+                            // Smaller than the source limits alone would allow.
+                            if (size != renderSize(widthPoints, heightPoints, request.dpi, MAX_PIXELS)) {
+                                reduced = true
+                            }
+                        }
                     }
                 }
                 onProgress(index + 1, limit)
@@ -196,7 +209,7 @@ internal object PdfPageImport {
             files.forEach { it.delete() }
             throw error
         }
-        return PdfImportResult(files.map { it.path }, pageCount, rejected, truncated)
+        return PdfImportResult(files.map { it.path }, pageCount, rejected, truncated, reduced)
     }
 
     /** Removes renders left behind if the previous activity died mid-import. */

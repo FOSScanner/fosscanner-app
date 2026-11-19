@@ -142,11 +142,13 @@ void main() {
     int? pageCount,
     int rejected = 0,
     bool truncated = false,
+    bool reduced = false,
   }) => PdfImportBatch(
     paths: [for (final file in files) file.path],
     pageCount: pageCount ?? files.length,
     rejected: rejected,
     truncated: truncated,
+    reduced: reduced,
   );
 
   ScannedPage savedPage() => ScannedPage(
@@ -366,6 +368,65 @@ void main() {
       ),
       findsOneWidget,
     );
+  }, variant: _iOS);
+
+  for (final added in [true, false]) {
+    testWidgets('reduced-resolution renders are mentioned once '
+        '${added ? 'after adding pages' : 'only when a page was added'}', (
+      tester,
+    ) async {
+      importer.batch = batchOf(renderedPages(2), reduced: true);
+      await pumpHome(tester);
+      store.loaded.complete([]);
+      await settle(tester);
+      await startImport(tester);
+      final first = await waitForEditor(tester);
+      if (added) {
+        await accept(tester);
+      } else {
+        await tester.tap(find.text('Skip page'));
+        await tester.pumpAndSettle();
+      }
+      await waitForEditor(tester, previous: first);
+      await accept(tester);
+      await settle(tester);
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(
+        find.text(
+          'Pages were imported at reduced resolution to fit the document '
+          'memory limit.',
+        ),
+        findsOneWidget,
+      );
+    }, variant: _iOS);
+  }
+
+  testWidgets('pages at full resolution get no resolution message', (
+    tester,
+  ) async {
+    importer.batch = batchOf(renderedPages(1));
+    await pumpHome(tester);
+    store.loaded.complete([]);
+    await settle(tester);
+    await startImport(tester);
+    await waitForEditor(tester);
+    await accept(tester);
+    await settle(tester);
+    expect(find.textContaining('reduced resolution'), findsNothing);
+  }, variant: _iOS);
+
+  testWidgets('a skipped reduced page says nothing about resolution', (
+    tester,
+  ) async {
+    importer.batch = batchOf(renderedPages(1), reduced: true);
+    await pumpHome(tester);
+    store.loaded.complete([]);
+    await settle(tester);
+    await startImport(tester);
+    await waitForEditor(tester);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+    expect(find.textContaining('reduced resolution'), findsNothing);
   }, variant: _iOS);
 
   testWidgets('a full document disables PDF import and intake help explains', (

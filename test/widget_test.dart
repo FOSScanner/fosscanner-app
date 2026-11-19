@@ -687,10 +687,12 @@ void main() {
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
-  testWidgets('gallery reports a distinct transient processing-budget error', (
+  testWidgets('a document near its limit still reviews a new image', (
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
+    // 250 MiB of the 256 MiB document limit: processing headroom no longer
+    // shrinks as the document grows, so the image is reviewed.
     final retainedBytes = _imageWithRetainedStorage(icon, 50 * 5 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
@@ -710,16 +712,20 @@ void main() {
           find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
         )
         .onPressed!();
-    await tester.pumpAndSettle();
+    // The editor keeps animating while it previews; never settle here.
+    for (
+      var i = 0;
+      i < 20 && find.byType(CornerAdjustScreen).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
-    expect(
-      find.text(
-        'Not enough memory for this image. Remove pages or choose a smaller '
-        'image.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expect(find.byType(CornerAdjustScreen), findsOneWidget);
+    expect(find.textContaining('Not enough memory'), findsNothing);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
@@ -812,12 +818,14 @@ void main() {
   });
 
   testWidgets(
-    'initial 20MP-metadata page near the cap can preview but cannot edit',
+    'a 20MP page of a document over the cap can preview but cannot edit',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
       final sharedRetainedBytes = _imageWithRetainedStorage(
         icon,
-        52 * 2 * 1024 * 1024,
+        // Initial pages bypass admission; 272 MiB leaves less than a 20 MP
+        // edit needs even beyond the document limit.
+        272 * 1024 * 1024,
       );
       final page = ScannedPage(
         originalBytes: sharedRetainedBytes,
@@ -853,11 +861,12 @@ void main() {
       expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
       expect(
         find.text(
-          'Not enough memory for this image. Remove pages or choose a smaller '
-          'image.',
+          'This page can\'t be edited while the document is this large. '
+          'Remove some pages and try again.',
         ),
         findsOneWidget,
       );
+      expect(find.textContaining('choose a smaller image'), findsNothing);
       expect(find.byType(CornerAdjustScreen), findsNothing);
     },
   );

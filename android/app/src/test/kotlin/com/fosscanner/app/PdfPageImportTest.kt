@@ -107,9 +107,52 @@ class PdfPageImportTest {
         assertEquals(listOf(0 to 3, 1 to 3, 2 to 3, 3 to 3), progress)
         assertFalse(result.truncated)
         assertEquals(
-            mapOf("paths" to result.paths, "pageCount" to 3, "rejected" to 0, "truncated" to false),
+            mapOf(
+                "paths" to result.paths,
+                "pageCount" to 3,
+                "rejected" to 0,
+                "truncated" to false,
+                "reduced" to false,
+            ),
             result.toChannelMap(),
         )
+    }
+
+    @Test fun reportsPagesRenderedBelowTheRequestedDensity() {
+        // A4 at 300 DPI is 2480 x 3508 px (8.7 MP).
+        val full = PdfPageImport.renderPages(
+            temporary.newFolder(), 1, request(dpi = 300, maxPagePixels = 9_000_000),
+            pageSize = { a4 }, render = writer(), isCancelled = { false }, onProgress = { _, _ -> },
+        )
+        assertFalse(full.reduced)
+        assertEquals(false, full.toChannelMap()["reduced"])
+
+        val rendered = mutableListOf<Pair<Int, PixelSize>>()
+        val capped = PdfPageImport.renderPages(
+            temporary.newFolder(), 2, request(dpi = 300, maxPagePixels = 4_000_000),
+            pageSize = { a4 }, render = writer(rendered = rendered),
+            isCancelled = { false }, onProgress = { _, _ -> },
+        )
+        assertTrue(rendered.all { it.second.width.toLong() * it.second.height <= 4_000_000 })
+        assertTrue(capped.reduced)
+        assertEquals(true, capped.toChannelMap()["reduced"])
+
+        // Only pages that were kept count.
+        val dropped = PdfPageImport.renderPages(
+            temporary.newFolder(), 1, request(dpi = 300, maxPagePixels = 4_000_000),
+            pageSize = { a4 }, render = writer(bytesPerPage = { 0 }),
+            isCancelled = { false }, onProgress = { _, _ -> },
+        )
+        assertFalse(dropped.reduced)
+    }
+
+    @Test fun theSourceEdgeLimitAloneIsNotAReduction() {
+        // A poster at 600 DPI exceeds the 8192 px edge whatever the document.
+        val result = PdfPageImport.renderPages(
+            temporary.newFolder(), 1, request(dpi = 600, maxPagePixels = PdfPageImport.MAX_PIXELS),
+            pageSize = { 2000 to 3000 }, render = writer(), isCancelled = { false }, onProgress = { _, _ -> },
+        )
+        assertFalse(result.reduced)
     }
 
     @Test fun stopsAtThePageLimitWithoutRenderingTheRest() {

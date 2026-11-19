@@ -405,7 +405,9 @@ void main() {
   // A small valid PNG view retaining a larger backing allocation lets these
   // tests exercise the memory budget without decoding a large bitmap.
   Uint8List retainedImage() {
-    final allocation = Uint8List(48 * 1024 * 1024);
+    // Over the document limit, as only Undo and draft writes can make it:
+    // with a 20 MP source the editor's headroom is exceeded.
+    final allocation = Uint8List(272 * 1024 * 1024);
     allocation.setRange(0, imageBytes.length, imageBytes);
     return Uint8List.sublistView(allocation, 0, imageBytes.length);
   }
@@ -436,18 +438,12 @@ void main() {
     await tester.pumpAndSettle();
     await editFirstPage(tester);
     expect(operations.previewCalls, 0);
-    expect(
-      find.textContaining('Not enough memory for this image'),
-      findsNothing,
-    );
+    expect(find.textContaining("This page can't be edited"), findsNothing);
     expect(find.byType(CornerAdjustScreen), findsNothing);
     expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
     await tester.pump(const Duration(seconds: 11));
     await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Not enough memory for this image'),
-      findsOneWidget,
-    );
+    expect(find.textContaining("This page can't be edited"), findsOneWidget);
   });
 
   testWidgets('dismissing Undo releases image-processing headroom', (
@@ -471,6 +467,63 @@ void main() {
     await editFirstPage(tester);
     expect(operations.previewCalls, 1);
     expect(find.byType(CornerAdjustScreen), findsOneWidget);
+  });
+
+  Uint8List imageIn(int mebibytes) {
+    final allocation = Uint8List(mebibytes * 1024 * 1024);
+    allocation.setRange(0, imageBytes.length, imageBytes);
+    return Uint8List.sublistView(allocation, 0, imageBytes.length);
+  }
+
+  testWidgets('editing counts the replaced page as released', (tester) async {
+    // 140 MiB in the edited page's own result, 130 MiB held by Undo: with the
+    // page counted, a 20 MP edit would exceed the budget; replaced, it fits.
+    await pumpHome(
+      tester,
+      pages: [
+        page(original: imageIn(130)),
+        ScannedPage(
+          originalBytes: imageBytes,
+          processedBytes: imageIn(140),
+          corners: page().corners,
+        ),
+      ],
+      sourceSize: const Size(4000, 5000),
+    );
+    await tapDelete(tester);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(SnackBarAction, 'Undo'), findsOneWidget);
+    await editFirstPage(tester);
+    expect(find.byType(CornerAdjustScreen), findsOneWidget);
+    expect(find.textContaining("can't be edited"), findsNothing);
+  });
+
+  testWidgets('an edit that still cannot fit says so for the page', (
+    tester,
+  ) async {
+    // Undo holds 272 MiB: even without the edited page nothing fits.
+    await pumpHome(
+      tester,
+      pages: [
+        page(original: imageIn(272)),
+        page(),
+      ],
+      sourceSize: const Size(4000, 5000),
+    );
+    await tapDelete(tester);
+    await tester.pumpAndSettle();
+    await editFirstPage(tester);
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pumpAndSettle();
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expect(
+      find.text(
+        "This page can't be edited while the document is this large. Remove "
+        'some pages and try again.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('choose a smaller image'), findsNothing);
   });
 
   for (final failSave in [false, true]) {
@@ -499,7 +552,7 @@ void main() {
         await editFirstPage(tester);
         expect(operations.previewCalls, 0);
         expect(
-          find.textContaining('Not enough memory for this image'),
+          find.textContaining("This page can't be edited"),
           findsOneWidget,
         );
 

@@ -13,11 +13,32 @@ const maxPickerEdge = 4472.0;
 const maxEncodedImageBytes = 32 * 1024 * 1024;
 const maxDocumentPages = 100;
 const maxRetainedDocumentBytes = 256 * 1024 * 1024;
+
+/// Processing memory for one image on top of a document at its limit.
+///
+/// The largest image within the source limits needs 224,000,000 bytes
+/// (20 MP decoded at 4 B/px plus four warp-sized intermediates capped at
+/// 9 MP, see [estimateDecodedOpenCvBytes]); a picker-capped 4472 × 3354
+/// camera photo needs about 204 MB. 224 MiB covers either, so any page of a
+/// document within [maxRetainedDocumentBytes] can still be edited and any
+/// image the document can hold can still be reviewed: the document limit is
+/// the one the user meets. Before, the retained document and the processing
+/// shared a single 256 MiB budget, which refused edits and imports from
+/// about 60 photo pages on.
+///
+/// The total is bounded at 480 MiB estimated (and the estimate is
+/// pessimistic: warp intermediates are rarely all alive at once). On the
+/// device profiled at 97 pages the app idled at 444 MB PSS and already peaked
+/// at 634 MB during OCR export, so editing stays within what export reaches.
+const maxImageProcessingHeadroomBytes = 224 * 1024 * 1024;
+
 // Admission heuristic, not a hard process-RSS limit. Flutter's decoded image
 // cache, native libraries, isolate/message copies and PDF output add overhead.
 // The home screen also counts encoded buffers held by draft writes and Undo,
-// and prevents PDF/image workers from overlapping within a scanner session.
-const maxImageProcessingWorkingSetBytes = 256 * 1024 * 1024;
+// so those transient copies are what can still push an image over it; and it
+// prevents PDF/image workers from overlapping within a scanner session.
+const maxImageProcessingWorkingSetBytes =
+    maxRetainedDocumentBytes + maxImageProcessingHeadroomBytes;
 
 // Peak processing allowance: the source decoder retains one four-channel
 // buffer while export/auto-enhance can hold four four-channel warp-sized
