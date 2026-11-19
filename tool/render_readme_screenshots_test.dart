@@ -227,6 +227,11 @@ void main() {
     await show(home(3));
     expect(find.text('Export PDF (3 pages)'), findsOneWidget);
     await save('ui-home-pages');
+    await tester.tap(find.byTooltip('Reorder page 2'));
+    await tester.pumpAndSettle();
+    await save('ui-reorder-pages');
+    Navigator.of(tester.element(find.text('Move earlier'))).pop();
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
     await save('ui-export-options');

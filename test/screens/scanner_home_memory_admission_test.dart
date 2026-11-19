@@ -199,6 +199,14 @@ void main() {
       final reorder = tester
           .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
           .onAcceptWithDetails!;
+      final reorderMenu = tester.widget<PopupMenuButton<int>>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is PopupMenuButton<int> &&
+              widget.tooltip == 'Reorder page 1',
+        ),
+      );
+      final moveLater = reorderMenu.onSelected!;
       final openPage = tester
           .widget<InkWell>(
             find
@@ -240,6 +248,19 @@ void main() {
             .maxSimultaneousDrags,
         0,
       );
+      expect(
+        tester
+            .widget<PopupMenuButton<int>>(
+              find.byWidgetPredicate(
+                (widget) =>
+                    widget is PopupMenuButton<int> &&
+                    widget.tooltip == 'Reorder page 1',
+              ),
+            )
+            .enabled,
+        isFalse,
+      );
+      moveLater(1);
       gallery();
       camera();
       barcode();

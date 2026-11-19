@@ -229,6 +229,58 @@ void main() {
     });
   }
 
+  for (final brightness in Brightness.values) {
+    for (final size in [
+      const Size(320, 568),
+      const Size(640, 300),
+      const Size(1024, 768),
+    ]) {
+      testWidgets(
+        'reorder controls and menu fit $size at 200% text in $brightness',
+        (tester) async {
+          setViewport(tester, size);
+          tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+          addTearDown(tester.view.resetPadding);
+          await pumpHome(
+            tester,
+            pageCount: 8,
+            textScale: 2,
+            brightness: brightness,
+          );
+          final reorder = find.byTooltip('Reorder page 8');
+          await tester.scrollUntilVisible(
+            reorder,
+            200,
+            maxScrolls: 50,
+            scrollable: find.descendant(
+              of: find.byType(GridView),
+              matching: find.byType(Scrollable),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          final preview = find.descendant(
+            of: find.byKey(const ValueKey('page_semantics_7')),
+            matching: find.byType(Image),
+          );
+          expect(
+            tester.getRect(preview).overlaps(tester.getRect(reorder)),
+            isFalse,
+          );
+          await tester.tap(reorder);
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(find.text('Move earlier'));
+          await tester.pumpAndSettle();
+          expect(find.text('Move earlier').hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          expect(find.text('Move earlier'), findsNothing);
+        },
+      );
+    }
+  }
+
   testWidgets('short empty home scrolls without large-text overflow', (
     tester,
   ) async {

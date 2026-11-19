@@ -967,6 +967,38 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  Widget _pageReorderMenu(int index, ScannedPage page) => PopupMenuButton<int>(
+    tooltip: 'Reorder page ${index + 1}',
+    icon: const Icon(Icons.swap_vert),
+    enabled: !_isDocumentInteractionLocked,
+    onSelected: (direction) {
+      // A menu callback must not move a different page if the document changed
+      // while it was open. _reorderPage also rechecks the operation lock.
+      if (index >= _pages.length || !identical(_pages[index], page)) return;
+      _reorderPage(index, index + direction);
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(
+        value: -1,
+        enabled: index > 0,
+        child: const ListTile(
+          leading: Icon(Icons.arrow_upward),
+          title: Text('Move earlier'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      PopupMenuItem(
+        value: 1,
+        enabled: index < _pages.length - 1,
+        child: const ListTile(
+          leading: Icon(Icons.arrow_downward),
+          title: Text('Move later'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+    ],
+  );
+
   void _reorderPage(int fromIndex, int toIndex) {
     if (_isDocumentInteractionLocked ||
         fromIndex < 0 ||
@@ -1568,24 +1600,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                     left: 12,
                                     right: 4,
                                   ),
-                                  child: Row(
+                                  child: Wrap(
+                                    alignment: WrapAlignment.spaceBetween,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
                                     children: [
-                                      Expanded(
-                                        child: ExcludeSemantics(
-                                          child: Text(
-                                            'Page ${index + 1}',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.labelLarge,
-                                          ),
+                                      ExcludeSemantics(
+                                        child: Text(
+                                          'Page ${index + 1}',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelLarge,
                                         ),
                                       ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline),
-                                        tooltip: 'Delete page ${index + 1}',
-                                        onPressed: _isDocumentInteractionLocked
-                                            ? null
-                                            : () => _removePage(index),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (_pages.length > 1)
+                                            _pageReorderMenu(index, page),
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                            ),
+                                            tooltip: 'Delete page ${index + 1}',
+                                            onPressed:
+                                                _isDocumentInteractionLocked
+                                                ? null
+                                                : () => _removePage(index),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),

@@ -10,6 +10,7 @@ quality.
 | `ui-home-empty.png` | Initial document screen |
 | `ui-home-pages.png` | Three-page document and compact export bar |
 | `ui-home-pages-dark.png` | The same document in the dark theme |
+| `ui-reorder-pages.png` | Visible earlier/later actions in a page's reorder menu |
 | `ui-export-options.png` | Android searchable-text export options |
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
 | `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |
