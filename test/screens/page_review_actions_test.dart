@@ -515,6 +515,105 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
+  Future<void> acceptWithFilter(WidgetTester tester, PageFilter filter) async {
+    await tester.tap(find.text('Preview page'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('filter_${filter.name}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Close filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add page'));
+    await tester.pumpAndSettle();
+  }
+
+  PageFilter editorFilter(WidgetTester tester) => tester
+      .widget<CornerAdjustScreen>(find.byType(CornerAdjustScreen))
+      .initialFilter;
+
+  Future<void> capture(WidgetTester tester, String name) async {
+    picker.cameraPhoto = XFile(photo(name).path);
+    await tester.tap(find.byTooltip('Capture Image'));
+    await waitForEditor(tester);
+  }
+
+  testWidgets(
+    'camera pages start with the last new-page filter until Clear all',
+    (tester) async {
+      final existing = ScannedPage(
+        originalBytes: bytes,
+        corners: _corners,
+        processedBytes: bytes,
+        filter: PageFilter.grayscale,
+      );
+      await pumpHome(tester, pages: [existing]);
+
+      await capture(tester, 'first');
+      expect(editorFilter(tester), PageFilter.original);
+      await acceptWithFilter(tester, PageFilter.blackAndWhite);
+      expect(find.byType(Card), findsNWidgets(2));
+
+      // Editing an existing page keeps its own filter and does not replace
+      // the carried-over choice.
+      await tester.tap(find.byType(Card).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Edit page'));
+      await tester.pumpAndSettle();
+      expect(editorFilter(tester), PageFilter.grayscale);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      await capture(tester, 'second');
+      expect(editorFilter(tester), PageFilter.blackAndWhite);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Clear all'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Card), findsNothing);
+
+      await capture(tester, 'third');
+      expect(editorFilter(tester), PageFilter.original);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'gallery batch pages start with the filter chosen for the previous page',
+    (tester) async {
+      picker.galleryPhotos = [
+        for (var i = 0; i < 3; i++) XFile(photo('batch-$i').path),
+      ];
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+
+      await waitForEditor(tester);
+      expect(editorFilter(tester), PageFilter.original);
+      var previousBytes = tester
+          .widget<CornerAdjustScreen>(find.byType(CornerAdjustScreen))
+          .originalBytes;
+      await acceptWithFilter(tester, PageFilter.grayscale);
+
+      await waitForEditor(tester, previousBytes: previousBytes);
+      expect(editorFilter(tester), PageFilter.grayscale);
+      previousBytes = tester
+          .widget<CornerAdjustScreen>(find.byType(CornerAdjustScreen))
+          .originalBytes;
+      await acceptWithFilter(tester, PageFilter.autoEnhance);
+
+      await waitForEditor(tester, previousBytes: previousBytes);
+      expect(editorFilter(tester), PageFilter.autoEnhance);
+      await accept(tester);
+      expect(find.byType(Card), findsNWidgets(3));
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
   for (final size in [const Size(320, 568), const Size(640, 300)]) {
     testWidgets('batch guidance fits $size at 200% text', (tester) async {
       tester.view.physicalSize = size;

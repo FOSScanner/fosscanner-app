@@ -97,6 +97,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _isClearingDraft = false;
   bool _isOpeningImageRoute = false;
   late bool _cameraSupported;
+  // Session-only: a new page starts with the filter chosen for the previous
+  // new page, so a multi-page scan needs the filter sheet only once. Edits of
+  // existing pages keep their own filter and do not change this.
+  PageFilter _lastNewPageFilter = PageFilter.original;
 
   @override
   void initState() {
@@ -729,7 +733,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       onStopImport: onStopImport,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
-      initialFilter: page?.filter ?? PageFilter.original,
+      initialFilter: page?.filter ?? _lastNewPageFilter,
       initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
       initialBrightness: page?.brightness ?? 0,
       initialContrast: page?.contrast ?? 1,
@@ -859,9 +863,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         documentGeneration != _documentGeneration) {
       return _PhotoIntakeResult.skipped;
     }
-    return _tryAddPage(result, documentGeneration: documentGeneration)
-        ? _PhotoIntakeResult.added
-        : _PhotoIntakeResult.capacityReached;
+    if (!_tryAddPage(result, documentGeneration: documentGeneration)) {
+      return _PhotoIntakeResult.capacityReached;
+    }
+    _lastNewPageFilter = result.filter;
+    return _PhotoIntakeResult.added;
   }
 
   Future<void> _openBarcodeScanner() async {
@@ -1129,6 +1135,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (cleared) {
         _pages.clear();
         _draftRestoreFailed = false;
+        _lastNewPageFilter = PageFilter.original;
         _draftSaveFailed = false;
         _deferredMessage = null;
       }
