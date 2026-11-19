@@ -42,6 +42,15 @@ jobs:
         with:
           flutter-version: '3.44.0'
       - run: flutter build apk --debug --target-platform android-arm64
+      # Plugins merge their own permissions into the app. Merging the release
+      # manifest needs no signing key; the debug APK shows what is installed.
+      # Must run after the build above, which also generates android/gradlew.
+      - name: Check requested Android permissions
+        run: |
+          (cd android && ./gradlew :app:processReleaseMainManifest)
+          bash tool/check_android_permissions.sh \
+            build/app/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml \
+            build/app/outputs/flutter-apk/app-debug.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-debug-arm64
