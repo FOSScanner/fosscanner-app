@@ -35,7 +35,18 @@ class _DocumentCapacityException implements Exception {
   const _DocumentCapacityException();
 }
 
-enum _PhotoIntakeResult { added, skipped, capacityReached, stopped }
+enum _PhotoIntakeResult {
+  added,
+  skipped,
+  capacityReached,
+  stopped,
+
+  /// A camera page was added and the user asked to capture another one.
+  addedScanNext,
+
+  /// A camera capture was discarded and the user asked to capture it again.
+  retake,
+}
 
 enum _CameraRecovery { retry, gallery }
 
@@ -610,6 +621,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// Continuous capture: after each camera review the user can add the page
+  /// and scan the next one, or retake the photo. The loop ends when they
+  /// choose Add page, leave the review, cancel the system camera, or the
+  /// document is full. Accepted pages are kept in every case.
+  ///
+  /// If Android destroys the activity while the camera is open mid-loop, the
+  /// pending photo is restored by [_recoverLostImages] as a single review; the
+  /// loop itself is not resumed.
   Future<void> _captureImage() async {
     if (_isRestoringDraft || _isDocumentInteractionLocked) {
       return;
@@ -622,21 +641,42 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _CameraRecovery? recovery;
     setState(() => _isPickingImages = true);
     try {
-      await _imageProcessingQueue.idle;
-      if (!mounted || documentGeneration != _documentGeneration) return;
-      final XFile? photo = await _picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: maxPickerEdge,
-        maxHeight: maxPickerEdge,
-      );
-      if (photo == null) return;
-      // Camera capture writes a fresh file that's genuinely ours to delete.
-      await _addCapturedPhoto(
-        photo,
-        source: PageReviewSource.camera,
-        deleteAfterRead: true,
-        documentGeneration: documentGeneration,
-      );
+      for (var isFirstCapture = true; ; isFirstCapture = false) {
+        if (!isFirstCapture) {
+          if (!mounted ||
+              _isClearingDraft ||
+              documentGeneration != _documentGeneration) {
+            return;
+          }
+          // Admission is re-checked before every relaunch: pages added in
+          // this loop may have filled the document.
+          if (!_canStartImagePick) {
+            _showDocumentLimit();
+            return;
+          }
+        }
+        await _imageProcessingQueue.idle;
+        if (!mounted || documentGeneration != _documentGeneration) return;
+        final XFile? photo = await _picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: maxPickerEdge,
+          maxHeight: maxPickerEdge,
+        );
+        if (photo == null) return;
+        // Camera capture writes a fresh file that's genuinely ours to delete.
+        final result = await _addCapturedPhoto(
+          photo,
+          source: PageReviewSource.camera,
+          deleteAfterRead: true,
+          documentGeneration: documentGeneration,
+        );
+        // Every other outcome has already been reported where it happened
+        // (limits included), so the loop just ends.
+        if (result != _PhotoIntakeResult.addedScanNext &&
+            result != _PhotoIntakeResult.retake) {
+          return;
+        }
+      }
     } catch (error) {
       if (!mounted) return;
       if (_isDefinitiveCameraUnavailable(error)) {
@@ -723,6 +763,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     int? batchPosition,
     int? batchCount,
     VoidCallback? onStopImport,
+    VoidCallback? onScanNext,
+    VoidCallback? onRetake,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
@@ -731,6 +773,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       batchPosition: batchPosition,
       batchCount: batchCount,
       onStopImport: onStopImport,
+      onScanNext: onScanNext,
+      onRetake: onRetake,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
       initialFilter: page?.filter ?? _lastNewPageFilter,
@@ -844,6 +888,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
 
     var stopRequested = false;
+    var scanNextRequested = false;
+    var retakeRequested = false;
+    // Only camera capture loops back into the picker.
+    final isCamera = source == PageReviewSource.camera;
     final result = await Navigator.of(context).push<ScannedPage>(
       MaterialPageRoute(
         builder: (_) => _buildEditor(
@@ -853,10 +901,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           batchPosition: batchPosition,
           batchCount: batchCount,
           onStopImport: () => stopRequested = true,
+          onScanNext: isCamera ? () => scanNextRequested = true : null,
+          onRetake: isCamera ? () => retakeRequested = true : null,
         ),
       ),
     );
     if (stopRequested) return _PhotoIntakeResult.stopped;
+    if (retakeRequested && result == null) return _PhotoIntakeResult.retake;
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
@@ -867,7 +918,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.capacityReached;
     }
     _lastNewPageFilter = result.filter;
-    return _PhotoIntakeResult.added;
+    return scanNextRequested
+        ? _PhotoIntakeResult.addedScanNext
+        : _PhotoIntakeResult.added;
   }
 
   Future<void> _openBarcodeScanner() async {

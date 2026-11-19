@@ -174,7 +174,7 @@ void main() {
   );
 
   testWidgets(
-    'camera review says Cancel, cleans its temp file, and does not reopen capture',
+    'camera review offers Retake, cleans its temp file, and Back does not reopen capture',
     (tester) async {
       final file = photo('capture');
       picker.cameraPhoto = XFile(file.path);
@@ -186,10 +186,11 @@ void main() {
       );
       expect(editor.source, PageReviewSource.camera);
       expect(editor.isBatchImport, isFalse);
-      expect(find.text('Retake'), findsNothing);
+      expect(find.text('Retake'), findsOneWidget);
+      expect(find.text('Cancel'), findsNothing);
       expect(find.text('Skip image'), findsNothing);
       expect(file.existsSync(), isFalse);
-      await tester.tap(find.text('Cancel'));
+      await tester.pageBack();
       await tester.pumpAndSettle();
       expect(find.byType(Card), findsNothing);
       expect(operations.exports, 0);
@@ -568,7 +569,8 @@ void main() {
 
       await capture(tester, 'second');
       expect(editorFilter(tester), PageFilter.blackAndWhite);
-      await tester.tap(find.text('Cancel'));
+      // Camera reviews offer Retake; Back leaves without adding the page.
+      await tester.pageBack();
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('Clear all'));

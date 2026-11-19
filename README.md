@@ -31,7 +31,11 @@ No account, no cloud processing, no tracking.
 3. **Preview and adjust.** Choose **Preview page**, then tap the **Filters** icon
    to open filter choices, rotate, or adjust brightness and contrast. **Reset adjustments** restores
    neutral brightness/contrast without changing your crop, filter, or rotation.
-4. **Build your document.** Choose **Add page**, then scan more pages. Tap a
+4. **Build your document.** Choose **Add page**, then scan more pages. After a
+   camera capture, **Add & scan next** adds the page and reopens the camera
+   right away; **Add page** (or canceling the camera) ends the series with every
+   accepted page kept. On the crop step, **Retake** discards a bad shot and
+   reopens the camera. Tap a
    page to zoom in and choose Edit to change its appearance. Use the editor’s
    back arrow to revisit the crop; back again leaves the editor without saving.
    Save an edit with **Save changes**.
