@@ -237,6 +237,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   // overwrite a choice made while it was still reading.
   bool _preferencesChanged = false;
   final _fabLocation = _ExportBarFabLocation();
+  final _gridScroll = ScrollController();
+  // The page grid's latest layout, used to scroll a page into view.
+  _PageGridGeometry? _gridGeometry;
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
   _ExportAction _exportAction = _ExportAction.share;
@@ -289,6 +292,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   @override
   void dispose() {
+    _gridScroll.dispose();
     _sharedImageRetry?.cancel();
     widget.sharedImageInbox?.setListener(null);
     super.dispose();
@@ -708,6 +712,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
     setState(() => _pages.add(page));
     _queueDraftSave();
+    _revealPage(_pages.length - 1);
     return true;
   }
 
@@ -1600,6 +1605,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               _undoPage = null;
             });
             _queueDraftSave();
+            _revealPage(restoredIndex);
           },
         ),
       ),
@@ -1649,6 +1655,77 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     ],
   );
 
+  /// Scrolls the grid just enough to show the page at [index] whole and clear
+  /// of the camera button. A page already in view does not move. While a
+  /// review route still covers the grid, this waits until it has closed, so
+  /// the user sees where the page went; reduced motion jumps instead.
+  void _revealPage(int index) {
+    final covering = ModalRoute.of(context)?.secondaryAnimation;
+    if (covering != null && !covering.isDismissed) {
+      void onStatus(AnimationStatus status) {
+        if (!status.isDismissed) return;
+        covering.removeStatusListener(onStatus);
+        if (mounted) _revealPage(index);
+      }
+
+      covering.addStatusListener(onStatus);
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final geometry = _gridGeometry;
+      if (!mounted ||
+          geometry == null ||
+          !_gridScroll.hasClients ||
+          index >= _pages.length) {
+        return;
+      }
+      final position = _gridScroll.position;
+      final padding = geometry.padding;
+      final row = index ~/ geometry.columns;
+      final top =
+          padding.top + row * (geometry.cardSize.height + _pageGridSpacing);
+      final bottom = top + geometry.cardSize.height;
+      final double target;
+      // A card taller than the viewport is shown from its top and never
+      // scrolled past it, so it cannot jump between top and bottom.
+      final fits =
+          padding.top + geometry.cardSize.height + padding.bottom <=
+          position.viewportDimension;
+      if (top - padding.top < position.pixels ||
+          (!fits && top - padding.top > position.pixels)) {
+        target = top - padding.top;
+      } else if (bottom + padding.bottom >
+          position.pixels + position.viewportDimension) {
+        target = bottom + padding.bottom - position.viewportDimension;
+      } else {
+        return;
+      }
+      // A lazily built grid only estimates its extent until its last row is
+      // laid out, so the exact end comes from the grid's own geometry.
+      final rows = (_pages.length / geometry.columns).ceil();
+      final contentHeight =
+          padding.top +
+          rows * geometry.cardSize.height +
+          math.max(0, rows - 1) * _pageGridSpacing +
+          padding.bottom;
+      final offset = target
+          .clamp(0.0, math.max(0.0, contentHeight - position.viewportDimension))
+          .toDouble();
+      if ((offset - position.pixels).abs() < 0.5) return;
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _gridScroll.jumpTo(offset);
+      } else {
+        unawaited(
+          _gridScroll.animateTo(
+            offset,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          ),
+        );
+      }
+    });
+  }
+
   void _reorderPage(int fromIndex, int toIndex) {
     if (_isDocumentInteractionLocked ||
         fromIndex < 0 ||
@@ -1663,6 +1740,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pages.insert(toIndex, page);
     });
     _queueDraftSave();
+    _revealPage(toIndex);
     SemanticsService.sendAnnouncement(
       View.of(context),
       'Page moved to position ${toIndex + 1} of ${_pages.length}.',
@@ -2551,9 +2629,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   Widget _buildPageGrid() => LayoutBuilder(
     builder: (context, constraints) {
-      final geometry = _pageGridGeometry(constraints.biggest);
+      final geometry = _gridGeometry = _pageGridGeometry(constraints.biggest);
       return GridView.builder(
         key: const Key('page_grid'),
+        controller: _gridScroll,
         padding: geometry.padding,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: geometry.columns,
