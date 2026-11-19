@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show compute;
@@ -12,7 +13,12 @@ class ImagePdfCancelledException implements Exception {
   const ImagePdfCancelledException();
 }
 
-/// Assembles an image-only PDF, keeping only compressed page images.
+/// Assembles an image-only PDF at [outputPath], keeping only compressed page
+/// images.
+///
+/// The worker that assembles the document also writes it, so the finished
+/// PDF never crosses into the calling isolate's heap. Whenever this throws,
+/// including on cancellation, no file is left at [outputPath].
 ///
 /// [onProgress] reports finished pages; [isCancelled] is polled between them,
 /// before assembly and once more after it, so a cancelled export stops without
@@ -20,8 +26,32 @@ class ImagePdfCancelledException implements Exception {
 /// after the caller gave up. Page conversion and assembly run through
 /// [compute], which uses a worker isolate on every platform that has one and
 /// falls back to the calling isolate on web.
-Future<Uint8List> createImageOnlyPdf(
-  List<Uint8List> pages, {
+Future<void> writeImageOnlyPdf(
+  List<Uint8List> pages,
+  String outputPath, {
+  void Function(int completed, int total)? onProgress,
+  bool Function()? isCancelled,
+}) async {
+  try {
+    await _writeImageOnlyPdf(
+      pages,
+      outputPath,
+      onProgress: onProgress,
+      isCancelled: isCancelled,
+    );
+  } catch (_) {
+    try {
+      await File(outputPath).delete();
+    } on FileSystemException {
+      // Nothing was written, or the caller's directory cleanup removes it.
+    }
+    rethrow;
+  }
+}
+
+Future<void> _writeImageOnlyPdf(
+  List<Uint8List> pages,
+  String outputPath, {
   void Function(int completed, int total)? onProgress,
   bool Function()? isCancelled,
 }) async {
@@ -44,12 +74,11 @@ Future<Uint8List> createImageOnlyPdf(
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
   // Assembly is the one step that holds every page at once and deflates the
   // document around them, so it does not belong on the UI isolate either.
-  final document = await compute(_assembleDocument, jpegPages);
+  await compute(_assembleDocument, (pages: jpegPages, path: outputPath));
   // Assembly cannot be interrupted once handed to the worker, so a cancel
   // arriving while it runs is only observable here. Report it rather than
   // returning a document the caller would go on to share.
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
-  return document;
 }
 
 // Re-encodes one page as an opaque JPEG. Top-level so compute can run it.
@@ -69,9 +98,11 @@ Uint8List _encodeJpegPage(Uint8List bytes) {
   return im.encodeJpg(opaque, quality: 95);
 }
 
-Future<Uint8List> _assembleDocument(List<Uint8List> jpegPages) async {
+Future<void> _assembleDocument(
+  ({List<Uint8List> pages, String path}) job,
+) async {
   final pdf = pw.Document();
-  for (final bytes in jpegPages) {
+  for (final bytes in job.pages) {
     final image = pw.MemoryImage(bytes);
     pdf.addPage(
       pw.Page(
@@ -84,5 +115,5 @@ Future<Uint8List> _assembleDocument(List<Uint8List> jpegPages) async {
       ),
     );
   }
-  return pdf.save();
+  await File(job.path).writeAsBytes(await pdf.save(), flush: true);
 }

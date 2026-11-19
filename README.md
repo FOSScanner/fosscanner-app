@@ -167,8 +167,10 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 ### Sharing and external links
 
 Export opens the OS share sheet; it does not prove that another app saved or
-delivered the PDF. Sharing may leave a PDF copy in an app/OS cache, whose lifetime
-is platform-managed. Receiving apps control their own copies and may upload them.
+delivered the PDF. FOSScanner writes the PDF to its private cache only for the
+hand-off and deletes it when the share sheet returns; a copy left by an
+interrupted export is removed at the next launch. The share system may keep
+its own copy in an app/OS cache, whose lifetime is platform-managed. Receiving apps control their own copies and may upload them.
 
 FOSScanner does not make its own network requests. Opening a scanned HTTP/HTTPS
 link or the source-code link hands it to an external app, which may use the

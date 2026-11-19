@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -20,7 +21,48 @@ List<Uint8List> embeddedJpegs(Uint8List pdf) {
   return images;
 }
 
+late Directory _outputs;
+
+String _outputPath() => '${_outputs.path}/document.pdf';
+
+/// Writes the PDF to a file and reads it back for inspection.
+Future<Uint8List> createImageOnlyPdf(
+  List<Uint8List> pages, {
+  void Function(int completed, int total)? onProgress,
+  bool Function()? isCancelled,
+}) async {
+  await writeImageOnlyPdf(
+    pages,
+    _outputPath(),
+    onProgress: onProgress,
+    isCancelled: isCancelled,
+  );
+  final file = File(_outputPath());
+  final bytes = await file.readAsBytes();
+  await file.delete();
+  return bytes;
+}
+
 void main() {
+  setUp(() async {
+    _outputs = await Directory.systemTemp.createTemp('image_pdf_test_');
+  });
+
+  tearDown(() async {
+    // Every test leaves the directory empty: success paths delete what they
+    // read back, and failures must not leave a partial PDF behind.
+    expect(_outputs.listSync(), isEmpty);
+    await _outputs.delete();
+  });
+
+  test('writes the finished document to the requested path', () async {
+    final page = im.encodeJpg(im.Image(width: 20, height: 10));
+    await writeImageOnlyPdf([page], _outputPath());
+    final written = File(_outputPath());
+    expect(latin1.decode(await written.readAsBytes()), startsWith('%PDF-'));
+    await written.delete();
+  });
+
   test('retains original JPEG bytes without another lossy encoding', () async {
     final source = im.Image(width: 200, height: 100, numChannels: 3);
     im.fill(source, color: im.ColorRgb8(30, 100, 180));

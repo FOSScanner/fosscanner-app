@@ -54,9 +54,12 @@ void _checkCancellation() {
 
 // Renders a multi-page searchable PDF (each page's image with an invisible,
 // selectable OCR text layer, in the given order) using libtesseract's own
-// native PDF renderer. Returns the finished PDF's bytes.
-Future<Uint8List> createSearchablePdf(
+// native PDF renderer, and moves the finished file to [outputPath]. The PDF is
+// never read into the Dart heap. Whenever this throws, no file is left at
+// [outputPath].
+Future<void> createSearchablePdf(
   List<Uint8List> pageImages, {
+  required String outputPath,
   void Function(int completed, int total)? onProgress,
 }) async {
   if (!isSupported) {
@@ -82,8 +85,9 @@ Future<Uint8List> createSearchablePdf(
   _progressCallback = onProgress;
   _channel.setMethodCallHandler(_handleNativeCall);
   Directory? jobDirectory;
+  final output = File(outputPath);
+  var moved = false;
   try {
-    late Uint8List pdfBytes;
     try {
       await _ensureTessdata();
       _checkCancellation();
@@ -121,10 +125,8 @@ Future<Uint8List> createSearchablePdf(
       if (length == 0 || length > maxRetainedDocumentBytes) {
         throw StateError('Searchable PDF exceeds the supported output size');
       }
-      pdfBytes = await readBoundedBytes(
-        pdfFile.openRead(),
-        maxBytes: maxRetainedDocumentBytes,
-      );
+      await _move(pdfFile, output);
+      moved = true;
     } finally {
       // Includes partially written inputs and PDFs even when native rendering
       // fails before it returns a path. Native resources are already closed.
@@ -135,8 +137,8 @@ Future<Uint8List> createSearchablePdf(
       }
     }
     _checkCancellation();
-    return pdfBytes;
   } catch (_) {
+    if (moved) await _deleteQuietly(output);
     // Cancellation wins over a late preparation/rendering failure, so the UI
     // does not offer a fallback for an export the user already cancelled.
     _checkCancellation();
@@ -146,5 +148,28 @@ Future<Uint8List> createSearchablePdf(
     _cancellationRequested = false;
     _progressCallback = null;
     _channel.setMethodCallHandler(null);
+  }
+}
+
+// Both paths are in the app cache, so this is normally a rename. The copy only
+// covers a platform that splits the cache across file systems.
+Future<void> _move(File source, File destination) async {
+  try {
+    await source.rename(destination.path);
+  } on FileSystemException {
+    try {
+      await source.copy(destination.path);
+    } catch (_) {
+      await _deleteQuietly(destination);
+      rethrow;
+    }
+  }
+}
+
+Future<void> _deleteQuietly(File file) async {
+  try {
+    await file.delete();
+  } on FileSystemException {
+    // Already gone, or left for the caller's directory cleanup.
   }
 }

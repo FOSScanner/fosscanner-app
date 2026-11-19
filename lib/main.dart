@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,11 +7,16 @@ import 'package:flutter/services.dart';
 import 'screens/scanner_home_page.dart';
 import 'services/app_preferences.dart';
 import 'services/draft_store.dart';
+import 'services/pdf_export_files.dart';
 import 'services/shared_image_inbox.dart';
 import 'widgets/draft_session_gate.dart';
 
 void main() {
   registerBundledLicenses();
+  // Remove exports a killed process could not clean up. Nothing can be
+  // exporting yet, so this cannot race a live export.
+  WidgetsFlutterBinding.ensureInitialized();
+  unawaited(sweepStalePdfExports());
   runApp(
     FOSScannerApp(
       draftStore: createDraftStore(),

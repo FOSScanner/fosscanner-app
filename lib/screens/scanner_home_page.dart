@@ -10,6 +10,7 @@ import 'package:flutter/semantics.dart'
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -20,6 +21,7 @@ import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
 import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
+import '../services/pdf_export_files.dart';
 import '../services/platform_capabilities.dart';
 import '../services/shared_image_inbox.dart';
 import '../widgets/transient_message.dart';
@@ -71,6 +73,7 @@ class ScannerHomePage extends StatefulWidget {
     this.sourceImageSizeReader = readEncodedImageSize,
     this.sharedImageInbox,
     this.preferencesStore,
+    this.temporaryDirectory = getTemporaryDirectory,
   });
 
   final List<ScannedPage> initialPages;
@@ -86,6 +89,9 @@ class ScannerHomePage extends StatefulWidget {
 
   /// Where export choices persist; defaults to memory only.
   final AppPreferencesStore? preferencesStore;
+
+  /// The cache directory exported PDFs are written to before handing off.
+  final DirectoryProvider temporaryDirectory;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -1371,10 +1377,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (mounted) setState(() => _pdfProgress = completed / total);
   }
 
-  Future<Uint8List> _createSearchablePdf(List<ScannedPage> pages) {
-    return ocr_service.createSearchablePdf([
-      for (final page in pages) page.processedBytes,
-    ], onProgress: _updatePdfProgress);
+  Future<void> _createSearchablePdf(List<ScannedPage> pages, File output) {
+    return ocr_service.createSearchablePdf(
+      [for (final page in pages) page.processedBytes],
+      outputPath: output.path,
+      onProgress: _updatePdfProgress,
+    );
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -1402,17 +1410,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return fallback ?? false;
   }
 
-  Future<ShareResult> _sharePdfBytes(
-    Uint8List pdfBytes, {
+  // Shares by path: the platform reads the file itself, so the PDF never has
+  // to be loaded into this isolate. Share targets see the file's own name.
+  Future<ShareResult> _sharePdfFile(
+    File pdf, {
     required String fileName,
     required String message,
     required Rect? shareOrigin,
   }) {
     return _sharePlus.share(
       ShareParams(
-        files: [
-          XFile.fromData(pdfBytes, name: fileName, mimeType: 'application/pdf'),
-        ],
+        files: [XFile(pdf.path, name: fileName, mimeType: 'application/pdf')],
         fileNameOverrides: [fileName],
         text: message,
         sharePositionOrigin: shareOrigin,
@@ -1421,9 +1429,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  Future<Uint8List> _createImageOnlyPdf(List<ScannedPage> pages) {
-    return image_pdf.createImageOnlyPdf(
+  Future<void> _createImageOnlyPdf(List<ScannedPage> pages, File output) {
+    return image_pdf.writeImageOnlyPdf(
       [for (final page in pages) page.processedBytes],
+      output.path,
       onProgress: _updatePdfProgress,
       isCancelled: () => _isCancellingPdf,
     );
@@ -1450,13 +1459,20 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  Future<({Uint8List bytes, bool searchable})?> _createPdf(
+  /// Writes the PDF into [directory] and returns it, or null when the user
+  /// declined the image-only fallback.
+  Future<({File file, String name, bool searchable})?> _createPdf(
     List<ScannedPage> pages, {
     required bool useOcr,
+    required PdfExportDirectory directory,
   }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
     if (useOcr) {
       try {
-        return (bytes: await _createSearchablePdf(pages), searchable: true);
+        final name = 'FOSScanner_searchable_$timestamp.pdf';
+        final file = directory.fileNamed(name);
+        await _createSearchablePdf(pages, file);
+        return (file: file, name: name, searchable: true);
       } catch (error) {
         if (ocr_service.isCancellation(error)) rethrow;
         if (!mounted) return null;
@@ -1466,13 +1482,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
 
     if (!mounted) return null;
-    setState(() {
-      // A confirmed fallback starts fresh after an OCR failure.
-      _isCancellingPdf = false;
-      _pdfExporter = _PdfExporter.imageOnly;
-      _pdfProgress = 0;
-    });
-    return (bytes: await _createImageOnlyPdf(pages), searchable: false);
+    if (useOcr) {
+      setState(() {
+        // A confirmed fallback starts fresh after an OCR failure.
+        _isCancellingPdf = false;
+        _pdfExporter = _PdfExporter.imageOnly;
+        _pdfProgress = 0;
+      });
+    }
+    final name = 'FOSScanner_$timestamp.pdf';
+    final file = directory.fileNamed(name);
+    await _createImageOnlyPdf(pages, file);
+    return (file: file, name: name, searchable: false);
   }
 
   Future<void> _generateAndSharePdf() async {
@@ -1496,6 +1517,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pdfProgress = 0;
     });
 
+    PdfExportDirectory? exportDirectory;
     try {
       // Popping an editor does not interrupt its active worker. Use the same
       // queue so PDF/OCR processing cannot overlap that native allocation.
@@ -1504,17 +1526,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         if (_isCancellingPdf) {
           throw const image_pdf.ImagePdfCancelledException();
         }
-        return _createPdf(pages, useOcr: useOcr);
+        exportDirectory = await createPdfExportDirectory(
+          temporaryDirectory: widget.temporaryDirectory,
+        );
+        return _createPdf(pages, useOcr: useOcr, directory: exportDirectory!);
       });
       if (pdf == null || !mounted || _isCancellingPdf) return;
       setState(() {
         _pdfProgress = null;
         _isSharingPdf = true;
       });
-      final prefix = pdf.searchable ? 'FOSScanner_searchable' : 'FOSScanner';
-      await _sharePdfBytes(
-        pdf.bytes,
-        fileName: '${prefix}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      await _sharePdfFile(
+        pdf.file,
+        fileName: pdf.name,
         message: pdf.searchable
             ? 'Searchable document scanned with FOSScanner'
             : 'Document scanned with FOSScanner',
@@ -1531,6 +1555,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         if (mounted) _showMessage('Could not generate or share the PDF.');
       }
     } finally {
+      // The share call returns once the platform has taken its own copy (or
+      // the share failed), so the exported file is no longer needed. Files
+      // orphaned by a killed process are swept at the next launch.
+      exportDirectory?.delete();
       if (mounted) {
         setState(() {
           _isGeneratingPdf = false;

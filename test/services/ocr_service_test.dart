@@ -18,10 +18,26 @@ void main() {
   late Future<Object?> Function(MethodCall) render;
   final page = Uint8List.fromList([1, 2, 3]);
   final pdf = Uint8List.fromList('%PDF-1.5\nfixture\n%%EOF'.codeUnits);
+  late Directory outputs;
+  String outputPath() => '${outputs.path}/export.pdf';
+  Future<void> create(List<Uint8List> images) =>
+      ocr.createSearchablePdf(images, outputPath: outputPath());
+  Future<Uint8List> readOutput() async {
+    final output = File(outputPath());
+    final bytes = await output.readAsBytes();
+    await output.delete();
+    return bytes;
+  }
+
+  Future<Uint8List> exportPdf(List<Uint8List> images) async {
+    await create(images);
+    return readOutput();
+  }
 
   setUp(() async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     temporary = await Directory.systemTemp.createTemp('ocr_test_');
+    outputs = await Directory.systemTemp.createTemp('ocr_output_');
     calls = [];
     messenger.setMockMethodCallHandler(paths, (_) async => temporary.path);
     render = (call) async {
@@ -43,6 +59,10 @@ void main() {
     messenger.setMockMethodCallHandler(paths, null);
     debugDefaultTargetPlatformOverride = null;
     await temporary.delete(recursive: true);
+    // Failed and cancelled exports never leave a file at the output path;
+    // successful ones are read back and removed by the test.
+    expect(outputs.listSync(), isEmpty);
+    await outputs.delete();
   });
 
   test(
@@ -59,7 +79,7 @@ void main() {
         await output.writeAsBytes(pdf);
         return output.path;
       };
-      expect(await ocr.createSearchablePdf([page, second]), pdf);
+      expect(await exportPdf([page, second]), pdf);
       expect(calls.map((call) => call.method), [
         'ensureTessdata',
         'createSearchablePdf',
@@ -77,17 +97,14 @@ void main() {
         ).writeAsBytes(pdf);
         throw PlatformException(code: 'ocr_failed');
       };
-      await expectLater(
-        ocr.createSearchablePdf([page]),
-        throwsA(isA<PlatformException>()),
-      );
+      await expectLater(create([page]), throwsA(isA<PlatformException>()));
       expect(await temporary.list().toList(), isEmpty);
       render = (call) async {
         final output = File('${(call.arguments as Map)['outputPath']}.pdf');
         await output.writeAsBytes(pdf);
         return output.path;
       };
-      expect(await ocr.createSearchablePdf([page]), pdf);
+      expect(await exportPdf([page]), pdf);
     },
   );
 
@@ -97,7 +114,7 @@ void main() {
       final outside = File('${temporary.path}/original.pdf');
       await outside.writeAsBytes(pdf);
       render = (_) async => outside.path;
-      await expectLater(ocr.createSearchablePdf([page]), throwsStateError);
+      await expectLater(create([page]), throwsStateError);
       expect(await outside.readAsBytes(), pdf);
       expect(await temporary.list().length, 1);
     },
@@ -107,13 +124,10 @@ void main() {
     'cleans up when the renderer returns no path or a missing PDF',
     () async {
       render = (_) async => null;
-      await expectLater(ocr.createSearchablePdf([page]), throwsStateError);
+      await expectLater(create([page]), throwsStateError);
       expect(await temporary.list().toList(), isEmpty);
       render = (call) async => '${(call.arguments as Map)['outputPath']}.pdf';
-      await expectLater(
-        ocr.createSearchablePdf([page]),
-        throwsA(isA<FileSystemException>()),
-      );
+      await expectLater(create([page]), throwsA(isA<FileSystemException>()));
       expect(await temporary.list().toList(), isEmpty);
     },
   );
@@ -129,7 +143,7 @@ void main() {
       }
       return output.path;
     };
-    await expectLater(ocr.createSearchablePdf([page]), throwsStateError);
+    await expectLater(create([page]), throwsStateError);
     expect(await temporary.list().toList(), isEmpty);
   });
 
@@ -147,15 +161,16 @@ void main() {
         await output.writeAsBytes(pdf);
         return output.path;
       };
-      final first = ocr.createSearchablePdf(images);
+      final first = create(images);
       images.clear();
       await started.future;
       try {
-        await expectLater(ocr.createSearchablePdf([page]), throwsStateError);
+        await expectLater(create([page]), throwsStateError);
       } finally {
         finish.complete();
       }
-      expect(await first, pdf);
+      await first;
+      expect(await readOutput(), pdf);
     },
   );
 
@@ -170,7 +185,7 @@ void main() {
       return output.path;
     };
 
-    final first = ocr.createSearchablePdf([page]);
+    final first = create([page]);
     final cancelled = expectLater(
       first,
       throwsA(predicate(ocr.isCancellation)),
@@ -202,7 +217,7 @@ void main() {
           if (call.method == 'cancelSearchablePdf') return null;
           return render(call);
         });
-        final export = ocr.createSearchablePdf([page]);
+        final export = create([page]);
         final cancelled = expectLater(
           export,
           throwsA(predicate(ocr.isCancellation)),
@@ -221,7 +236,7 @@ void main() {
           if (call.method == 'ensureTessdata') return null;
           return render(call);
         });
-        expect(await ocr.createSearchablePdf([page]), pdf);
+        expect(await exportPdf([page]), pdf);
       },
     );
   }
@@ -234,7 +249,7 @@ void main() {
       await finish.future;
       return temporary.path;
     });
-    final export = ocr.createSearchablePdf([page]);
+    final export = create([page]);
     final cancelled = expectLater(
       export,
       throwsA(predicate(ocr.isCancellation)),
@@ -255,10 +270,7 @@ void main() {
       throw PlatformException(code: 'invalid_model');
     });
     for (var attempt = 0; attempt < 2; attempt++) {
-      await expectLater(
-        ocr.createSearchablePdf([page]),
-        throwsA(isA<PlatformException>()),
-      );
+      await expectLater(create([page]), throwsA(isA<PlatformException>()));
     }
     expect(await temporary.list().toList(), isEmpty);
   });
@@ -267,29 +279,20 @@ void main() {
     'rejects unsupported platforms and invalid inputs before the channel',
     () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      await expectLater(
-        ocr.createSearchablePdf([page]),
-        throwsUnsupportedError,
-      );
+      await expectLater(create([page]), throwsUnsupportedError);
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      await expectLater(ocr.createSearchablePdf([]), throwsArgumentError);
+      await expectLater(create([]), throwsArgumentError);
+      await expectLater(create([Uint8List(0)]), throwsArgumentError);
       await expectLater(
-        ocr.createSearchablePdf([Uint8List(0)]),
+        create(List.filled(maxDocumentPages + 1, page)),
         throwsArgumentError,
       );
       await expectLater(
-        ocr.createSearchablePdf(List.filled(maxDocumentPages + 1, page)),
-        throwsArgumentError,
-      );
-      await expectLater(
-        ocr.createSearchablePdf([Uint8List(maxEncodedImageBytes + 1)]),
+        create([Uint8List(maxEncodedImageBytes + 1)]),
         throwsArgumentError,
       );
       final large = Uint8List(maxEncodedImageBytes);
-      await expectLater(
-        ocr.createSearchablePdf(List.filled(9, large)),
-        throwsArgumentError,
-      );
+      await expectLater(create(List.filled(9, large)), throwsArgumentError);
       expect(calls, isEmpty);
     },
   );
