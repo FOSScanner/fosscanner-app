@@ -45,12 +45,19 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<CheckedPopupMenuItem<String>> openMenuItem(WidgetTester tester) async {
+  /// Opens the menu and reports whether Block screenshots is checked.
+  Future<({bool checked})> openMenuItem(WidgetTester tester) async {
     await tester.tap(find.byTooltip('More options'));
     await tester.pumpAndSettle();
-    return tester.widget<CheckedPopupMenuItem<String>>(
-      find.byType(CheckedPopupMenuItem<String>),
+    final semantics = tester.widget<Semantics>(
+      find.ancestor(
+        of: find.text('Block screenshots'),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Semantics && widget.properties.checked != null,
+        ),
+      ),
     );
+    return (checked: semantics.properties.checked!);
   }
 
   testWidgets(
@@ -137,8 +144,8 @@ void main() {
       supported: true,
       blockScreenshots: true,
     );
-    final item = items.single as CheckedPopupMenuItem<String>;
+    final item = items.single as PopupMenuItem<String>;
     expect(item.value, blockScreenshotsMenuValue);
-    expect(item.checked, isTrue);
+    expect((item.child! as Semantics).properties.checked, isTrue);
   });
 }

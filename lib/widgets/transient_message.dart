@@ -14,10 +14,14 @@ typedef SnackBarController =
 /// while it is shown, while a floating one sits above it (or above the bottom
 /// bar), so nothing the user may be about to tap moves.
 ///
-/// [onShown] receives the controller once it is shown.
+/// [margin] lifts the message above controls the screen draws at its bottom
+/// edge, and [overCamera] gives it the dark style of the camera controls it
+/// sits next to. [onShown] receives the controller once it is shown.
 void showTransientMessage(
   BuildContext context,
   String message, {
+  EdgeInsetsGeometry? margin,
+  bool overCamera = false,
   ValueSetter<SnackBarController>? onShown,
 }) {
   if (!context.mounted) return;
@@ -29,7 +33,15 @@ void showTransientMessage(
     if (messenger == null) return;
     messenger.clearSnackBars();
     final controller = messenger.showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Text(
+          message,
+          style: overCamera ? const TextStyle(color: Colors.white) : null,
+        ),
+        behavior: SnackBarBehavior.floating,
+        margin: margin,
+        backgroundColor: overCamera ? Colors.black : null,
+      ),
     );
     onShown?.call(controller);
   }

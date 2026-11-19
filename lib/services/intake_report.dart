@@ -57,8 +57,9 @@ String intakeRejectionMessage(IntakeRejection reason) => switch (reason) {
   IntakeRejection.needsTooMuchMemory =>
     'Not enough memory for this image. Remove pages or choose a smaller '
         'image.',
-  IntakeRejection.unavailable =>
-    'Could not open the shared file. Share images under $_maxMegabytes MB.',
+  // The platform does not say why (not an image, no access, or over the
+  // size limit), so the message names no cause.
+  IntakeRejection.unavailable => 'Could not open the shared file.',
   IntakeRejection.notRendered => 'This PDF page is too large to add.',
 };
 

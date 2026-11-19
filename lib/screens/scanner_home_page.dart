@@ -2480,10 +2480,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           runSpacing: 8,
           children: [
             for (final value in values)
-              // No checkmark: it would widen the selected chip and could
-              // re-wrap the row, moving chips and the sheet edge.
+              // Every chip reserves the check's slot, so the selected one
+              // is marked by more than color without changing width: chips
+              // never re-wrap and the sheet edge never moves.
               ChoiceChip(
                 showCheckmark: false,
+                avatar: Icon(
+                  Icons.check,
+                  color: value == selected ? null : Colors.transparent,
+                ),
                 label: Text(label(value)),
                 selected: value == selected,
                 onSelected: (_) => onSelected(value),
@@ -2620,12 +2625,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       ),
                     ],
                     const SizedBox(width: 8),
-                    Semantics(
-                      value: _exportOptionsSummary,
-                      child: IconButton.filledTonal(
-                        onPressed: _canExport ? _showExportOptions : null,
-                        tooltip: 'PDF export options',
-                        icon: const Icon(Icons.tune_outlined),
+                    // One focus stop: the button with its current options.
+                    MergeSemantics(
+                      child: Semantics(
+                        value: _exportOptionsSummary,
+                        child: IconButton.filledTonal(
+                          onPressed: _canExport ? _showExportOptions : null,
+                          tooltip: 'PDF export options',
+                          icon: const Icon(Icons.tune_outlined),
+                        ),
                       ),
                     ),
                   ],
@@ -3092,72 +3100,94 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _isDropHandledByGrid = false;
   }
 
+  void _onPageCardTap(int index) {
+    if (!_isTapGuarded) unawaited(_openPage(index));
+  }
+
   Widget _buildPageCard(BuildContext context, int index, Size cardSize) {
     final page = _pages[index];
     final card = Card(
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _isDocumentInteractionLocked
-            ? null
-            : () {
-                if (!_isTapGuarded) unawaited(_openPage(index));
-              },
-        child: Column(
-          children: [
-            Expanded(
-              child: Padding(
-                key: ValueKey('page_thumbnail_$index'),
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                child: Image(
-                  image: ResizeImage(
-                    MemoryImage(page.processedBytes),
-                    width: _thumbnailCacheWidth,
-                    height: _thumbnailCacheWidth,
-                    policy: ResizeImagePolicy.fit,
-                  ),
-                  fit: BoxFit.contain,
-                ),
+      // Screen readers get the tap from the labelled page node below. The
+      // card's own node, the ink well's focus node and the thumbnail's image
+      // node would each be an unlabelled stop.
+      semanticContainer: false,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Behind the content, so the footer buttons keep their own taps;
+          // the thumbnail and label let taps through to it.
+          Positioned.fill(
+            child: ExcludeSemantics(
+              child: InkWell(
+                onTap: _isDocumentInteractionLocked
+                    ? null
+                    : () => _onPageCardTap(index),
               ),
             ),
-            // Every footer has the same controls and a one-line label, so
-            // thumbnails keep one size for any page count or page number.
-            Padding(
-              padding: const EdgeInsets.only(left: 12, right: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ExcludeSemantics(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: AlignmentDirectional.centerStart,
-                        child: Text(
-                          'Page ${index + 1}',
-                          maxLines: 1,
-                          style: Theme.of(context).textTheme.labelLarge,
+          ),
+          Column(
+            children: [
+              Expanded(
+                child: IgnorePointer(
+                  child: Padding(
+                    key: ValueKey('page_thumbnail_$index'),
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                    child: Image(
+                      image: ResizeImage(
+                        MemoryImage(page.processedBytes),
+                        width: _thumbnailCacheWidth,
+                        height: _thumbnailCacheWidth,
+                        policy: ResizeImagePolicy.fit,
+                      ),
+                      fit: BoxFit.contain,
+                      excludeFromSemantics: true,
+                    ),
+                  ),
+                ),
+              ),
+              // Every footer has the same controls and a one-line label, so
+              // thumbnails keep one size for any page count or page number.
+              Padding(
+                padding: const EdgeInsets.only(left: 12, right: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: IgnorePointer(
+                        child: ExcludeSemantics(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Text(
+                              'Page ${index + 1}',
+                              maxLines: 1,
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  // A popup menu opens on tap before any callback could
-                  // check the guard, so the guard absorbs the tap instead.
-                  AbsorbPointer(
-                    absorbing: _isTapGuarded,
-                    child: _pageReorderMenu(index, page),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Delete page ${index + 1}',
-                    onPressed: _isDocumentInteractionLocked
-                        ? null
-                        : () {
-                            if (!_isTapGuarded) _removePage(index);
-                          },
-                  ),
-                ],
+                    // A popup menu opens on tap before any callback could
+                    // check the guard, so the guard absorbs the tap instead.
+                    AbsorbPointer(
+                      absorbing: _isTapGuarded,
+                      child: _pageReorderMenu(index, page),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Delete page ${index + 1}',
+                      onPressed: _isDocumentInteractionLocked
+                          ? null
+                          : () {
+                              if (!_isTapGuarded) _removePage(index);
+                            },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
 
@@ -3174,6 +3204,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return Semantics(
       key: ValueKey('page_semantics_$index'),
       label: 'Page ${index + 1} of ${_pages.length}',
+      onTap: _isDocumentInteractionLocked ? null : () => _onPageCardTap(index),
+      onTapHint: 'Open',
       sortKey: OrdinalSortKey(index.toDouble()),
       container: true,
       customSemanticsActions: reorderActions,

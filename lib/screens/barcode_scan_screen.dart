@@ -175,6 +175,16 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
   }
 
+  /// Messages over the camera view sit above the reader's flashlight and
+  /// camera buttons (48 px plus 10 px padding on each side) and share their
+  /// dark style, whatever the app theme.
+  void _showScanViewMessage(String message) => showTransientMessage(
+    context,
+    message,
+    overCamera: true,
+    margin: const EdgeInsets.fromLTRB(15, 5, 15, 48 + 2 * 10 + 10),
+  );
+
   Future<void> _scanImage() async {
     if (_isScanningImage) return;
     setState(() => _isScanningImage = true);
@@ -183,12 +193,12 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       if (!mounted || scan == null) return;
       final text = scan.text;
       if (!scan.isValid || text == null || text.isEmpty) {
-        showTransientMessage(context, 'No code found in this image.');
+        _showScanViewMessage('No code found in this image.');
         return;
       }
       _handleScan(scan);
     } catch (_) {
-      if (mounted) showTransientMessage(context, 'Could not read this image.');
+      if (mounted) _showScanViewMessage('Could not read this image.');
     } finally {
       if (mounted) setState(() => _isScanningImage = false);
     }
