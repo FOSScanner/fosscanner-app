@@ -13,7 +13,7 @@ quality.
 | `ui-reorder-pages.png` | Visible earlier/later actions in a page's reorder menu |
 | `ui-export-options.png` | Android searchable-text export options |
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
-| `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |
+| `ui-adjust-appearance.png` | Page preview with Filters and Adjust icons, and Add page |
 | `ui-filters-panel.png` | Filter choices opened explicitly from the Filters icon |
 | `ui-intake-page-limit.png` | Discoverable intake help at the page-count limit |
 | `ui-intake-limit-guidance.png` | Page-count limit and recovery guidance |
