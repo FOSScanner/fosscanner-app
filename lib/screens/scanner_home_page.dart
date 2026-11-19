@@ -25,6 +25,10 @@ import 'corner_adjust_screen.dart';
 import 'page_preview_screen.dart';
 
 const _thumbnailCacheWidth = 512;
+
+/// Page cards never grow wider than this: phones keep two columns, while
+/// tablets and landscape windows get more columns instead of oversized cards.
+const _maxPageCardExtent = 240.0;
 const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
 class _DocumentCapacityException implements Exception {
@@ -1596,8 +1600,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         _cameraSupported ? 96 : 8,
                       ),
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: _maxPageCardExtent,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                             childAspectRatio: 0.7,
