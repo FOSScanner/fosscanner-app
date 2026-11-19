@@ -196,6 +196,9 @@ void main() {
       expect(file.existsSync(), isFalse);
       await tester.pageBack();
       await tester.pumpAndSettle();
+      expect(find.text('Discard this scan?'), findsOneWidget);
+      await tester.tap(find.text('Discard'));
+      await tester.pumpAndSettle();
       expect(find.byType(Card), findsNothing);
       expect(operations.exports, 0);
       expect(picker.cameraCalls, 1);
@@ -439,6 +442,9 @@ void main() {
 
       await tester.pageBack();
       await tester.pumpAndSettle();
+      expect(find.text('Stop importing?'), findsOneWidget);
+      await tester.tap(find.text('Stop'));
+      await tester.pumpAndSettle();
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
       expect(find.byType(Card), findsOneWidget);
@@ -571,8 +577,12 @@ void main() {
 
       await capture(tester, 'second');
       expect(editorFilter(tester), PageFilter.blackAndWhite);
-      // Camera reviews offer Retake; Back leaves without adding the page.
+      // Camera reviews offer Retake; Back asks, then leaves without adding
+      // the page.
       await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Discard this scan?'), findsOneWidget);
+      await tester.tap(find.text('Discard'));
       await tester.pumpAndSettle();
 
       await tapClearAllPages(tester);

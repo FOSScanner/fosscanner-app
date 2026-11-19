@@ -9,6 +9,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
+import 'package:fosscanner/widgets/corner_overlay.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 
@@ -237,8 +238,12 @@ void main() {
       expect(first.existsSync(), isFalse);
       expect(find.byType(Card), findsNothing);
 
-      // Back from the crop step exits without adding and without a relaunch.
+      // Back from the crop step asks, since the shot would be lost, then
+      // exits without adding and without a relaunch.
       await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Discard this scan?'), findsOneWidget);
+      await tester.tap(find.text('Discard'));
       await settleIntake(tester);
       expect(find.byType(CornerAdjustScreen), findsNothing);
       expect(picker.cameraCalls, 2);
@@ -261,10 +266,26 @@ void main() {
       await pumpHome(tester);
       await tester.tap(find.byTooltip('Scan a page'));
       final editor = await waitForEditor(tester);
+      // Crop edits and settings made before Retake must survive it.
+      const edited = [
+        Offset(20, 15),
+        Offset(95, 5),
+        Offset(95, 95),
+        Offset(5, 95),
+      ];
+      tester.widget<CornerOverlay>(find.byType(CornerOverlay)).onChanged([
+        ...edited,
+      ]);
+      await tester.pumpAndSettle();
 
       // The relaunched camera is canceled: the fake returns null.
       await tester.tap(find.text('Retake'));
-      await waitForEditor(tester, previous: editor);
+      final restored = await waitForEditor(tester, previous: editor);
+      expect(restored.restoredReview, isNotNull);
+      expect(
+        tester.widget<CornerOverlay>(find.byType(CornerOverlay)).corners,
+        edited,
+      );
       expect(picker.cameraCalls, 2);
       expect(first.existsSync(), isFalse);
       expect(
@@ -429,7 +450,7 @@ void main() {
             originalBytes: bytes,
             source: PageReviewSource.camera,
             onScanNext: () {},
-            onRetake: () {},
+            onRetake: (_) {},
             operations: operations,
           ),
         ),

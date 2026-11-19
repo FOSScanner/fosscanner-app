@@ -78,7 +78,7 @@ void main() {
               originalBytes: bytes,
               source: PageReviewSource.camera,
               onScanNext: () {},
-              onRetake: () {},
+              onRetake: (_) {},
               operations: _Operations(bytes),
             ),
           ),

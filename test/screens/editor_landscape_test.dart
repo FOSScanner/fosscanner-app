@@ -86,7 +86,7 @@ void main() {
           home: CornerAdjustScreen(
             originalBytes: bytes,
             source: PageReviewSource.camera,
-            onRetake: () {},
+            onRetake: (_) {},
             onScanNext: () {},
             operations: _Operations(bytes),
           ),

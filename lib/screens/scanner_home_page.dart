@@ -955,9 +955,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final documentGeneration = _documentGeneration;
     _CameraRecovery? recovery;
     setState(() => _isPickingImages = true);
-    // The shot discarded by Retake, kept only until the next capture so that
-    // cancelling the camera returns to its review instead of losing it.
+    // The shot discarded by Retake and its review, kept only until the next
+    // capture so that cancelling the camera returns to that review, crop and
+    // settings included, instead of losing it.
     Uint8List? retakenBytes;
+    PageReviewState? retakenReview;
     try {
       for (var isFirstCapture = true; ; isFirstCapture = false) {
         if (!isFirstCapture) {
@@ -981,7 +983,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           maxHeight: maxPickerEdge,
         );
         final previous = retakenBytes;
+        final previousReview = retakenReview;
         retakenBytes = null;
+        retakenReview = null;
         if (captured == null && previous == null) return;
         // Camera capture writes a fresh file that's genuinely ours to delete.
         final report = IntakeReport(total: 1);
@@ -990,7 +994,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           source: PageReviewSource.camera,
           deleteAfterRead: captured != null,
           documentGeneration: documentGeneration,
-          onRetake: (bytes) => retakenBytes = bytes,
+          restoredReview: captured == null ? previousReview : null,
+          onRetake: (bytes, review) {
+            retakenBytes = bytes;
+            retakenReview = review;
+          },
           report: report,
         );
         _showIntakeReport(report);
@@ -1242,8 +1250,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     int? batchCount,
     VoidCallback? onStopImport,
     VoidCallback? onScanNext,
-    VoidCallback? onRetake,
+    ValueChanged<PageReviewState>? onRetake,
     VoidCallback? onUnreadable,
+    PageReviewState? restoredReview,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
@@ -1255,6 +1264,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       onScanNext: onScanNext,
       onRetake: onRetake,
       onUnreadable: onUnreadable,
+      restoredReview: restoredReview,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
       // PDF pages are already flat: start from the full page.
@@ -1336,7 +1346,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     int? batchCount,
     required bool deleteAfterRead,
     required int documentGeneration,
-    ValueSetter<Uint8List>? onRetake,
+    void Function(Uint8List bytes, PageReviewState review)? onRetake,
+    PageReviewState? restoredReview,
   }) async {
     // Every way out that does not add a page is recorded in [report] (or is
     // the user's own Skip) and logged in debug builds.
@@ -1443,7 +1454,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
     var stopRequested = false;
     var scanNextRequested = false;
-    var retakeRequested = false;
+    PageReviewState? retakeReview;
     var unreadable = false;
     // Only camera capture loops back into the picker.
     final isCamera = source == PageReviewSource.camera;
@@ -1457,8 +1468,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           batchCount: batchCount,
           onStopImport: () => stopRequested = true,
           onScanNext: isCamera ? () => scanNextRequested = true : null,
-          onRetake: isCamera ? () => retakeRequested = true : null,
+          onRetake: isCamera ? (review) => retakeReview = review : null,
           onUnreadable: () => unreadable = true,
+          restoredReview: restoredReview,
         ),
       ),
     );
@@ -1468,8 +1480,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (stopRequested) {
       return end('stopped', 'Import stopped. Pages already added were kept.');
     }
-    if (retakeRequested && result == null) {
-      onRetake?.call(bytes);
+    if (retakeReview != null && result == null) {
+      onRetake?.call(bytes, retakeReview!);
       return _PhotoIntakeResult.retake;
     }
     if (unreadable && result == null) return _PhotoIntakeResult.rejected;

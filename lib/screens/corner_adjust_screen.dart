@@ -48,7 +48,42 @@ enum PageReviewSource {
   pdf,
 }
 
+/// A review's crop and appearance, handed to [CornerAdjustScreen.onRetake]
+/// so that cancelling the camera can reopen the review exactly as it was.
+class PageReviewState {
+  const PageReviewState({
+    required this.corners,
+    required this.startCorners,
+    required this.filter,
+    required this.rotationQuarterTurns,
+    required this.brightness,
+    required this.contrast,
+  });
+
+  final List<Offset> corners;
+
+  /// The detected (or full-image) corners a double-tap restores.
+  final List<Offset> startCorners;
+  final PageFilter filter;
+  final int rotationQuarterTurns;
+  final double brightness;
+  final double contrast;
+}
+
 enum _Step { corners, filter }
+
+/// What leaving the review from the crop step would lose, and so which
+/// question Back and Cancel ask first.
+enum _LeaveConfirmation {
+  /// Edits to a page that is kept as it was.
+  discardChanges,
+
+  /// A new camera capture, edited or not.
+  discardScan,
+
+  /// The rest of a batch import, and any edits to this image.
+  stopImport,
+}
 
 /// Appearance controls shown in the landscape side column.
 enum _Panel { filters, adjust }
@@ -77,6 +112,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.onScanNext,
     this.onRetake,
     this.onUnreadable,
+    this.restoredReview,
     this.initialCorners,
     this.startWithAdjustments = false,
     this.detectPageEdges = true,
@@ -113,14 +149,20 @@ class CornerAdjustScreen extends StatefulWidget {
   final VoidCallback? onScanNext;
 
   /// When set for a new camera capture, the crop step's **Cancel** becomes
-  /// **Retake**: this is called before the route pops without a page so the
-  /// caller can relaunch the camera. System Back still just leaves.
-  final VoidCallback? onRetake;
+  /// **Retake**: this is called with the review's current crop and settings
+  /// before the route pops without a page, so the caller can relaunch the
+  /// camera and, if it is cancelled, reopen this review via
+  /// [restoredReview].
+  final ValueChanged<PageReviewState>? onRetake;
 
   /// Called when [originalBytes] cannot be decoded. The review then only
   /// offers Go back and closes without a page, so callers can report the
   /// image as unreadable instead of skipped. Leaving it never stops a batch.
   final VoidCallback? onUnreadable;
+
+  /// Reopens a review left with Retake: its corners and settings replace
+  /// edge detection and the initial settings. Still a new page.
+  final PageReviewState? restoredReview;
   final List<Offset>? initialCorners;
 
   /// Open saved appearance directly; crop remains available.
@@ -165,10 +207,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   _Panel? _sidePanel;
   LocalHistoryEntry? _panelHistoryEntry;
   bool _isSideBySide = false;
-  late PageFilter _selectedFilter = widget.initialFilter;
-  late int _rotationQuarterTurns = widget.initialRotationQuarterTurns;
-  late double _brightness = widget.initialBrightness;
-  late double _contrast = widget.initialContrast;
+  late PageFilter _selectedFilter =
+      widget.restoredReview?.filter ?? widget.initialFilter;
+  late int _rotationQuarterTurns =
+      widget.restoredReview?.rotationQuarterTurns ??
+      widget.initialRotationQuarterTurns;
+  late double _brightness =
+      widget.restoredReview?.brightness ?? widget.initialBrightness;
+  late double _contrast =
+      widget.restoredReview?.contrast ?? widget.initialContrast;
   // Cache reduced-resolution filter previews so dragging only reprocesses on
   // drag-end. Confirm deliberately recomputes the selected filter at the full
   // bounded export resolution.
@@ -206,6 +253,20 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final generation = ++_initializationGeneration;
     try {
       final size = await widget.operations.decodeSize(widget.originalBytes);
+
+      final restored = widget.restoredReview;
+      if (restored != null) {
+        // Exactly as it was left, problems included: nothing to detect.
+        if (!mounted) return;
+        setState(() {
+          _imageSize = size;
+          _corners = List.of(restored.corners);
+          _startCorners = List.of(restored.startCorners);
+          _cropProblem = cropProblem(_corners!);
+        });
+        unawaited(_updatePreviews());
+        return;
+      }
 
       List<Offset>? candidateCorners = widget.initialCorners;
       if (candidateCorners == null && widget.detectPageEdges) {
@@ -493,10 +554,24 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _contrast != widget.initialContrast;
   }
 
+  /// One rule for Back and Cancel on the crop step. (Back from the
+  /// appearance step only returns here, keeping every setting.) Explicit
+  /// Skip, Retake and Stop importing never ask.
+  _LeaveConfirmation? get _leaveConfirmation {
+    // An unreadable image has nothing to lose, and leaving it moves on.
+    if (_error != null) return null;
+    if (_canStopImport) return _LeaveConfirmation.stopImport;
+    if (_isNewCameraCapture) return _LeaveConfirmation.discardScan;
+    if (_hasUnsavedChanges) return _LeaveConfirmation.discardChanges;
+    return null;
+  }
+
   bool _isConfirmingDiscard = false;
 
-  Future<void> _confirmDiscard() async {
+  Future<void> _confirmLeave() async {
+    final confirmation = _leaveConfirmation;
     if (!mounted ||
+        confirmation == null ||
         _isConfirmingDiscard ||
         _isLeaving ||
         _isProcessing ||
@@ -504,20 +579,44 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       return;
     }
     _isConfirmingDiscard = true;
-    final bool? discard;
+    final item = _batchItem.toLowerCase();
+    final (title, body, keep, leave) = switch (confirmation) {
+      _LeaveConfirmation.discardChanges => (
+        'Discard changes?',
+        null,
+        'Keep editing',
+        'Discard',
+      ),
+      _LeaveConfirmation.discardScan => (
+        'Discard this scan?',
+        null,
+        'Keep editing',
+        'Discard',
+      ),
+      _LeaveConfirmation.stopImport => (
+        'Stop importing?',
+        '${_hasUnsavedChanges ? 'Your changes are discarded. ' : ''}'
+            'This $item and the remaining ones will not be added. '
+            'Pages already added are kept.',
+        'Keep reviewing',
+        'Stop',
+      ),
+    };
+    final bool? confirmed;
     try {
-      discard = await showDialog<bool>(
+      confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Discard changes?'),
+          title: Text(title),
+          content: body == null ? null : Text(body),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Keep editing'),
+              child: Text(keep),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Discard'),
+              child: Text(leave),
             ),
           ],
         ),
@@ -525,15 +624,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     } finally {
       _isConfirmingDiscard = false;
     }
-    if (discard != true ||
+    if (confirmed != true ||
         !mounted ||
         _isLeaving ||
         _isProcessing ||
         ModalRoute.of(context)?.isCurrent != true) {
       return;
     }
-    // Navigator.pop bypasses canPop; onPopInvokedWithResult still runs, so
-    // a batch review still stops the import as Back always did.
+    // Navigator.pop bypasses canPop; onPopInvokedWithResult still runs and
+    // stops a batch import.
     Navigator.of(context).pop();
   }
 
@@ -579,7 +678,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     Navigator.of(context).pop();
   }
 
-  void _cancelReview() => _leaveReview(retake: false);
+  /// Skip leaves at once; Cancel asks first, exactly as Back does.
+  void _cancelReview() {
+    if (!_canSkipImage && _leaveConfirmation != null) {
+      unawaited(_confirmLeave());
+      return;
+    }
+    _leaveReview(retake: false);
+  }
 
   void _retake() => _leaveReview(retake: true);
 
@@ -593,7 +699,21 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
     // The caller advances an import after this route returns. Ignore stale
     // taps during the reverse transition rather than popping another route.
-    if (retake) widget.onRetake!();
+    if (retake) {
+      // The crop step's actions only show once the image is ready.
+      final corners = _corners;
+      if (corners == null) return;
+      widget.onRetake!(
+        PageReviewState(
+          corners: List.of(corners),
+          startCorners: List.of(_startCorners ?? corners),
+          filter: _selectedFilter,
+          rotationQuarterTurns: _rotationQuarterTurns,
+          brightness: _brightness,
+          contrast: _contrast,
+        ),
+      );
+    }
     setState(() => _isLeaving = true);
     Navigator.of(context).pop();
   }
@@ -606,13 +726,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
     return PopScope(
       // Back from the appearance step only returns to the crop step, which
-      // keeps every setting; leaving the review with edits asks first.
+      // keeps every setting; leaving the review asks first whenever it
+      // would lose something (see _leaveConfirmation).
       canPop:
           !_isProcessing &&
-          (_step != _Step.corners || _isLeaving || !_hasUnsavedChanges),
+          (_step != _Step.corners || _isLeaving || _leaveConfirmation == null),
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
-          unawaited(_confirmDiscard());
+          unawaited(_confirmLeave());
           return;
         }
         // Back during batch review leaves the import instead of silently
