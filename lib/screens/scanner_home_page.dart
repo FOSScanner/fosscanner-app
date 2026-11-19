@@ -40,6 +40,24 @@ const _thumbnailCacheWidth = 512;
 /// Page cards never grow wider than this: phones keep two columns, while
 /// tablets and landscape windows get more columns instead of oversized cards.
 const _maxPageCardExtent = 240.0;
+const _pageGridSpacing = 8.0;
+const _pageCardAspectRatio = 0.7;
+
+/// The card footer (48 px controls), its 8 px inset and a thumbnail strip
+/// that still shows which page it is.
+const _minPageCardHeight = 72.0;
+
+/// The camera button's 56 px plus its margin and a gap, so a card next to
+/// or above it keeps every control uncovered.
+const _cameraButtonClearance =
+    56.0 + kFloatingActionButtonMargin + _pageGridSpacing;
+
+/// Columns, card size and padding of the page grid for one viewport.
+typedef _PageGridGeometry = ({
+  int columns,
+  Size cardSize,
+  EdgeInsetsDirectional padding,
+});
 const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
 class _DocumentCapacityException implements Exception {
@@ -2437,6 +2455,86 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// Lays out the page grid for [viewport] so that at least one whole row of
+  /// cards is visible and the camera button never covers a card's controls.
+  ///
+  /// The result depends only on the viewport and on whether the camera is
+  /// available, never on the page count, so cards keep their size as pages
+  /// are added or removed.
+  _PageGridGeometry _pageGridGeometry(Size viewport) {
+    final clearance = _cameraSupported
+        ? _cameraButtonClearance
+        : _pageGridSpacing;
+    ({int columns, double width}) columnsFor(double extent) {
+      final columns = math.max(
+        1,
+        (extent / (_maxPageCardExtent + _pageGridSpacing)).ceil(),
+      );
+      return (
+        columns: columns,
+        width: (extent - _pageGridSpacing * (columns - 1)) / columns,
+      );
+    }
+
+    // Tall viewports: cards keep their shape, and the grid can scroll its
+    // last row above the camera button.
+    final tall = columnsFor(viewport.width - 2 * _pageGridSpacing);
+    final tallHeight = tall.width / _pageCardAspectRatio;
+    if (_pageGridSpacing + tallHeight + clearance <= viewport.height) {
+      return (
+        columns: tall.columns,
+        cardSize: Size(tall.width, tallHeight),
+        padding: EdgeInsetsDirectional.fromSTEB(
+          _pageGridSpacing,
+          _pageGridSpacing,
+          _pageGridSpacing,
+          clearance,
+        ),
+      );
+    }
+    // Short viewports (landscape phones): cards are shortened so a whole row
+    // fits, and the grid leaves a column for the camera button, which would
+    // otherwise cover the end card of every row. The vertical padding
+    // halves, which keeps a usable thumbnail at the largest text size.
+    const vertical = _pageGridSpacing / 2;
+    final short = columnsFor(viewport.width - _pageGridSpacing - clearance);
+    final shortHeight = math.max(
+      _minPageCardHeight,
+      math.min(
+        short.width / _pageCardAspectRatio,
+        viewport.height - 2 * vertical,
+      ),
+    );
+    return (
+      columns: short.columns,
+      cardSize: Size(short.width, shortHeight),
+      padding: EdgeInsetsDirectional.fromSTEB(
+        _pageGridSpacing,
+        vertical,
+        clearance,
+        vertical,
+      ),
+    );
+  }
+
+  Widget _buildPageGrid() => LayoutBuilder(
+    builder: (context, constraints) {
+      final geometry = _pageGridGeometry(constraints.biggest);
+      return GridView.builder(
+        key: const Key('page_grid'),
+        padding: geometry.padding,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: geometry.columns,
+          crossAxisSpacing: _pageGridSpacing,
+          mainAxisSpacing: _pageGridSpacing,
+          mainAxisExtent: geometry.cardSize.height,
+        ),
+        itemCount: _pages.length,
+        itemBuilder: _buildPageCard,
+      );
+    },
+  );
+
   Widget _buildPageCard(BuildContext context, int index) {
     final page = _pages[index];
     final card = Card(
@@ -2622,25 +2720,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           Expanded(
             child: _pages.isEmpty
                 ? _buildEmptyState(context)
-                : GridView.builder(
-                    padding: EdgeInsets.fromLTRB(
-                      8,
-                      8,
-                      8,
-                      _cameraSupported ? 96 : 8,
-                    ),
-                    // Two columns on phones; more on tablets and in landscape
-                    // so previews stay legible without wasting space.
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: _maxPageCardExtent,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 0.7,
-                        ),
-                    itemCount: _pages.length,
-                    itemBuilder: _buildPageCard,
-                  ),
+                : _buildPageGrid(),
           ),
         ],
       ),
