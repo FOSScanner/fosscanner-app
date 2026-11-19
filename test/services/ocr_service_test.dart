@@ -193,7 +193,7 @@ void main() {
       throwsA(predicate(ocr.isCancellation)),
     );
     await started.future;
-    await ocr.cancelSearchablePdf();
+    await ocr.cancelOcrJob();
     expect(calls.last.method, 'cancelSearchablePdf');
     finish.complete();
     await cancelled;
@@ -225,7 +225,7 @@ void main() {
           throwsA(predicate(ocr.isCancellation)),
         );
         await started.future;
-        await ocr.cancelSearchablePdf();
+        await ocr.cancelOcrJob();
         finish.complete();
         await cancelled;
         expect(
@@ -257,7 +257,7 @@ void main() {
       throwsA(predicate(ocr.isCancellation)),
     );
     await started.future;
-    await ocr.cancelSearchablePdf();
+    await ocr.cancelOcrJob();
     finish.complete();
     await cancelled;
     expect(
@@ -345,4 +345,117 @@ void main() {
       expect(sizes.single.$2 / dpis.single * 72, closeTo(595.28, 1));
     },
   );
+
+  group('copyRecognizedText', () {
+    test('sends ordered pages, reports progress and cleans up', () async {
+      final second = Uint8List.fromList([4, 5, 6]);
+      final progress = <(int, int)>[];
+      render = (call) async {
+        expect(call.method, 'copyRecognizedText');
+        final args = call.arguments as Map;
+        // Only page paths cross the channel; the text never comes back.
+        expect(args.keys, ['imagePaths']);
+        final inputs = (args['imagePaths'] as List).cast<String>();
+        expect(inputs.map((path) => path.split('/').last), [
+          'page_0.jpg',
+          'page_1.jpg',
+        ]);
+        expect(await File(inputs[0]).readAsBytes(), page);
+        expect(await File(inputs[1]).readAsBytes(), second);
+        await messenger.handlePlatformMessage(
+          channel.name,
+          channel.codec.encodeMethodCall(
+            const MethodCall('ocrProgress', {'completed': 1, 'total': 2}),
+          ),
+          (_) {},
+        );
+        return 42;
+      };
+
+      final copied = await ocr.copyRecognizedText([
+        page,
+        second,
+      ], onProgress: (completed, total) => progress.add((completed, total)));
+
+      expect(copied, 42);
+      expect(progress, [(1, 2)]);
+      expect(calls.first.method, 'ensureTessdata');
+      expect(await temporary.list().toList(), isEmpty);
+    });
+
+    test('reports no text as zero characters', () async {
+      render = (_) async => 0;
+      expect(await ocr.copyRecognizedText([page]), 0);
+    });
+
+    test('rejects a malformed native result', () async {
+      render = (_) async => null;
+      await expectLater(
+        ocr.copyRecognizedText([page]),
+        throwsA(isA<StateError>()),
+      );
+      expect(await temporary.list().toList(), isEmpty);
+    });
+
+    test('native failures surface and free the job slot', () async {
+      render = (_) async => throw PlatformException(code: 'ocr_failed');
+      await expectLater(
+        ocr.copyRecognizedText([page]),
+        throwsA(
+          isA<PlatformException>().having((e) => e.code, 'code', 'ocr_failed'),
+        ),
+      );
+      render = (_) async => 7;
+      expect(await ocr.copyRecognizedText([page]), 7);
+    });
+
+    test('cancels the native worker and reports a cancellation', () async {
+      final started = Completer<void>();
+      final finish = Completer<void>();
+      render = (call) async {
+        started.complete();
+        await finish.future;
+        throw PlatformException(code: 'ocr_cancelled');
+      };
+      final copy = ocr.copyRecognizedText([page]);
+      final cancelled = expectLater(
+        copy,
+        throwsA(predicate(ocr.isCancellation)),
+      );
+      await started.future;
+      await ocr.cancelOcrJob();
+      expect(calls.last.method, 'cancelSearchablePdf');
+      finish.complete();
+      await cancelled;
+      expect(await temporary.list().toList(), isEmpty);
+    });
+
+    test('shares the single OCR job slot with PDF export', () async {
+      final finish = Completer<void>();
+      render = (call) async {
+        await finish.future;
+        return 1;
+      };
+      final copy = ocr.copyRecognizedText([page]);
+      await expectLater(
+        ocr.copyRecognizedText([page]),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(create([page]), throwsA(isA<StateError>()));
+      finish.complete();
+      expect(await copy, 1);
+    });
+
+    test('validates pages before touching the channel', () async {
+      await expectLater(
+        ocr.copyRecognizedText(const []),
+        throwsA(isA<ArgumentError>()),
+      );
+      await expectLater(
+        ocr.copyRecognizedText([Uint8List(0)]),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(calls, isEmpty);
+    });
+  });
 }

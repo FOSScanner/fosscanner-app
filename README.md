@@ -56,7 +56,7 @@ No account, no cloud processing, no tracking.
    recognition); you can rename them in the picker.
    **PDF export options** sets the page size (Original, A4 or Letter) and
    quality (High, Balanced or Small); on Android it also turns searchable text
-   on or off. Your choices are remembered.
+   on or off and offers **Copy text**. Your choices are remembered.
 
 Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
 **Move later** (disabled while the document has a single page), or long-press
@@ -101,6 +101,7 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | Multi-page PDF export through the system share sheet | Yes | Yes |
 | Save the PDF to device storage | Yes — system file picker | Via the share sheet's "Save to Files" |
 | Offline searchable PDFs with selectable text | Yes — Latin-script OCR | Image-only PDFs |
+| Copy recognized text to the clipboard | Yes — Latin-script OCR | Not yet |
 | Temporary draft restoration after app restart | Yes | Yes |
 | QR/barcode scanning and full-result inspection | Yes | Yes |
 | System light/dark theme | Yes | Yes |
@@ -120,6 +121,14 @@ in **PDF export options**. The app remembers your choice in a small private
 settings file, and the export button reads **Export searchable PDF** while it
 is on. Recognition
 quality depends on the document, language, lighting, and image quality.
+
+**Copy text** (in **PDF export options**, Android) recognizes the text of every
+page on your device, in page order, and puts it on the clipboard. Progress and
+**Cancel** appear in the export bar, like a PDF export; nothing is copied if you
+cancel. The clipboard entry is marked sensitive, so Android 13 and later (and
+keyboards that honour the flag) do not preview it. The recognized text is never
+logged or written to a file, but anything on the clipboard can be read by apps
+you paste into, so clear it when you are done.
 
 The editor keeps the last successful preview visible while processing a new
 adjustment. If it fails, retry the preview before saving. PDF generation shows

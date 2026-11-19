@@ -2,6 +2,9 @@ package com.fosscanner.app
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -13,6 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.PersistableBundle
 import android.view.WindowManager
 import android.provider.DocumentsContract
 import com.googlecode.leptonica.android.ReadFile
@@ -184,7 +188,9 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "ensureTessdata" -> handleEnsureTessdata(result)
                 "createSearchablePdf" -> handleCreateSearchablePdf(call, result)
+                // Cancels whichever OCR job is running, PDF or text copy.
                 "cancelSearchablePdf" -> handleCancelSearchablePdf(result)
+                "copyRecognizedText" -> handleCopyRecognizedText(call, result)
                 "savePdfDocument" -> handleSavePdfDocument(call, result)
                 else -> result.notImplemented()
             }
@@ -252,25 +258,61 @@ class MainActivity : FlutterActivity() {
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
-    private fun submit(result: MethodChannel.Result, work: () -> Any?) {
+    /**
+     * Runs [work] on the OCR worker, then [deliver]s its value on the main
+     * thread and replies with the result. [onDone] runs on the main thread
+     * after every reply, including failures.
+     */
+    private fun submit(
+        result: MethodChannel.Result,
+        deliver: (Any?) -> Any? = { it },
+        onDone: () -> Unit = {},
+        work: () -> Any?,
+    ) {
         try {
             executor.execute {
+                var value: Any? = null
+                var failure: Throwable? = null
                 try {
-                    val value = work()
-                    mainHandler.post { result.success(value) }
-                } catch (e: OcrCancelledException) {
-                    mainHandler.post { result.error("ocr_cancelled", "OCR export cancelled", null) }
+                    value = work()
                 } catch (e: Exception) {
-                    // Do not expose native exception messages, paths, or OCR text.
-                    mainHandler.post { result.error("ocr_failed", "OCR operation failed", null) }
+                    failure = e
                 } catch (e: LinkageError) {
-                    mainHandler.post { result.error("ocr_unavailable", "OCR native library is unavailable", null) }
+                    failure = e
                 } catch (e: OutOfMemoryError) {
-                    mainHandler.post { result.error("ocr_memory", "Not enough memory for OCR", null) }
+                    failure = e
+                }
+                mainHandler.post {
+                    try {
+                        if (failure != null) {
+                            replyOcrError(result, failure)
+                        } else {
+                            val reply = try {
+                                deliver(value)
+                            } catch (e: Exception) {
+                                replyOcrError(result, e)
+                                return@post
+                            }
+                            result.success(reply)
+                        }
+                    } finally {
+                        onDone()
+                    }
                 }
             }
         } catch (e: RejectedExecutionException) {
+            onDone()
             result.error("ocr_unavailable", "OCR worker is unavailable", null)
+        }
+    }
+
+    // Do not expose native exception messages, paths, or OCR text.
+    private fun replyOcrError(result: MethodChannel.Result, error: Throwable) {
+        when (error) {
+            is OcrCancelledException -> result.error("ocr_cancelled", "OCR export cancelled", null)
+            is LinkageError -> result.error("ocr_unavailable", "OCR native library is unavailable", null)
+            is OutOfMemoryError -> result.error("ocr_memory", "Not enough memory for OCR", null)
+            else -> result.error("ocr_failed", "OCR operation failed", null)
         }
     }
 
@@ -317,21 +359,10 @@ class MainActivity : FlutterActivity() {
             var succeeded = false
             try {
                 val output = File(outputPath).canonicalFile
-                val directory = requireNotNull(output.parentFile)
-                require(
-                    directory.parentFile == cacheDir.canonicalFile &&
-                        directory.name.startsWith(OcrCacheCleanupCoordinator.JOB_PREFIX),
-                )
-                require(output.name == "document" && directory.isDirectory)
+                val directory = OcrJobContract.jobDirectory(cacheDir, output)
+                require(output.name == "document")
                 jobDirectory = directory
-                val images = imagePaths.map { File(it).canonicalFile }
-                var encodedBytes = 0L
-                for ((index, image) in images.withIndex()) {
-                    require(image.parentFile == directory && image.name == "page_$index.jpg")
-                    require(image.isFile && image.length() in 1..MAX_IMAGE_BYTES)
-                    encodedBytes += image.length()
-                    require(encodedBytes <= MAX_DOCUMENT_BYTES)
-                }
+                val images = OcrJobContract.pageImages(directory, imagePaths, MAX_IMAGE_BYTES, MAX_DOCUMENT_BYTES)
                 checkNotCancelled(jobDetached)
                 renderPdf(filesDir, images, pageDpis, output.path, jobDetached)
                 checkNotCancelled(jobDetached)
@@ -347,6 +378,106 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Recognizes the text of every page on the OCR worker and copies it to the
+     * clipboard on the main thread, replying with the number of characters
+     * copied (0 leaves the clipboard untouched). The text never crosses the
+     * channel and is never logged. Dart owns and removes the job directory.
+     */
+    private fun handleCopyRecognizedText(call: MethodCall, result: MethodChannel.Result) {
+        val imagePaths = call.argument<List<String>>("imagePaths")
+        if (imagePaths.isNullOrEmpty() || imagePaths.size > MAX_PAGES) {
+            result.error("invalid_args", "Between 1 and 100 images are required", null)
+            return
+        }
+        if (!rendering.compareAndSet(false, true)) {
+            result.error("ocr_busy", "An OCR export is already running", null)
+            return
+        }
+        cancellationRequested.set(false)
+        val cacheDir = applicationContext.cacheDir
+        val filesDir = applicationContext.filesDir
+        val jobDetached = detached
+        submit(
+            result,
+            deliver = { text ->
+                // A cancel that arrived while the last page finished still wins:
+                // nothing reaches the clipboard after the user cancelled.
+                checkNotCancelled(jobDetached)
+                val recognized = text as String
+                if (recognized.isNotEmpty()) copySensitiveText(recognized)
+                recognized.length
+            },
+            // Released on the main thread after the clipboard decision, so a
+            // cancel can never be dropped between recognition and copying.
+            onDone = { rendering.set(false) },
+        ) {
+            val directory = OcrJobContract.jobDirectory(cacheDir, File(imagePaths.first()))
+            val images = OcrJobContract.pageImages(directory, imagePaths, MAX_IMAGE_BYTES, MAX_DOCUMENT_BYTES)
+            checkNotCancelled(jobDetached)
+            recognizeText(filesDir, images, jobDetached)
+        }
+    }
+
+    private fun recognizeText(filesDir: File, images: List<File>, jobDetached: AtomicBoolean): String {
+        val pages = ArrayList<String?>(images.size)
+        val baseApi = TessBaseAPI()
+        try {
+            check(baseApi.init(filesDir.absolutePath, OcrModelStore.language, TessBaseAPI.OEM_LSTM_ONLY))
+            // Same density the searchable PDF uses for original pages.
+            check(baseApi.setVariable("user_defined_dpi", PdfExportContract.DEFAULT_OCR_DPI.toString()))
+            for ((index, image) in images.withIndex()) {
+                checkNotCancelled(jobDetached)
+                val pix = readPagePix(image)
+                try {
+                    baseApi.setImage(pix)
+                    pages.add(baseApi.getUTF8Text())
+                    baseApi.clear()
+                } finally {
+                    pix.recycle()
+                }
+                reportProgress(images.size, index + 1)
+            }
+            checkNotCancelled(jobDetached)
+        } finally {
+            baseApi.recycle()
+        }
+        return OcrJobContract.joinPages(pages)
+    }
+
+    // Mirror image_metadata.dart's source limits before allocating bitmap/Pix
+    // buffers, including pass-through imported pages.
+    private fun readPagePix(image: File): com.googlecode.leptonica.android.Pix {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(image.path, bounds)
+        require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192)
+        require(bounds.outWidth.toLong() * bounds.outHeight <= 20_000_000)
+        val bitmap = requireNotNull(BitmapFactory.decodeFile(image.path))
+        return try {
+            requireNotNull(ReadFile.readBitmap(bitmap))
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    // Marks the clip sensitive so keyboards' clipboard suggestions and the
+    // Android 13+ copy preview hide it.
+    private fun copySensitiveText(text: String) {
+        val clipboard = requireNotNull(getSystemService(ClipboardManager::class.java))
+        val clip = ClipData.newPlainText("Recognized text", text)
+        // Clip description extras exist since Android 7.0; the system honours
+        // the flag from Android 13, some keyboards before that.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val extra = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ClipDescription.EXTRA_IS_SENSITIVE
+            } else {
+                OcrJobContract.SENSITIVE_CLIP_EXTRA
+            }
+            clip.description.extras = PersistableBundle().apply { putBoolean(extra, true) }
+        }
+        clipboard.setPrimaryClip(clip)
     }
 
     // Lets the user pick a location with the system picker (ACTION_CREATE_DOCUMENT):
@@ -574,18 +705,7 @@ class MainActivity : FlutterActivity() {
                     // Tesseract reads this for every page, and its PDF renderer
                     // sizes the page as pixels / DPI.
                     check(baseApi.setVariable("user_defined_dpi", pageDpis[index].toString()))
-                    // Mirror image_metadata.dart's source limits before allocating
-                    // bitmap/Pix buffers, including pass-through imported pages.
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(image.path, bounds)
-                    require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192)
-                    require(bounds.outWidth.toLong() * bounds.outHeight <= 20_000_000)
-                    val bitmap = requireNotNull(BitmapFactory.decodeFile(image.path))
-                    val pix = try {
-                        requireNotNull(ReadFile.readBitmap(bitmap))
-                    } finally {
-                        bitmap.recycle()
-                    }
+                    val pix = readPagePix(image)
                     try {
                         check(baseApi.addPageToDocument(pix, image.path, renderer))
                     } finally {

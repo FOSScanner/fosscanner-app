@@ -241,6 +241,26 @@ void main() {
       await tester.pumpAndSettle();
       expectFrame('idle after declining the fallback');
 
+      // Copying text, then cancelling it.
+      ocr.fail = false;
+      ocr.gate = await newGate(tester);
+      await tester.tap(find.byTooltip('PDF export options'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Copy text'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy text'));
+      await pumpUntil(tester, () => ocr.jobs == 4, settle: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Recognizing text 0%'), findsOneWidget);
+      expectFrame('recognizing text');
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pump();
+      expect(find.text('Canceling…'), findsOneWidget);
+      expectFrame('canceling text recognition');
+      ocr.gate!.complete();
+      await pumpUntilFound(tester, find.text('Text recognition canceled'));
+      await dismissMessages(tester);
+      expectFrame('idle after text recognition');
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),

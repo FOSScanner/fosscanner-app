@@ -64,8 +64,9 @@ enum _CameraRecovery { retry, gallery }
 /// the Dart image-only exporter only polls the flag this screen already sets.
 enum _PdfExporter { searchable, imageOnly }
 
-/// Where a finished PDF goes: the share sheet, or a user-chosen document.
-enum _ExportAction { share, save }
+/// What the running export job produces: a PDF for the share sheet or a
+/// user-chosen document, or recognized text for the clipboard.
+enum _ExportAction { share, save, copyText }
 
 typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
 
@@ -1713,7 +1714,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // native renderer has to be told over the channel.
     if (_pdfExporter != _PdfExporter.searchable) return;
     try {
-      await ocr_service.cancelSearchablePdf();
+      await ocr_service.cancelOcrJob();
     } catch (error) {
       if (mounted && !ocr_service.isCancellation(error)) {
         _showMessage('Could not cancel PDF generation.');
@@ -1859,6 +1860,60 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  /// Recognizes the text of every page on device and copies it to the
+  /// clipboard. Runs as an export job: it holds the same document lock, shows
+  /// its progress in the export bar and can be cancelled there.
+  Future<void> _copyRecognizedText() async {
+    if (!_canExport || !_ocrSupported) return;
+    _undoGeneration++;
+    _undoPage = null;
+    _deferredMessage = null;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    final pages = [for (final page in _pages) page.processedBytes];
+    setState(() {
+      _isGeneratingPdf = true;
+      _isSharingPdf = false;
+      _exportAction = _ExportAction.copyText;
+      _isCancellingPdf = false;
+      _pdfExporter = _PdfExporter.searchable;
+      _pdfProgress = 0;
+    });
+    try {
+      final copied = await _imageProcessingQueue.run(() {
+        if (_isCancellingPdf) {
+          throw const image_pdf.ImagePdfCancelledException();
+        }
+        return ocr_service.copyRecognizedText(
+          pages,
+          onProgress: _updatePdfProgress,
+        );
+      });
+      if (mounted) _showMessage(copied > 0 ? 'Text copied' : 'No text found');
+    } catch (error) {
+      final cancelled =
+          ocr_service.isCancellation(error) ||
+          error is image_pdf.ImagePdfCancelledException;
+      if (!cancelled && kDebugMode) {
+        debugPrint('Text recognition failed (${error.runtimeType}).');
+      }
+      if (mounted) {
+        _showMessage(
+          cancelled ? 'Text recognition canceled' : 'Could not recognize text.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGeneratingPdf = false;
+          _isCancellingPdf = false;
+          _pdfExporter = null;
+          _pdfProgress = null;
+        });
+      }
+      _resumeSharedImageIntake();
+    }
+  }
+
   Future<void> _showExportOptions() async {
     if (!_canExport) return;
     // Every control re-checks that the sheet still belongs to an idle screen,
@@ -1899,6 +1954,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         _preferences.copyWith(searchablePdf: value),
                       );
                       updateSheet(() {});
+                    },
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.content_copy),
+                    title: const Text('Copy text'),
+                    onTap: () {
+                      if (!canChange(sheetContext)) return;
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_copyRecognizedText());
                     },
                   ),
                   const SizedBox(height: 8),
@@ -2002,6 +2067,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   String get _exportStatus {
     if (_isClearingDraft) return 'Clearing draft...';
+    if (_exportAction == _ExportAction.copyText) {
+      if (_isCancellingPdf) return 'Canceling…';
+      if (_pdfProgress == null) return 'Recognizing text…';
+      return 'Recognizing text ${(_pdfProgress! * 100).round()}%';
+    }
     if (_isCancellingPdf) return 'Cancelling PDF...';
     if (_isSharingPdf) {
       return _exportAction == _ExportAction.save

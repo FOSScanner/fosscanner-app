@@ -10,8 +10,11 @@ import 'image_metadata.dart';
 import 'pdf_export_options.dart';
 
 // Android's Tesseract renderer preserves page images and adds selectable text.
+// Keep the channel contract synchronized with MainActivity.kt.
 const _channel = MethodChannel('com.fosscanner.app/ocr');
-bool _isCreatingPdf = false;
+// One OCR job (searchable PDF or text copy) at a time; they share the native
+// worker, its cancellation flag and the progress callback.
+bool _isRunning = false;
 bool _cancellationRequested = false;
 bool _nativeRendering = false;
 void Function(int completed, int total)? _progressCallback;
@@ -36,10 +39,13 @@ Future<void> _handleNativeCall(MethodCall call) async {
 bool isCancellation(Object error) =>
     error is PlatformException && error.code == 'ocr_cancelled';
 
-Future<void> cancelSearchablePdf() async {
-  if (!_isCreatingPdf) return;
+/// Cancels the running OCR job, whether it renders a searchable PDF or
+/// recognizes text to copy. A no-op when nothing is running.
+Future<void> cancelOcrJob() async {
+  if (!_isRunning) return;
   _cancellationRequested = true;
   if (_nativeRendering) {
+    // The native method cancels whichever OCR job its worker is running.
     await _channel.invokeMethod<void>('cancelSearchablePdf');
   }
 }
@@ -70,28 +76,8 @@ Future<void> createSearchablePdf(
   PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
 }) async {
-  if (!isSupported) {
-    throw UnsupportedError('Searchable PDF export requires Android');
-  }
-  if (_isCreatingPdf) throw StateError('An OCR export is already running');
-  if (pageImages.isEmpty || pageImages.length > maxDocumentPages) {
-    throw ArgumentError('OCR requires 1 to $maxDocumentPages pages');
-  }
-  final images = List<Uint8List>.of(pageImages, growable: false);
-  var totalBytes = 0;
-  for (final bytes in images) {
-    if (bytes.isEmpty || bytes.length > maxEncodedImageBytes) {
-      throw ArgumentError('OCR page exceeds the supported encoded size');
-    }
-    totalBytes += bytes.length;
-    if (totalBytes > maxRetainedDocumentBytes) {
-      throw ArgumentError('OCR document exceeds the supported byte limit');
-    }
-  }
-  _isCreatingPdf = true;
-  _cancellationRequested = false;
-  _progressCallback = onProgress;
-  _channel.setMethodCallHandler(_handleNativeCall);
+  final images = _validatedPages(pageImages);
+  _startJob(onProgress);
   Directory? jobDirectory;
   final output = File(outputPath);
   var moved = false;
@@ -170,11 +156,104 @@ Future<void> createSearchablePdf(
     _checkCancellation();
     rethrow;
   } finally {
-    _isCreatingPdf = false;
-    _cancellationRequested = false;
-    _progressCallback = null;
-    _channel.setMethodCallHandler(null);
+    _finishJob();
   }
+}
+
+/// Recognizes the text of every page, in order, on the native OCR worker and
+/// puts it on the system clipboard, marked sensitive where Android supports
+/// it. Returns the number of characters copied; 0 means no text was found and
+/// the clipboard was left untouched.
+///
+/// The text is written to the clipboard natively and never crosses the
+/// channel or reaches a log. Pages are recognized as they are, without the
+/// PDF page-size and quality presets. Throws a cancellation (see
+/// [isCancellation]) after [cancelOcrJob].
+Future<int> copyRecognizedText(
+  List<Uint8List> pageImages, {
+  void Function(int completed, int total)? onProgress,
+}) async {
+  final images = _validatedPages(pageImages);
+  _startJob(onProgress);
+  Directory? jobDirectory;
+  try {
+    try {
+      await _ensureTessdata();
+      _checkCancellation();
+      final tempDir = await getTemporaryDirectory();
+      _checkCancellation();
+      jobDirectory = await tempDir.createTemp('fosscanner_ocr_');
+      _checkCancellation();
+      final imagePaths = <String>[];
+      for (var i = 0; i < images.length; i++) {
+        final file = File('${jobDirectory.path}/page_$i.jpg');
+        await file.writeAsBytes(images[i]);
+        _checkCancellation();
+        imagePaths.add(file.path);
+      }
+      final int? copied;
+      _nativeRendering = true;
+      try {
+        copied = await _channel.invokeMethod<int>('copyRecognizedText', {
+          'imagePaths': imagePaths,
+        });
+      } finally {
+        _nativeRendering = false;
+      }
+      if (copied == null || copied < 0) {
+        throw StateError('Native text recognition returned an invalid result');
+      }
+      return copied;
+    } finally {
+      try {
+        if (jobDirectory != null) await jobDirectory.delete(recursive: true);
+      } on FileSystemException {
+        // Best effort; app/OS cache copies can persist if deletion fails.
+      }
+    }
+  } catch (_) {
+    // A late failure after the user cancelled is reported as the cancel.
+    _checkCancellation();
+    rethrow;
+  } finally {
+    _finishJob();
+  }
+}
+
+List<Uint8List> _validatedPages(List<Uint8List> pageImages) {
+  if (!isSupported) {
+    throw UnsupportedError('On-device text recognition requires Android');
+  }
+  if (_isRunning) throw StateError('An OCR job is already running');
+  if (pageImages.isEmpty || pageImages.length > maxDocumentPages) {
+    throw ArgumentError('OCR requires 1 to $maxDocumentPages pages');
+  }
+  final images = List<Uint8List>.of(pageImages, growable: false);
+  var totalBytes = 0;
+  for (final bytes in images) {
+    if (bytes.isEmpty || bytes.length > maxEncodedImageBytes) {
+      throw ArgumentError('OCR page exceeds the supported encoded size');
+    }
+    totalBytes += bytes.length;
+    if (totalBytes > maxRetainedDocumentBytes) {
+      throw ArgumentError('OCR document exceeds the supported byte limit');
+    }
+  }
+  return images;
+}
+
+void _startJob(void Function(int completed, int total)? onProgress) {
+  _isRunning = true;
+  _cancellationRequested = false;
+  _progressCallback = onProgress;
+  _channel.setMethodCallHandler(_handleNativeCall);
+}
+
+void _finishJob() {
+  _isRunning = false;
+  _cancellationRequested = false;
+  _progressCallback = null;
+  _channel.setMethodCallHandler(null);
 }
 
 // Both paths are in the app cache, so this is normally a rename. The copy only
