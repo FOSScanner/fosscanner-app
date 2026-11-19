@@ -33,7 +33,8 @@ const _filterLabels = {
 };
 
 /// The original picker source may be unknown after Android activity recovery.
-enum PageReviewSource { camera, gallery, recovered }
+/// [shared] images were sent from another app and copied into app storage.
+enum PageReviewSource { camera, gallery, recovered, shared }
 
 enum _Step { corners, filter }
 
@@ -441,7 +442,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       !_isEditingExistingPage &&
       widget.isBatchImport &&
       (widget.source == PageReviewSource.gallery ||
-          widget.source == PageReviewSource.recovered);
+          widget.source == PageReviewSource.recovered ||
+          widget.source == PageReviewSource.shared);
 
   bool get _hasBatchProgress =>
       _canSkipImage &&

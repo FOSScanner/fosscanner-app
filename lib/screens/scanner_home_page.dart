@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
@@ -19,6 +20,7 @@ import '../services/image_metadata.dart';
 import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
 import '../services/platform_capabilities.dart';
+import '../services/shared_image_inbox.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -66,6 +68,7 @@ class ScannerHomePage extends StatefulWidget {
     this.draftStore = const NoOpDraftStore(),
     this.cornerAdjustOperations = const DefaultCornerAdjustOperations(),
     this.sourceImageSizeReader = readEncodedImageSize,
+    this.sharedImageInbox,
   });
 
   final List<ScannedPage> initialPages;
@@ -74,6 +77,10 @@ class ScannerHomePage extends StatefulWidget {
   final DraftStore draftStore;
   final CornerAdjustOperations cornerAdjustOperations;
   final SourceImageSizeReader sourceImageSizeReader;
+
+  /// Images shared into the app by other apps (Android only); null disables
+  /// share intake.
+  final SharedImageInbox? sharedImageInbox;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -107,6 +114,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _draftRestoreFailed = false;
   bool _isClearingDraft = false;
   bool _isOpeningImageRoute = false;
+  // Shared images are waiting on the platform side. They are pulled only
+  // when no draft decision, intake, editor, export or clear is in progress.
+  bool _isSharedImageIntakePending = false;
+  Timer? _sharedImageRetry;
   late bool _cameraSupported;
   // Session-only: a new page starts with the filter chosen for the previous
   // new page, so a multi-page scan needs the filter sheet only once. Edits of
@@ -129,6 +140,118 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // but it is lost permanently unless retrieveLostData is called at startup.
     if (defaultTargetPlatform == TargetPlatform.android) {
       unawaited(_recoverLostImages());
+    }
+    final inbox = widget.sharedImageInbox;
+    if (inbox != null) {
+      inbox.setListener(_onSharedImagesAvailable);
+      // A cold start may have been caused by a share; ask once the draft has
+      // been restored so new pages are appended to it.
+      _isSharedImageIntakePending = true;
+      unawaited(_initialDraftRestore.then((_) => _resumeSharedImageIntake()));
+    }
+  }
+
+  @override
+  void dispose() {
+    _sharedImageRetry?.cancel();
+    widget.sharedImageInbox?.setListener(null);
+    super.dispose();
+  }
+
+  void _onSharedImagesAvailable() {
+    _isSharedImageIntakePending = true;
+    _resumeSharedImageIntake();
+  }
+
+  /// Starts pending shared-image intake once nothing else owns the screen.
+  ///
+  /// Every lock holder calls this when it finishes. A failed draft restore
+  /// defers intake exactly like lost-image recovery: it resumes after the
+  /// user retries restoration or discards the draft.
+  void _resumeSharedImageIntake() {
+    _sharedImageRetry?.cancel();
+    _sharedImageRetry = null;
+    final inbox = widget.sharedImageInbox;
+    if (inbox == null || !mounted || !_isSharedImageIntakePending) return;
+    if (_isRestoringDraft || _isDocumentInteractionLocked) return;
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      // A dialog, menu or sheet is open over the home screen and does not
+      // report when it closes; check again shortly.
+      _sharedImageRetry = Timer(
+        const Duration(milliseconds: 500),
+        _resumeSharedImageIntake,
+      );
+      return;
+    }
+    _isSharedImageIntakePending = false;
+    unawaited(_importSharedImages(inbox));
+  }
+
+  Future<void> _importSharedImages(SharedImageInbox inbox) async {
+    final documentGeneration = _documentGeneration;
+    setState(() => _isPickingImages = true);
+    var paths = const <String>[];
+    var nextPath = 0;
+    try {
+      await _imageProcessingQueue.idle;
+      if (!mounted) return;
+      final batch = await inbox.take(
+        maxCount: math.max(0, maxDocumentPages - _pages.length),
+      );
+      paths = batch.paths;
+      if (!mounted ||
+          _isClearingDraft ||
+          documentGeneration != _documentGeneration) {
+        return;
+      }
+      if (batch.rejected > 0) {
+        _showMessage(
+          'Some shared files could not be added. Share images under '
+          '${maxEncodedImageBytes ~/ (1024 * 1024)} MB.',
+        );
+      }
+      var limitReported = false;
+      var stopped = false;
+      while (nextPath < paths.length) {
+        final index = nextPath++;
+        // The copies are app-owned cache files, deleted once read.
+        final result = await _addCapturedPhoto(
+          XFile(paths[index]),
+          source: PageReviewSource.shared,
+          isBatchImport: paths.length > 1,
+          batchPosition: index + 1,
+          batchCount: paths.length,
+          deleteAfterRead: true,
+          documentGeneration: documentGeneration,
+        );
+        if (!mounted) return;
+        if (result == _PhotoIntakeResult.stopped) {
+          stopped = true;
+          _showImportStopped();
+          break;
+        }
+        if (result == _PhotoIntakeResult.capacityReached) {
+          limitReported = true;
+          break;
+        }
+      }
+      if (batch.truncated && !limitReported && !stopped) {
+        _showMessage(
+          'Some shared images were not added: a document can have up to '
+          '$maxDocumentPages pages.',
+        );
+      }
+    } on MissingPluginException {
+      // No native share handler (tests, unsupported embedders).
+    } catch (_) {
+      _showMessage('Could not add the shared images.');
+    } finally {
+      for (final path in paths.skip(nextPath)) {
+        await _deleteFileQuietly(path);
+      }
+      if (mounted) setState(() => _isPickingImages = false);
+      // Another share may have arrived during this review.
+      _resumeSharedImageIntake();
     }
   }
 
@@ -156,11 +279,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_isRestoringDraft || _isClearingDraft || !_draftRestoreFailed) return;
     setState(() => _isRestoringDraft = true);
     await _restoreDraft();
-    if (mounted &&
-        !_draftRestoreFailed &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      unawaited(_recoverLostImages());
-    }
+    _resumeIntakeAfterDraftDecision();
   }
 
   Future<void> _discardFailedDraft() async {
@@ -194,11 +313,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return;
     }
     await _clearCurrentDraft();
-    if (mounted &&
-        !_draftRestoreFailed &&
-        defaultTargetPlatform == TargetPlatform.android) {
+    _resumeIntakeAfterDraftDecision();
+  }
+
+  /// Lost-image recovery and shared images both wait while a failed draft
+  /// awaits a decision. Recovery runs first: it takes the intake lock
+  /// synchronously, so shared images resume when it finishes.
+  void _resumeIntakeAfterDraftDecision() {
+    if (!mounted || _draftRestoreFailed) return;
+    if (defaultTargetPlatform == TargetPlatform.android) {
       unawaited(_recoverLostImages());
     }
+    _resumeSharedImageIntake();
   }
 
   Widget _buildDraftRestoreFailure() => Scaffold(
@@ -562,6 +688,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _showMessage('Could not recover the interrupted image selection.');
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
+      _resumeSharedImageIntake();
     }
   }
 
@@ -685,6 +812,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       recovery = await _showCameraFailure(error);
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
+      _resumeSharedImageIntake();
     }
     if (!mounted || documentGeneration != _documentGeneration) return;
     switch (recovery) {
@@ -744,6 +872,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _showMessage('Could not open the photo gallery.');
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
+      _resumeSharedImageIntake();
     }
   }
 
@@ -936,6 +1065,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       );
     } finally {
       if (mounted) setState(() => _isOpeningImageRoute = false);
+      _resumeSharedImageIntake();
     }
   }
 
@@ -1024,6 +1154,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       } else {
         _isOpeningImageRoute = false;
       }
+      _resumeSharedImageIntake();
     }
   }
 
@@ -1194,6 +1325,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       }
       _isClearingDraft = false;
     });
+    _resumeSharedImageIntake();
   }
 
   bool get _ocrSupported =>
@@ -1373,6 +1505,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           _pdfProgress = null;
         });
       }
+      _resumeSharedImageIntake();
     }
   }
 

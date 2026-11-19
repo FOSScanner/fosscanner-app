@@ -335,6 +335,33 @@ void main() {
     expect(script, contains('set -euo pipefail'));
   });
 
+  test('Android accepts shared images without persistent URI access', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final activity = File(
+      'android/app/src/main/kotlin/com/fosscanner/app/MainActivity.kt',
+    ).readAsStringSync();
+
+    for (final action in ['SEND', 'SEND_MULTIPLE']) {
+      expect(
+        manifest,
+        matches(
+          RegExp(
+            '<intent-filter>\\s*<action android:name="android\\.intent\\.'
+            'action\\.$action"/>\\s*<category android:name="android\\.'
+            'intent\\.category\\.DEFAULT"/>\\s*<data android:mimeType='
+            '"image/\\*"/>\\s*</intent-filter>',
+          ),
+        ),
+      );
+    }
+    // One activity instance owns the draft; shares arrive via onNewIntent.
+    expect(manifest, contains('android:launchMode="singleTask"'));
+    expect(activity, isNot(contains('takePersistableUriPermission')));
+    expect(activity, contains('override fun onNewIntent'));
+  });
+
   test('native drafts use the OS-managed application cache', () {
     final source = File(
       'lib/services/draft_store_native.dart',

@@ -1,7 +1,9 @@
 package com.fosscanner.app
 
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -17,6 +19,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,8 +36,26 @@ class MainActivity : FlutterActivity() {
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
 
+    // Shared images are copied off the UI thread on their own worker, so a
+    // running OCR export never delays them (Dart blocks intake during export).
+    private var sharedImageExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var sharedImageChannel: MethodChannel? = null
+    private val sharedImages by lazy {
+        SharedImageInbox<Uri>(
+            directory = File(cacheDir, SharedImageInbox.DIRECTORY_NAME),
+            open = { contentResolver.openInputStream(it) },
+            typeOf = { contentResolver.getType(it) },
+            maxImageBytes = MAX_IMAGE_BYTES,
+            maxImages = MAX_PAGES,
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         orphanCacheCleanup.schedule(applicationContext.cacheDir, executor::execute)
+        // No Dart isolate of this activity can hold a copied path yet. The
+        // single worker runs this cleanup before any later copy.
+        val inbox = sharedImages
+        sharedImageExecutor.execute { inbox.clearDirectory() }
         super.onCreate(savedInstanceState)
         // Scans are often IDs or bank statements: keep page content out of the
         // Recents thumbnail without blocking screenshots. Older APIs have no
@@ -43,6 +64,80 @@ class MainActivity : FlutterActivity() {
             setRecentsScreenshotEnabled(false)
         }
         applySecureScreen()
+        // After recreation the intent was already delivered; only re-read it
+        // if Dart had not pulled its images yet.
+        if (savedInstanceState == null || savedInstanceState.getBoolean(KEY_SHARE_PENDING)) {
+            receiveSharedImages(intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (receiveSharedImages(intent)) {
+            sharedImageChannel?.invokeMethod("sharedImagesAvailable", null)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_SHARE_PENDING, sharedImages.hasPending)
+    }
+
+    /**
+     * Queues image URIs from a share intent. Only the temporary read grant
+     * that comes with the intent is used: no persistable permission is taken,
+     * and nothing is read until Dart asks for the images.
+     */
+    private fun receiveSharedImages(intent: Intent?): Boolean {
+        if (intent == null) return false
+        val streams = try {
+            SharedImageIntents.sharedStreams(
+                action = intent.action,
+                mimeType = intent.type,
+                flags = intent.flags,
+                single = if (intent.action == Intent.ACTION_SEND) singleStream(intent) else null,
+                multiple = if (intent.action == Intent.ACTION_SEND_MULTIPLE) multipleStreams(intent) else null,
+            )
+        } catch (_: Exception) {
+            // Malformed extras from another app must not crash the scanner.
+            emptyList()
+        }
+        return sharedImages.offer(streams)
+    }
+
+    private fun singleStream(intent: Intent): Uri? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+
+    private fun multipleStreams(intent: Intent): List<Uri?>? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+
+    private fun handleTakeSharedImages(call: MethodCall, result: MethodChannel.Result) {
+        val maxCount = call.argument<Int>("maxCount") ?: 0
+        val inbox = sharedImages
+        try {
+            sharedImageExecutor.execute {
+                try {
+                    val batch = inbox.take(maxCount)
+                    mainHandler.post { result.success(batch.toChannelMap()) }
+                } catch (e: Exception) {
+                    // Do not expose provider exception messages or URIs.
+                    mainHandler.post { result.error("share_failed", "Could not read shared images", null) }
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            result.error("share_unavailable", "Shared image worker is unavailable", null)
+        }
     }
 
     // FLAG_SECURE blocks screenshots, screen recording and the Recents
@@ -86,6 +181,14 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        if (sharedImageExecutor.isShutdown) sharedImageExecutor = Executors.newSingleThreadExecutor()
+        sharedImageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARED_IMAGES_CHANNEL)
+        sharedImageChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "takeSharedImages" -> handleTakeSharedImages(call, result)
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -94,6 +197,9 @@ class MainActivity : FlutterActivity() {
         channel = null
         privacyChannel?.setMethodCallHandler(null)
         privacyChannel = null
+        sharedImageChannel?.setMethodCallHandler(null)
+        sharedImageChannel = null
+        sharedImageExecutor.shutdown()
         // Let the active native call finish and release its resources. Interrupting
         // the Java worker cannot safely interrupt Tesseract's native renderer.
         executor.shutdown()
@@ -262,5 +368,10 @@ class MainActivity : FlutterActivity() {
         @Volatile private var secureScreen = false
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
+
+        // Mirror lib/services/image_metadata.dart's maxDocumentPages.
+        private const val MAX_PAGES = 100
+        private const val SHARED_IMAGES_CHANNEL = "com.fosscanner.app/shared_images"
+        private const val KEY_SHARE_PENDING = "fosscanner.sharePending"
     }
 }

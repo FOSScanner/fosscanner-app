@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'screens/scanner_home_page.dart';
 import 'services/draft_store.dart';
+import 'services/shared_image_inbox.dart';
 import 'widgets/draft_session_gate.dart';
 
 void main() {
@@ -32,7 +33,14 @@ class FOSScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = draftStore ?? const NoOpDraftStore();
-    final scanner = ScannerHomePage(draftStore: store);
+    final scanner = ScannerHomePage(
+      draftStore: store,
+      // iOS would need a Share Extension target; only Android accepts shares.
+      sharedImageInbox:
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? MethodChannelSharedImageInbox.instance
+          : null,
+    );
     return MaterialApp(
       title: 'FOSScanner',
       theme: ThemeData(
