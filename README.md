@@ -122,6 +122,11 @@ FOSScanner has no login, telemetry, analytics, or scan-upload service. Imported
 gallery originals are not modified or deleted. App-owned camera temporary files
 are cleaned up after the attempt to read them, including failed reads.
 
+On Android 13 and later, the app's thumbnail in the Recents screen is blank so
+page content is not shown when you switch apps; screenshots still work. Android
+12 and earlier have no way to hide only the thumbnail, so it may show the
+current screen there.
+
 ### Drafts are temporary, not a backup
 
 Unfinished documents are saved in the app's private, **OS-managed cache** so they
