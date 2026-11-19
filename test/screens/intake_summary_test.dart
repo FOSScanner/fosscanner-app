@@ -253,7 +253,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export 2 pages as PDF'), findsOneWidget);
     expectOnlyMessage(
       "2 of 4 images couldn't be added: 1 unsupported size, "
       '1 not an image.',
@@ -312,7 +312,7 @@ void main() {
     await accept(tester);
     await settle(tester);
 
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     expectOnlyMessage(
       "2 of 3 pages couldn't be added: 1 not an image, "
       '1 too large to render.',
@@ -328,7 +328,7 @@ void main() {
       await accept(tester);
       await settle(tester);
 
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
       expectOnlyMessage("1 of 2 images couldn't be added: 1 unsupported size.");
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
@@ -464,7 +464,7 @@ void main() {
     await accept(tester);
     await settle(tester);
 
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     expect(find.byType(SnackBar), findsNothing);
   }, variant: _iOS);
 
@@ -510,7 +510,7 @@ void main() {
       await accept(tester);
       await settle(tester);
 
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
       expectOnlyMessage("1 of 3 images couldn't be added: 1 unreadable file.");
     }, variant: _iOS);
   }

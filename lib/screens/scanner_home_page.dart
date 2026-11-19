@@ -55,11 +55,17 @@ const _minPageCardHeight = 72.0;
 const _cameraButtonClearance =
     56.0 + kFloatingActionButtonMargin + _pageGridSpacing;
 
-/// Columns, card size and padding of the page grid for one viewport.
+/// Columns, card size and padding of the page grid for one viewport, and
+/// the strip below it kept free for the camera button.
+///
+/// [cameraInset] is outside the scrolling area, so the camera button never
+/// covers a card at any scroll position: tall viewports stop the grid above
+/// the button, short ones keep a column beside it (in [padding]).
 typedef _PageGridGeometry = ({
   int columns,
   Size cardSize,
   EdgeInsetsDirectional padding,
+  double cameraInset,
 });
 const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
@@ -2379,11 +2385,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     '${_preferences.pdfQuality.label} quality',
   ].join(', ');
 
+  /// The page count comes right after the verb, so it stays visible when a
+  /// large text size truncates the label.
   String get _exportLabel {
     final pages = '${_pages.length} ${_pages.length == 1 ? 'page' : 'pages'}';
     return _exportsSearchable
-        ? 'Export searchable PDF ($pages)'
-        : 'Export PDF ($pages)';
+        ? 'Export $pages as searchable PDF'
+        : 'Export $pages as PDF';
   }
 
   /// One height for every export state and page count, so starting,
@@ -2509,17 +2517,61 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool get _canClearPages =>
       _pages.isNotEmpty && !_isClearingDraft && !_isGeneratingPdf;
 
+  static const _draftHint =
+      'Drafts are temporary. Export a PDF to keep a copy.';
+
+  /// How many lines [text] takes at [maxWidth], at most [maxLines].
+  static int _lineCount(
+    String text, {
+    required TextStyle? style,
+    required TextScaler textScaler,
+    required double maxWidth,
+    required int maxLines,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+      textScaler: textScaler,
+      maxLines: maxLines,
+    )..layout(maxWidth: math.max(0, maxWidth));
+    final lines = painter.computeLineMetrics().length;
+    painter.dispose();
+    return lines.clamp(1, maxLines);
+  }
+
   static const _draftSaveFailureMessage =
       'Could not save the latest draft changes. Keep the app open and retry.';
 
-  /// One fixed-height line above the pages that shows either the draft hint
+  /// One fixed-height slot above the pages that shows either the draft hint
   /// or a draft-save failure with Retry. A failure arrives asynchronously, so
   /// it must replace the hint in place instead of pushing the grid down.
+  ///
+  /// On tall screens it fits two lines of the hint at the user's text size,
+  /// so large text wraps the hint instead of cutting it off early.
+  /// Short landscape screens keep one line for the pages. The height depends
+  /// only on the screen and the text size, never on the state.
   /// Image intake help shares the line, so it never moves the grid either.
   Widget _buildDraftStatusSlot(BuildContext context) {
     final theme = Theme.of(context);
     final textScaler = MediaQuery.textScalerOf(context);
-    final height = math.max(48.0, textScaler.scale(20) + 8);
+    final screen = MediaQuery.sizeOf(context);
+    final style = theme.textTheme.bodySmall;
+    final hintLines = screen.height < 480
+        ? 1
+        : _lineCount(
+            _draftHint,
+            style: style,
+            textScaler: textScaler,
+            maxWidth: screen.width - 32,
+            maxLines: 2,
+          );
+    final lineHeight =
+        textScaler.scale(style?.fontSize ?? 12) * (style?.height ?? 1.33);
+    final height = math.max(
+      48.0,
+      math.max(textScaler.scale(20), hintLines * lineHeight) + 8,
+    );
     final Widget content;
     if (_draftSaveFailed) {
       final errorColor = theme.colorScheme.error;
@@ -2556,18 +2608,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         ],
       );
     } else {
-      final style = theme.textTheme.bodySmall;
-      final lineHeight =
-          textScaler.scale(style?.fontSize ?? 12) * (style?.height ?? 1.33);
-      final hint = _pages.isEmpty
-          ? null
-          : Text(
-              'Drafts are temporary. Export a PDF to keep a copy.',
-              style: style,
-              textAlign: TextAlign.center,
-              maxLines: ((height - 8) / lineHeight).floor().clamp(1, 2),
-              overflow: TextOverflow.ellipsis,
-            );
       final help = _imageIntakeStatus == null
           ? null
           : TextButton.icon(
@@ -2578,7 +2618,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       content = Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (hint != null) Expanded(child: hint),
+          if (_pages.isNotEmpty)
+            Expanded(
+              child: Text(
+                _draftHint,
+                style: style,
+                textAlign: TextAlign.center,
+                maxLines: hintLines,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           if (help != null) Flexible(child: help),
         ],
       );
@@ -2594,8 +2643,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Widget _buildEmptyState(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
     final textScaler = MediaQuery.textScalerOf(context);
     // Nominal height of the ready state (icon, one-line title, two lines of
     // copy and the gallery button). The top inset centers that block, but
@@ -2604,67 +2651,89 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final readyHeight =
         80 + 16 + textScaler.scale(32) + 8 + textScaler.scale(40) + 24 + 48;
     return LayoutBuilder(
-      builder: (context, constraints) => SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          32,
-          math.max(32, (constraints.maxHeight - readyHeight) / 2),
-          32,
-          32,
-        ),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // The spinner gets the icon's 80 px square.
-                Center(
-                  child: SizedBox.square(
-                    key: const Key('empty_state_icon'),
-                    dimension: 80,
-                    child: _isRestoringDraft
-                        ? const Center(child: CircularProgressIndicator())
-                        : Icon(
-                            _cameraSupported
-                                ? Icons.camera_alt_outlined
-                                : Icons.photo_library_outlined,
-                            size: 80,
-                            color: muted,
-                          ),
-                  ),
+      builder: (context, constraints) {
+        // The space the page grid keeps free for the camera button is
+        // scroll padding here: the content centers above the button and can
+        // always be scrolled clear of it.
+        final geometry = _pageGridGeometry(constraints.biggest);
+        final besideCamera = geometry.padding.end > _pageGridSpacing
+            ? geometry.padding.end
+            : 0.0;
+        final height = constraints.maxHeight - geometry.cameraInset;
+        return _buildEmptyStateContent(
+          context,
+          padding: EdgeInsetsDirectional.fromSTEB(
+            32,
+            math.max(32, (height - readyHeight) / 2),
+            math.max(32, besideCamera),
+            32 + geometry.cameraInset,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEmptyStateContent(
+    BuildContext context, {
+    required EdgeInsetsDirectional padding,
+  }) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return SingleChildScrollView(
+      padding: padding,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // The spinner gets the icon's 80 px square.
+              Center(
+                child: SizedBox.square(
+                  key: const Key('empty_state_icon'),
+                  dimension: 80,
+                  child: _isRestoringDraft
+                      ? const Center(child: CircularProgressIndicator())
+                      : Icon(
+                          _cameraSupported
+                              ? Icons.camera_alt_outlined
+                              : Icons.photo_library_outlined,
+                          size: 80,
+                          color: muted,
+                        ),
                 ),
-                const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _isRestoringDraft ? 'Restoring draft…' : 'Ready to scan',
+                key: const Key('empty_state_title'),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineSmall,
+              ),
+              if (!_isRestoringDraft) ...[
+                const SizedBox(height: 8),
                 Text(
-                  _isRestoringDraft ? 'Restoring draft…' : 'Ready to scan',
-                  key: const Key('empty_state_title'),
+                  _cameraSupported
+                      ? 'Scan your first page, or import from your gallery.'
+                      : 'Import from your gallery to add your first page.',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineSmall,
+                  style: TextStyle(color: muted),
                 ),
-                if (!_isRestoringDraft) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _cameraSupported
-                        ? 'Scan your first page, or import from your gallery.'
-                        : 'Import from your gallery to add your first page.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: muted),
+                const SizedBox(height: 24),
+                Center(
+                  child: OutlinedButton.icon(
+                    onPressed:
+                        _isPickingImages ||
+                            _isClearingDraft ||
+                            !_canStartImagePick
+                        ? null
+                        : _importFromGallery,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('Import from gallery'),
                   ),
-                  const SizedBox(height: 24),
-                  Center(
-                    child: OutlinedButton.icon(
-                      onPressed:
-                          _isPickingImages ||
-                              _isClearingDraft ||
-                              !_canStartImagePick
-                          ? null
-                          : _importFromGallery,
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text('Import from gallery'),
-                    ),
-                  ),
-                ],
+                ),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -2692,20 +2761,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       );
     }
 
-    // Tall viewports: cards keep their shape, and the grid can scroll its
-    // last row above the camera button.
+    // Tall viewports: cards keep their shape, and the grid ends above the
+    // camera button, so no card scrolls under it.
     final tall = columnsFor(viewport.width - 2 * _pageGridSpacing);
     final tallHeight = tall.width / _pageCardAspectRatio;
-    if (_pageGridSpacing + tallHeight + clearance <= viewport.height) {
+    final cameraInset = _cameraSupported ? _cameraButtonClearance : 0.0;
+    if (2 * _pageGridSpacing + tallHeight + cameraInset <= viewport.height) {
       return (
         columns: tall.columns,
         cardSize: Size(tall.width, tallHeight),
-        padding: EdgeInsetsDirectional.fromSTEB(
-          _pageGridSpacing,
-          _pageGridSpacing,
-          _pageGridSpacing,
-          clearance,
-        ),
+        padding: const EdgeInsetsDirectional.all(_pageGridSpacing),
+        cameraInset: cameraInset,
       );
     }
     // Short viewports (landscape phones): cards are shortened so a whole row
@@ -2730,25 +2796,29 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         clearance,
         vertical,
       ),
+      cameraInset: 0,
     );
   }
 
   Widget _buildPageGrid() => LayoutBuilder(
     builder: (context, constraints) {
       final geometry = _gridGeometry = _pageGridGeometry(constraints.biggest);
-      return GridView.builder(
-        key: const Key('page_grid'),
-        controller: _gridScroll,
-        padding: geometry.padding,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: geometry.columns,
-          crossAxisSpacing: _pageGridSpacing,
-          mainAxisSpacing: _pageGridSpacing,
-          mainAxisExtent: geometry.cardSize.height,
+      return Padding(
+        padding: EdgeInsets.only(bottom: geometry.cameraInset),
+        child: GridView.builder(
+          key: const Key('page_grid'),
+          controller: _gridScroll,
+          padding: geometry.padding,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: geometry.columns,
+            crossAxisSpacing: _pageGridSpacing,
+            mainAxisSpacing: _pageGridSpacing,
+            mainAxisExtent: geometry.cardSize.height,
+          ),
+          itemCount: _pages.length,
+          itemBuilder: (context, index) =>
+              _buildPageCard(context, index, geometry.cardSize),
         ),
-        itemCount: _pages.length,
-        itemBuilder: (context, index) =>
-            _buildPageCard(context, index, geometry.cardSize),
       );
     },
   );
@@ -2880,7 +2950,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _fabLocation.estimatedBarHeight = _reservedExportBarHeight(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('FOSScanner'),
+        // Scales down rather than truncating at large text sizes.
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: Text('FOSScanner'),
+        ),
         // The same actions in the same places whether or not the document has
         // pages; clearing lives in the always-present overflow menu.
         actions: [

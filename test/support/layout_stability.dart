@@ -28,6 +28,22 @@ final layoutMatrix = [
     for (final scale in layoutTextScales) LayoutCase(size, scale),
 ];
 
+/// The largest display size and font QA uses: a 1080 × 2400 phone at
+/// density 560 with 2.0× font, tested as 412 × 915 logical pixels, and the
+/// same screen at its physical density (308 × 686).
+const highDensityLargeTextCases = [
+  LayoutCase(Size(412, 915), 2.0),
+  LayoutCase(Size(308, 686), 2.0),
+];
+
+/// The phone sizes of [layoutSizes] at the maximum text scale, plus
+/// [highDensityLargeTextCases].
+const largeDisplayCases = [
+  LayoutCase(Size(320, 568), 2.0),
+  LayoutCase(Size(390, 844), 2.0),
+  ...highDensityLargeTextCases,
+];
+
 /// Applies [layoutCase]'s physical size; the text scale must be applied by
 /// wrapping the app with [withTextScale].
 void applyLayoutCase(WidgetTester tester, LayoutCase layoutCase) {

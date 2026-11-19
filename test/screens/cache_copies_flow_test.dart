@@ -176,7 +176,7 @@ void main() {
       }
       await settle(tester);
 
-      expect(find.text('Export PDF (3 pages)'), findsOneWidget);
+      expect(find.text('Export 3 pages as PDF'), findsOneWidget);
       expect(scaled.existsSync(), isFalse);
       expect(copy.existsSync(), isFalse);
       expect(copy.parent.existsSync(), isFalse);
@@ -192,7 +192,7 @@ void main() {
   testWidgets('a dismissed share sheet removes the share copy', (tester) async {
     final share = _Share(cache, ShareResultStatus.dismissed);
     await pumpHome(tester, share: share, pages: [page()]);
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as PDF'));
     await pumpUntil(tester, () => share.copy != null);
     await pumpUntil(tester, () => !share.copy!.existsSync());
     expect(Directory('${cache.path}/share_plus').listSync(), isEmpty);
@@ -206,9 +206,9 @@ void main() {
     final foreign = File('${cache.path}/share_plus/notes.pdf')
       ..createSync(recursive: true);
     await pumpHome(tester, share: share, pages: [page()]);
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as PDF'));
     await pumpUntil(tester, () => share.copy != null);
-    await pumpUntilFound(tester, find.text('Export PDF (1 page)'));
+    await pumpUntilFound(tester, find.text('Export 1 page as PDF'));
     // The receiving app may still be reading it.
     expect(share.copy!.existsSync(), isTrue);
 

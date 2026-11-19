@@ -241,7 +241,7 @@ void main() {
 
     // No captured pages yet, so there's nothing to clear or export.
     expect(await isClearAllPagesEnabled(tester), isFalse);
-    expect(find.textContaining('Export PDF'), findsNothing);
+    expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
   });
 
   testWidgets(
@@ -1081,7 +1081,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as PDF'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
     final params = sharePlatform.lastParams;
@@ -1132,7 +1132,7 @@ void main() {
       expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Export PDF (1 page)'));
+      await tester.tap(find.text('Export 1 page as PDF'));
       await tester.pump();
       expect(find.byTooltip('PDF export options'), findsNothing);
       await pumpUntil(tester, () => sharePlatform.lastParams != null);
@@ -1143,7 +1143,7 @@ void main() {
         matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
       );
       expect(find.text('Keep this draft?'), findsNothing);
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
       await tester.tap(find.byTooltip('PDF export options'));
       await tester.pumpAndSettle();
       expect(
@@ -1219,7 +1219,7 @@ void main() {
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       final expectedAnchor = tester.getRect(find.byType(FilledButton));
-      await tester.tap(find.text('Export searchable PDF (1 page)'));
+      await tester.tap(find.text('Export 1 page as searchable PDF'));
       await pumpUntil(tester, () => started.isCompleted, settle: false);
       expect(find.byType(SwitchListTile), findsNothing);
       expect(find.byTooltip('PDF export options'), findsNothing);
@@ -1291,7 +1291,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export searchable PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as searchable PDF'));
     await pumpUntilFound(
       tester,
       find.text('Searchable export failed'),

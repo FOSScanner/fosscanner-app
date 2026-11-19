@@ -221,7 +221,7 @@ void main() {
           )
           .onTap!;
 
-      await tester.tap(find.text('Export PDF (2 pages)'));
+      await tester.tap(find.text('Export 2 pages as PDF'));
       await tester.pump();
       await tester.tap(find.text('Image intake help'));
       await tester.pump();
@@ -277,7 +277,7 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsNothing);
 
       await pumpUntil(tester, () => share.calls == 1);
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
       expect(button(tester, 'Import from gallery').onPressed, isNotNull);
       expect(button(tester, 'Delete page 1').onPressed, isNotNull);
     },
@@ -293,7 +293,7 @@ void main() {
     final undo = tester
         .widget<SnackBarAction>(find.byType(SnackBarAction))
         .onPressed;
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Export 2 pages as PDF'));
     await tester.pump();
     undo();
     await tester.pump();
@@ -302,7 +302,7 @@ void main() {
     undo();
     await tester.pump();
     expect(store.saveCalls, 1);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export 2 pages as PDF'), findsOneWidget);
     expect(find.byType(SnackBarAction), findsNothing);
   });
 
@@ -356,7 +356,7 @@ void main() {
     await tester.pump();
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Export 2 pages as PDF'));
     await tester.pump();
     expect(find.text('Generating PDF 0%'), findsOneWidget);
     expect(share.calls, 0);
@@ -377,7 +377,7 @@ void main() {
     await tester.pump();
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Export 2 pages as PDF'));
     await tester.pump();
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pump();
@@ -393,7 +393,7 @@ void main() {
   testWidgets('share failure releases admission', (tester) async {
     share.error = StateError('injected share failure');
     await pumpHome(tester);
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Export 2 pages as PDF'));
     await pumpUntilFound(
       tester,
       find.text('Could not export the PDF. Try again.'),

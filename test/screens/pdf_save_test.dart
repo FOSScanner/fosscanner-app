@@ -161,7 +161,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await pumpHome(tester);
     expect(saveButton(), findsNothing);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     debugDefaultTargetPlatformOverride = null;
   });
 
@@ -204,7 +204,7 @@ void main() {
     await tester.tap(saveButton());
     await pumpUntil(tester, () => saver.suggestedName != null, settle: false);
     saver.picked.complete(false);
-    await pumpUntilFound(tester, find.text('Export PDF (1 page)'));
+    await pumpUntilFound(tester, find.text('Export 1 page as PDF'));
     expect(cache.listSync(), isEmpty);
     expect(saver.target, isNull);
     expect(find.byType(SnackBar), findsNothing);
@@ -380,7 +380,7 @@ void main() {
         find.byTooltip('PDF export options').hitTestable(),
         findsOneWidget,
       );
-      expect(find.text('Export PDF (1 page)').hitTestable(), findsOneWidget);
+      expect(find.text('Export 1 page as PDF').hitTestable(), findsOneWidget);
     });
   }
 }

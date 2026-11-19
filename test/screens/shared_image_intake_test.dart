@@ -224,7 +224,7 @@ void main() {
 
       await accept(tester);
       await settle(tester);
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
       expect(store.saves.last, hasLength(2));
       expect(store.saves.last.first, same(restored));
     },
@@ -251,7 +251,7 @@ void main() {
       await settle(tester);
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
       expect(find.textContaining('Import stopped.'), findsOneWidget);
       expect(files.every((file) => !file.existsSync()), isTrue);
 
@@ -341,7 +341,7 @@ void main() {
       expect(inbox.takeCalls, [maxDocumentPages, maxDocumentPages - 1]);
       await accept(tester);
       await settle(tester);
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
       // Gallery originals belong to the user.
       expect(gallery.existsSync(), isTrue);
       expect(shared.existsSync(), isFalse);
@@ -391,7 +391,10 @@ void main() {
       await settle(tester);
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(find.text('Export PDF ($maxDocumentPages pages)'), findsOneWidget);
+      expect(
+        find.text('Export $maxDocumentPages pages as PDF'),
+        findsOneWidget,
+      );
       expect(
         find.textContaining('reached the $maxDocumentPages-page limit'),
         findsOneWidget,

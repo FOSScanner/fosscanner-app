@@ -167,7 +167,7 @@ void main() {
 
         store.loaded.complete([savedPage()]);
         await tester.pumpAndSettle();
-        expect(find.text('Export PDF (1 page)'), findsOneWidget);
+        expect(find.text('Export 1 page as PDF'), findsOneWidget);
         expect(find.text('Restoring draft…'), findsNothing);
         await tester.tap(find.byTooltip(tooltip));
         await tester.pumpAndSettle();
@@ -214,7 +214,7 @@ void main() {
       await tester.tap(find.text('Add page'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
       expect(store.saves.single, hasLength(2));
       expect(store.saves.single.first, same(restored));
       expect(store.saves.single.last.originalBytes, orderedEquals(imageBytes));
@@ -258,7 +258,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.loadCalls, 2);
       expect(store.clearCalls, 0);
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
       await tester.tap(find.byTooltip('Import from gallery'));
       await tester.pumpAndSettle();
       expect(picker.galleryCalls, 1);
@@ -378,7 +378,7 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
       expect(store.saves, isEmpty);
       expect(recovered.existsSync(), isFalse);
     },

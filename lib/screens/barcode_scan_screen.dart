@@ -391,8 +391,13 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     final cameraAttempt = _cameraAttempt;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          result == null ? 'Scan QR code or barcode' : 'Scanned result',
+        // Scales down rather than truncating at large text sizes.
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            result == null ? 'Scan QR code or barcode' : 'Scanned result',
+          ),
         ),
         actions: [
           if (result == null)

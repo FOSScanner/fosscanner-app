@@ -30,11 +30,7 @@ const _landscapeCases = [
 ];
 
 /// Large text and high display density (a 560 dpi phone at 2.0×).
-const _largeDisplayCases = [
-  LayoutCase(Size(320, 568), 2.0),
-  LayoutCase(Size(390, 844), 2.0),
-  LayoutCase(Size(412, 915), 2.0),
-];
+const _largeDisplayCases = largeDisplayCases;
 
 Finder _card(int index) => find.ancestor(
   of: find.byKey(ValueKey('page_thumbnail_$index')),

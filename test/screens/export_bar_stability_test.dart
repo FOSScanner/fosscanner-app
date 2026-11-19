@@ -301,7 +301,7 @@ void main() {
       applyLayoutCase(tester, const LayoutCase(Size(320, 568), 2.0));
       await pumpHome(tester, const LayoutCase(Size(320, 568), 2.0), pages: 100);
       final label = tester.widget<Text>(
-        find.text('Export searchable PDF (100 pages)'),
+        find.text('Export 100 pages as searchable PDF'),
       );
       expect(label.maxLines, 2);
       expect(label.overflow, TextOverflow.ellipsis);

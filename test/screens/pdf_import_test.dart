@@ -271,7 +271,7 @@ void main() {
 
     expect(operations.detectCalls, 0);
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export PDF (3 pages)'), findsOneWidget);
+    expect(find.text('Export 3 pages as PDF'), findsOneWidget);
     expect(store.saves.last, hasLength(3));
     expect(files.every((file) => !file.existsSync()), isTrue);
   }, variant: _iOS);
@@ -312,7 +312,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     expect(
       find.text('Import stopped. Pages already added were kept.'),
       findsOneWidget,
@@ -337,7 +337,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export PDF ($maxDocumentPages pages)'), findsOneWidget);
+    expect(find.text('Export $maxDocumentPages pages as PDF'), findsOneWidget);
     expect(
       find.textContaining('reached the $maxDocumentPages-page limit'),
       findsOneWidget,
@@ -475,7 +475,7 @@ void main() {
     await waitForEditor(tester);
     await accept(tester);
     await settle(tester);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     expect(
       find.text("2 of 3 pages couldn't be added: 2 too large to render."),
       findsOneWidget,

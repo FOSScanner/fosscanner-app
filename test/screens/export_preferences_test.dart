@@ -78,7 +78,7 @@ void main() {
       _Store(const AppPreferences(searchablePdf: true)),
       pages: 2,
     );
-    expect(find.text('Export searchable PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export 2 pages as searchable PDF'), findsOneWidget);
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
     expect(
@@ -92,7 +92,7 @@ void main() {
   ) async {
     final store = _Store();
     await pumpHome(tester, store);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
 
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
@@ -101,7 +101,7 @@ void main() {
     expect(store.saved, [const AppPreferences(searchablePdf: true)]);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    expect(find.text('Export searchable PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as searchable PDF'), findsOneWidget);
 
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
@@ -110,7 +110,7 @@ void main() {
     expect(store.saved.last, const AppPreferences());
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
   });
 
   testWidgets('platforms without OCR ignore a stored searchable choice', (
@@ -118,7 +118,7 @@ void main() {
   ) async {
     final store = _Store(const AppPreferences(searchablePdf: true));
     await pumpHome(tester, store, searchable: false);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     expect(find.textContaining('searchable'), findsNothing);
     expect(store.saved, isEmpty);
   });
@@ -137,7 +137,7 @@ void main() {
 
     store.loaded.complete(const AppPreferences());
     await tester.pumpAndSettle();
-    expect(find.text('Export searchable PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as searchable PDF'), findsOneWidget);
   });
 
   for (final size in [const Size(320, 568), const Size(640, 300)]) {
@@ -171,12 +171,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final label = find.text('Export searchable PDF (12 pages)');
+      final label = find.text('Export 12 pages as searchable PDF');
       expect(label.hitTestable(), findsOneWidget);
       final bar = tester.getRect(find.byKey(const Key('pdf_export_bar')));
       expect(tester.getRect(label).right, lessThanOrEqualTo(bar.right));
       expect(
-        find.bySemanticsLabel('Export searchable PDF (12 pages)'),
+        find.bySemanticsLabel('Export 12 pages as searchable PDF'),
         findsOneWidget,
       );
       semantics.dispose();

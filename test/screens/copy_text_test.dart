@@ -125,7 +125,7 @@ void main() {
         'ensureTessdata',
         'copyRecognizedText',
       ]);
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
       // The page copies written for the native worker are gone.
       expect(File(pagePaths!.first).parent.existsSync(), isFalse);
     },
@@ -160,7 +160,7 @@ void main() {
       await pumpUntilFound(tester, find.text('Could not recognize text.'));
       expect(find.textContaining('ocr_failed'), findsNothing);
       expect(find.textContaining('PlatformException'), findsNothing);
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );

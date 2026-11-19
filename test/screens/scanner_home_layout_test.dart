@@ -110,7 +110,7 @@ void main() {
     setViewport(tester, const Size(390, 844));
     await pumpHome(tester, pageCount: 3);
 
-    expect(find.text('Export PDF (3 pages)'), findsOneWidget);
+    expect(find.text('Export 3 pages as PDF'), findsOneWidget);
     expect(find.byTooltip('PDF export options'), findsOneWidget);
     expect(find.byType(SwitchListTile), findsNothing);
     expect(find.text('About FOSScanner'), findsNothing);
@@ -161,7 +161,7 @@ void main() {
     tester,
   ) async {
     await pumpHome(tester, searchable: false);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
     await openOptions(tester);
     expect(find.byType(SwitchListTile), findsNothing);
     expect(find.textContaining('Latin-script'), findsNothing);
@@ -194,7 +194,7 @@ void main() {
         setViewport(tester, size);
         await pumpHome(tester, textScale: 2, brightness: brightness);
         expect(tester.takeException(), isNull);
-        expect(find.text('Export PDF (1 page)').hitTestable(), findsOneWidget);
+        expect(find.text('Export 1 page as PDF').hitTestable(), findsOneWidget);
         await openOptions(tester);
         expect(tester.takeException(), isNull);
         await tester.ensureVisible(find.text('Searchable text'));
