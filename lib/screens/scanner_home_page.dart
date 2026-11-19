@@ -73,8 +73,10 @@ enum _PhotoIntakeResult {
 
   /// The image could not be added; the reason is in the intake report.
   rejected,
-  capacityReached,
-  stopped,
+
+  /// The intake cannot continue (stopped, document full or cleared); the
+  /// reason is in the intake report.
+  ended,
 
   /// A camera page was added and the user asked to capture another one.
   addedScanNext,
@@ -333,9 +335,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         maxCount: math.max(0, maxDocumentPages - _pages.length),
       );
       paths = batch.paths;
-      if (!mounted ||
-          _isClearingDraft ||
-          documentGeneration != _documentGeneration) {
+      if (!mounted) return;
+      if (_isClearingDraft || documentGeneration != _documentGeneration) {
+        _logIntake(PageReviewSource.shared, 'all', 'document cleared');
+        if (paths.isNotEmpty || batch.rejected > 0) {
+          _showMessage(_discardedIntakeMessage);
+        }
         return;
       }
       // Items the platform could not hand over are rejections of the same
@@ -676,15 +681,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _showDocumentLimit() => _showMessage(_documentLimitMessage);
 
+  /// Adds a reviewed page, or records in [report] why it could not be.
   bool _tryAddPage(
     ScannedPage page, {
     required int documentGeneration,
     required IntakeReport report,
   }) {
-    if (_isClearingDraft ||
-        _isGeneratingPdf ||
-        !mounted ||
+    if (!mounted ||
+        _isClearingDraft ||
         documentGeneration != _documentGeneration) {
+      report.end(_discardedIntakeMessage);
+      return false;
+    }
+    if (_draftRestoreFailed || _isGeneratingPdf) {
+      // Intake is locked in both states; this guards a stale review.
+      report.end('Could not add the page. Try again.');
       return false;
     }
     if (!canRetainDocument(
@@ -1074,7 +1085,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       }
       final batch = await _renderPdfWithProgress(importer, request);
       paths = batch.paths;
-      if (!isCurrent()) return;
+      if (!mounted) return;
+      if (!isCurrent()) {
+        _logIntake(PageReviewSource.pdf, 'all', 'document cleared');
+        _showMessage(_discardedIntakeMessage);
+        return;
+      }
       final report = IntakeReport(
         total: paths.length + batch.rejected,
         noun: 'page',
@@ -1218,6 +1234,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         currentPages: _pages.length,
         incomingBytes: 1,
       )) {
+        _logIntake(source, '${index + 1}/${files.length}', 'document full');
         report.end(_documentLimitMessage);
         // Not read: the caller deletes app-owned files from here on.
         return index;
@@ -1234,6 +1251,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       );
     }
     return next;
+  }
+
+  static const _discardedIntakeMessage =
+      'Import cancelled because the pages were cleared.';
+
+  /// Debug builds only: why an intake item was not added. Never logs paths
+  /// or image content.
+  void _logIntake(PageReviewSource source, String item, String outcome) {
+    if (kDebugMode) debugPrint('Intake ${source.name} $item: $outcome.');
   }
 
   /// Shows the one message summarizing an intake, if it needs one.
@@ -1259,19 +1285,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     required int documentGeneration,
     ValueSetter<Uint8List>? onRetake,
   }) async {
+    // Every way out that does not add a page is recorded in [report] (or is
+    // the user's own Skip) and logged in debug builds.
+    final item = '${batchPosition ?? 1}/${batchCount ?? 1}';
     _PhotoIntakeResult reject(IntakeRejection reason) {
+      _logIntake(source, item, reason.name);
       report.reject(reason);
       return _PhotoIntakeResult.rejected;
     }
 
-    _PhotoIntakeResult reachLimit() {
-      report.end(_documentLimitMessage);
-      return _PhotoIntakeResult.capacityReached;
+    _PhotoIntakeResult end(String outcome, String message) {
+      _logIntake(source, item, outcome);
+      report.end(message);
+      return _PhotoIntakeResult.ended;
     }
 
-    if (_isClearingDraft || documentGeneration != _documentGeneration) {
+    _PhotoIntakeResult reachLimit() =>
+        end('document full', _documentLimitMessage);
+
+    _PhotoIntakeResult discard() =>
+        end('document cleared', _discardedIntakeMessage);
+
+    bool isStale() =>
+        !mounted ||
+        _isClearingDraft ||
+        documentGeneration != _documentGeneration;
+
+    if (isStale()) {
       if (deleteAfterRead) await _deleteFileQuietly(photo.path);
-      return _PhotoIntakeResult.skipped;
+      return discard();
     }
 
     late final Uint8List bytes;
@@ -1314,9 +1356,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return reject(IntakeRejection.unreadable);
     }
 
-    if (_isClearingDraft || documentGeneration != _documentGeneration) {
-      return _PhotoIntakeResult.skipped;
-    }
+    if (isStale()) return discard();
     if (!canRetainDocument(
       currentBytes: _retainedImageBytes,
       currentPages: _pages.length,
@@ -1337,7 +1377,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (!mounted ||
         _isClearingDraft ||
         documentGeneration != _documentGeneration) {
-      return _PhotoIntakeResult.skipped;
+      return discard();
     }
 
     if (!canProcessSourceImage(
@@ -1368,20 +1408,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       ),
     );
     if (stopRequested) {
-      report.end(
+      return end(
+        'stopped',
         'Import stopped. Pages already added were kept; the remaining '
-        '${report.noun}s were not added.',
+            '${report.noun}s were not added.',
       );
-      return _PhotoIntakeResult.stopped;
     }
     if (retakeRequested && result == null) {
       onRetake?.call(bytes);
       return _PhotoIntakeResult.retake;
     }
-    if (result == null ||
-        !mounted ||
-        _isClearingDraft ||
-        documentGeneration != _documentGeneration) {
+    if (result == null) {
+      // Skip, Cancel, or back: the user's choice, so nothing to report.
+      _logIntake(source, item, 'left the review without adding');
       return _PhotoIntakeResult.skipped;
     }
     if (!_tryAddPage(
@@ -1389,7 +1428,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       documentGeneration: documentGeneration,
       report: report,
     )) {
-      return _PhotoIntakeResult.capacityReached;
+      _logIntake(source, item, 'not added after review');
+      return _PhotoIntakeResult.ended;
     }
     _lastNewPageFilter = result.filter;
     return scanNextRequested

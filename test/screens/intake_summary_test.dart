@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show DebugPrintCallback, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,12 +21,14 @@ final _iOS = TargetPlatformVariant.only(TargetPlatform.iOS);
 class _Inbox implements SharedImageInbox {
   VoidCallback? listener;
   SharedImageBatch? batch;
+  Completer<SharedImageBatch>? pending;
 
   @override
   void setListener(VoidCallback? onAvailable) => listener = onAvailable;
 
   @override
   Future<SharedImageBatch> take({required int maxCount}) async {
+    if (pending case final waiting?) return waiting.future;
     final taken = batch ?? const SharedImageBatch();
     batch = null;
     return taken;
@@ -60,6 +64,7 @@ class _Store implements DraftStore {
 
 class _Picker extends ImagePickerPlatform {
   List<XFile> galleryPhotos = [];
+  Completer<List<XFile>>? pendingGallery;
   List<XFile> recoveredPhotos = [];
 
   @override
@@ -68,12 +73,20 @@ class _Picker extends ImagePickerPlatform {
   @override
   Future<List<XFile>> getMultiImageWithOptions({
     MultiImagePickerOptions options = const MultiImagePickerOptions(),
-  }) async => galleryPhotos;
+  }) async => await pendingGallery?.future ?? galleryPhotos;
 
   @override
   Future<LostDataResponse> getLostData() async => recoveredPhotos.isEmpty
       ? LostDataResponse.empty()
       : LostDataResponse(files: recoveredPhotos);
+}
+
+/// A file whose declared length is over the per-image limit.
+class _OversizedXFile extends XFile {
+  _OversizedXFile(super.path);
+
+  @override
+  Future<int> length() async => 40 * 1024 * 1024;
 }
 
 class _Operations implements CornerAdjustOperations {
@@ -145,10 +158,14 @@ void main() {
   String tiny() => file(tinyBytes);
   String notImage() => file(notImageBytes);
 
-  Future<void> pumpHome(WidgetTester tester) async {
+  Future<void> pumpHome(
+    WidgetTester tester, {
+    List<ScannedPage> initialPages = const [],
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: ScannerHomePage(
+          initialPages: initialPages,
           draftStore: _Store(),
           searchablePdfEnabled: false,
           cornerAdjustOperations: _Operations(),
@@ -319,5 +336,124 @@ void main() {
       'This image is too small or has unsupported dimensions. '
       'Choose another image, or resize a large image and try again.',
     );
+  }, variant: _iOS);
+
+  // #91: every way a batch item is not added has a reason.
+  ScannedPage page([Uint8List? bytes]) => ScannedPage(
+    originalBytes: bytes ?? validBytes,
+    processedBytes: bytes ?? validBytes,
+    corners: const [],
+  );
+
+  Future<void> clearAllPages(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Clear all pages'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
+    await settle(tester);
+  }
+
+  testWidgets(
+    'unreadable and oversized files are reported and logged without paths',
+    (tester) async {
+      final logs = <String>[];
+      final DebugPrintCallback originalDebugPrint = debugPrint;
+      debugPrint = (message, {wrapWidth}) => logs.add(message ?? '');
+
+      picker.galleryPhotos = [
+        XFile('${directory.path}/missing.png'),
+        _OversizedXFile(valid()),
+        XFile(valid()),
+      ];
+      await pumpHome(tester);
+      await settle(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester, 'Image 3 of 3');
+      await accept(tester);
+      await settle(tester);
+
+      // Restored before the test ends, which checks debug variables.
+      debugPrint = originalDebugPrint;
+      expectOnlyMessage(
+        "2 of 3 images couldn't be added: 1 unreadable file, "
+        '1 file over 32 MB.',
+      );
+      expect(logs, contains('Intake gallery 1/3: unreadable.'));
+      expect(logs, contains('Intake gallery 2/3: fileTooLarge.'));
+      expect(logs.where((line) => line.contains(directory.path)), isEmpty);
+    },
+    variant: _iOS,
+  );
+
+  testWidgets('images that need too much memory to process are reported', (
+    tester,
+  ) async {
+    // 250 MB of retained page storage leaves no processing headroom.
+    final storage = Uint8List(50 * 5 * 1024 * 1024)
+      ..setRange(0, validBytes.length, validBytes);
+    final retained = Uint8List.sublistView(storage, 0, validBytes.length);
+    picker.galleryPhotos = [XFile(valid()), XFile(valid())];
+    await pumpHome(tester, initialPages: List.filled(50, page(retained)));
+    await settle(tester);
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await settle(tester);
+
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expectOnlyMessage("2 images couldn't be added: 2 too large to process.");
+  }, variant: _iOS);
+
+  testWidgets(
+    'clearing the pages while the gallery is open cancels with a reason',
+    (tester) async {
+      picker.pendingGallery = Completer();
+      await pumpHome(tester, initialPages: [page()]);
+      await settle(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await tester.pump();
+      await clearAllPages(tester);
+      picker.pendingGallery!.complete([XFile(valid()), XFile(valid())]);
+      await settle(tester);
+
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expectOnlyMessage('Import cancelled because the pages were cleared.');
+    },
+    variant: _iOS,
+  );
+
+  testWidgets(
+    'clearing the pages while a share is being read discards it with a '
+    'reason',
+    (tester) async {
+      inbox.pending = Completer();
+      await pumpHome(tester, initialPages: [page()]);
+      await settle(tester);
+      await clearAllPages(tester);
+      final shared = valid();
+      inbox.pending!.complete(SharedImageBatch(paths: [shared]));
+      await settle(tester);
+
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expectOnlyMessage('Import cancelled because the pages were cleared.');
+      expect(File(shared).existsSync(), isFalse);
+    },
+    variant: _iOS,
+  );
+
+  testWidgets('skipping an image is the user\'s choice, not a rejection', (
+    tester,
+  ) async {
+    picker.galleryPhotos = [XFile(valid()), XFile(valid())];
+    await pumpHome(tester);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await waitForEditor(tester, 'Image 1 of 2');
+    await tester.tap(find.text('Skip image'));
+    await waitForEditor(tester, 'Image 2 of 2');
+    await accept(tester);
+    await settle(tester);
+
+    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
   }, variant: _iOS);
 }
