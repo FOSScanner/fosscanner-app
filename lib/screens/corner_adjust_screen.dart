@@ -639,57 +639,63 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         ],
       ),
     );
-    final actions = SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _isLeaving || _isProcessing
-                    ? null
-                    : _canRetake
-                    ? _retake
-                    : _cancelReview,
-                child: Text(
-                  _canSkipImage
-                      ? 'Skip image'
-                      : _canRetake
-                      ? 'Retake'
-                      : 'Cancel',
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: FilledButton(
-                onPressed:
-                    _isGeneratingPreviews ||
-                        _isLeaving ||
-                        _isProcessing ||
-                        _cropProblem != null
-                    ? null
-                    : _goToFilterStep,
-                child: _isGeneratingPreviews
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Preview page'),
-              ),
-            ),
-          ],
+    Widget actions({required bool landscape}) {
+      final secondary = OutlinedButton(
+        onPressed: _isLeaving || _isProcessing
+            ? null
+            : _canRetake
+            ? _retake
+            : _cancelReview,
+        child: _actionLabel(
+          _canSkipImage
+              ? 'Skip image'
+              : _canRetake
+              ? 'Retake'
+              : 'Cancel',
+          singleLine: landscape,
         ),
-      ),
-    );
+      );
+      final primary = FilledButton(
+        onPressed:
+            _isGeneratingPreviews ||
+                _isLeaving ||
+                _isProcessing ||
+                _cropProblem != null
+            ? null
+            : _goToFilterStep,
+        child: _isGeneratingPreviews
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : _actionLabel('Preview page', singleLine: landscape),
+      );
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          // The landscape side column is narrow: stack full-width buttons,
+          // primary first, as on the appearance step.
+          child: landscape
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [primary, const SizedBox(height: 8), secondary],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: secondary),
+                    const SizedBox(width: 16),
+                    Expanded(child: primary),
+                  ],
+                ),
+        ),
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final controls = SingleChildScrollView(
-          key: const Key('batch_review_scroll_view'),
-          child: actions,
-        );
         // Keep the crop canvas stable while guidance and large-text controls
         // scroll independently. A height cap on the canvas made it tiny on
         // short screens and whenever accessibility text scaling was enabled.
@@ -697,9 +703,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           return Row(
             children: [
               Expanded(child: preview(landscape: true)),
-              SizedBox(
-                width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
-                child: controls,
+              _sideColumn(
+                constraints,
+                scrollKey: const Key('batch_review_scroll_view'),
+                child: actions(landscape: true),
               ),
             ],
           );
@@ -711,13 +718,40 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               constraints: BoxConstraints(
                 maxHeight: constraints.maxHeight * 0.35,
               ),
-              child: controls,
+              child: SingleChildScrollView(
+                key: const Key('batch_review_scroll_view'),
+                child: actions(landscape: false),
+              ),
             ),
           ],
         );
       },
     );
   }
+
+  /// Landscape control column, shared by both steps so the canvas, preview
+  /// and actions keep the same places when switching steps. Actions sit at
+  /// the bottom, within thumb reach, and scroll only if they cannot fit.
+  Widget _sideColumn(
+    BoxConstraints constraints, {
+    required Key scrollKey,
+    required Widget child,
+  }) => SizedBox(
+    width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
+    child: Align(
+      alignment: Alignment.bottomCenter,
+      child: SingleChildScrollView(key: scrollKey, child: child),
+    ),
+  );
+
+  /// A button label that never wraps: it scales down instead, so narrow
+  /// columns keep one-line buttons of a fixed height.
+  Widget _actionLabel(String text, {required bool singleLine}) => singleLine
+      ? FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(text, maxLines: 1, softWrap: false),
+        )
+      : Text(text, textAlign: TextAlign.center);
 
   /// Overlaid on the canvas (never in the column) so the canvas keeps its
   /// size when the notice fades after the first adjustment. Inset
@@ -843,6 +877,20 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         // confirm buttons share the screen with the preview. Large text
         // scales those buttons, which the fixed layout absorbs; only very
         // short viewports need to scroll.
+        if (constraints.maxWidth > constraints.maxHeight) {
+          // Side by side: the preview keeps the full height and the confirm
+          // buttons stay visible, without scrolling, in the side column.
+          return Row(
+            children: [
+              Expanded(child: _filterPreview(previewBytes)),
+              _sideColumn(
+                constraints,
+                scrollKey: const Key('filter_step_controls'),
+                child: _filterActions(singleLine: true),
+              ),
+            ],
+          );
+        }
         if (constraints.maxHeight >= 480) {
           return Column(
             children: [
@@ -1173,14 +1221,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Widget _filterActions() {
+  Widget _filterActions({bool singleLine = false}) {
     Widget label(String text, {required bool busy}) => busy
         ? const SizedBox(
             width: 20,
             height: 20,
             child: CircularProgressIndicator(strokeWidth: 2),
           )
-        : Text(text, textAlign: TextAlign.center);
+        : _actionLabel(text, singleLine: singleLine);
     final List<Widget> buttons;
     if (_canScanNext) {
       // Stacked full-width buttons keep both labels readable at large text

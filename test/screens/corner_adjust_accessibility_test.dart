@@ -159,9 +159,8 @@ void main() {
     });
   }
 
-  testWidgets('short landscape with large text scrolls to Save changes', (
-    tester,
-  ) async {
+  testWidgets('short landscape with large text keeps Save changes beside '
+      'the preview', (tester) async {
     tester.view.physicalSize = const Size(800, 300);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -169,13 +168,11 @@ void main() {
 
     await openFilterStep(tester, textScaler: const TextScaler.linear(2));
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const Key('filter_step_scroll_view')), findsOneWidget);
-
-    await tester.ensureVisible(
-      find.widgetWithText(FilledButton, 'Save changes'),
+    expect(find.byKey(const Key('filter_step_controls')), findsOneWidget);
+    expect(
+      find.widgetWithText(FilledButton, 'Save changes').hitTestable(),
+      findsOneWidget,
     );
-    await tester.pump();
-    expect(tester.takeException(), isNull);
     await tester.tap(find.widgetWithText(FilledButton, 'Save changes'));
     await tester.pumpAndSettle();
 

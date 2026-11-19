@@ -185,13 +185,10 @@ void main() {
     );
 
     testLayoutMatrix(
-      'scrollable layout keeps confirm fixed across preview states',
+      'landscape side column keeps confirm fixed across preview states',
       (tester, layoutCase) async {
         final operations = await openAppearance(tester, layoutCase);
-        expect(
-          find.byKey(const Key('filter_step_scroll_view')),
-          findsOneWidget,
-        );
+        expect(find.byKey(const Key('filter_step_controls')), findsOneWidget);
         await cyclePreviewStatus(tester, operations, {
           'confirm': find.widgetWithText(FilledButton, 'Save changes'),
         });
