@@ -11,6 +11,7 @@ import 'services/draft_store.dart';
 import 'services/pdf_document_saver.dart';
 import 'services/pdf_export_files.dart';
 import 'services/pdf_page_importer.dart';
+import 'services/review_journal.dart';
 import 'services/shared_image_inbox.dart';
 import 'widgets/draft_session_gate.dart';
 
@@ -26,6 +27,7 @@ void main() {
     FOSScannerApp(
       draftStore: createDraftStore(),
       preferencesStore: FileAppPreferencesStore(),
+      reviewJournal: FileReviewJournal(),
     ),
   );
 }
@@ -44,10 +46,18 @@ void registerBundledLicenses() {
 }
 
 class FOSScannerApp extends StatelessWidget {
-  const FOSScannerApp({super.key, this.draftStore, this.preferencesStore});
+  const FOSScannerApp({
+    super.key,
+    this.draftStore,
+    this.preferencesStore,
+    this.reviewJournal,
+  });
 
   final DraftStore? draftStore;
   final AppPreferencesStore? preferencesStore;
+
+  /// Keeps images under review across a killed process; null disables it.
+  final ReviewJournal? reviewJournal;
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +76,7 @@ class FOSScannerApp extends StatelessWidget {
       interruptedSaveRemover: isAndroid
           ? PlatformPdfDocumentSaver.removeInterruptedSave
           : null,
+      reviewJournal: reviewJournal,
     );
     return MaterialApp(
       title: 'FOSScanner',

@@ -29,6 +29,7 @@ import '../services/pdf_export_files.dart';
 import '../services/pdf_export_options.dart';
 import '../services/pdf_page_importer.dart';
 import '../services/platform_capabilities.dart';
+import '../services/review_journal.dart';
 import '../services/screen_privacy.dart' as screen_privacy;
 import '../services/shared_image_inbox.dart';
 import '../widgets/pdf_import_progress_dialog.dart';
@@ -208,6 +209,7 @@ class ScannerHomePage extends StatefulWidget {
     this.documentSaver = const PlatformPdfDocumentSaver(),
     this.appSettingsOpener = openAppSettings,
     this.interruptedSaveRemover,
+    this.reviewJournal,
   });
 
   final List<ScannedPage> initialPages;
@@ -239,6 +241,10 @@ class ScannerHomePage extends StatefulWidget {
   /// Removes the empty document of a save an earlier run never finished, and
   /// reports whether there was one. Null where saving is unsupported.
   final Future<bool> Function()? interruptedSaveRemover;
+
+  /// Keeps the images of a running review so they can be offered again after
+  /// the app is killed. Null disables it.
+  final ReviewJournal? reviewJournal;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -299,6 +305,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _isPickingImages = false;
   bool _isRestoringDraft = false;
   bool _draftRestoreFailed = false;
+  // A review an earlier run left unfinished may be waiting in the journal.
+  // It is offered once the draft is restored and nothing else holds intake.
+  bool _isInterruptedReviewPending = false;
   bool _isClearingDraft = false;
   bool _isOpeningImageRoute = false;
   // Shared images are waiting on the platform side. They are pulled only
@@ -329,6 +338,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // but it is lost permanently unless retrieveLostData is called at startup.
     if (defaultTargetPlatform == TargetPlatform.android) {
       unawaited(_recoverLostImages());
+    }
+    if (widget.reviewJournal != null) {
+      _isInterruptedReviewPending = true;
+      unawaited(_initialDraftRestore.then((_) => _resumeSharedImageIntake()));
     }
     if (widget.interruptedSaveRemover case final remove?) {
       unawaited(_removeInterruptedSave(remove));
@@ -371,6 +384,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   void _resumeSharedImageIntake() {
     _sharedImageRetry?.cancel();
     _sharedImageRetry = null;
+    // Every lock holder ends here, so an interrupted review is offered as
+    // soon as intake is free; new shares wait until it is done.
+    if (_startInterruptedReview()) return;
     final inbox = widget.sharedImageInbox;
     if (inbox == null || !mounted || !_isSharedImageIntakePending) return;
     if (_isRestoringDraft || _isDocumentInteractionLocked) return;
@@ -1154,19 +1170,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         retakenReview = null;
         if (captured == null && previous == null) return;
         // Camera capture writes a fresh file that's genuinely ours to delete.
+        // It is journaled during its review, so a killed app can offer it.
+        final journal = widget.reviewJournal;
+        var photo = captured ?? XFile.fromData(previous!);
+        var journaled = false;
+        if (captured != null && journal != null) {
+          final kept = await journal.keep(PageReviewSource.camera.name, [
+            captured.path,
+          ]);
+          photo = XFile(kept.single);
+          journaled = journal.owns(kept.single);
+        }
         final report = IntakeReport(total: 1);
-        final result = await _addCapturedPhoto(
-          captured ?? XFile.fromData(previous!),
-          source: PageReviewSource.camera,
-          deleteAfterRead: captured != null,
-          documentGeneration: documentGeneration,
-          restoredReview: captured == null ? previousReview : null,
-          onRetake: (bytes, review) {
-            retakenBytes = bytes;
-            retakenReview = review;
-          },
-          report: report,
-        );
+        final _PhotoIntakeResult result;
+        try {
+          result = await _addCapturedPhoto(
+            photo,
+            source: PageReviewSource.camera,
+            deleteAfterRead: captured != null && !journaled,
+            documentGeneration: documentGeneration,
+            restoredReview: captured == null ? previousReview : null,
+            onRetake: (bytes, review) {
+              retakenBytes = bytes;
+              retakenReview = review;
+            },
+            report: report,
+          );
+        } finally {
+          if (journaled) await journal!.clear();
+        }
         _showIntakeReport(report);
         // Any other outcome ends the loop; it has just been reported.
         if (result != _PhotoIntakeResult.addedScanNext &&
@@ -1448,6 +1480,99 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  bool _startInterruptedReview() {
+    if (!_isInterruptedReviewPending || widget.reviewJournal == null) {
+      return false;
+    }
+    // A failed draft restore keeps this waiting, like other intake.
+    if (!mounted || _isRestoringDraft || _isDocumentInteractionLocked) {
+      return false;
+    }
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _sharedImageRetry = Timer(
+        const Duration(milliseconds: 500),
+        _resumeSharedImageIntake,
+      );
+      return true;
+    }
+    _isInterruptedReviewPending = false;
+    unawaited(_resumeInterruptedReview(widget.reviewJournal!));
+    return true;
+  }
+
+  /// Offers the images of a review the app was killed during. App-owned
+  /// copies can be reviewed again; gallery images can only be reported.
+  Future<void> _resumeInterruptedReview(ReviewJournal journal) async {
+    final documentGeneration = _documentGeneration;
+    setState(() => _isPickingImages = true);
+    try {
+      final pending = await journal.read();
+      if (pending == null || !mounted) return;
+      final source = PageReviewSource.values.asNameMap()[pending.source];
+      final count = pending.paths.length;
+      final noun = source == PageReviewSource.pdf ? 'page' : 'image';
+      if (count == 0 || source == null) {
+        final missed = count + pending.unresumable;
+        if (missed > 0) _showMessage(_unfinishedImportMessage(missed, noun));
+        return;
+      }
+      final things = '${groupDigits(count)} $noun${count == 1 ? '' : 's'}';
+      final resume = await showDialog<bool>(
+        context: context,
+        // Images are deleted on Discard; a stray tap must not do that.
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Continue reviewing $things?'),
+          content: Text(
+            'The app closed before ${count == 1 ? 'it was' : 'they were'} '
+            'added.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Discard'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+      if (resume != true ||
+          !mounted ||
+          _isClearingDraft ||
+          documentGeneration != _documentGeneration) {
+        return;
+      }
+      final report = IntakeReport(total: count, noun: noun);
+      await _reviewBatch(
+        [for (final path in pending.paths) XFile(path)],
+        // The camera loop is not resumed: a capture is reviewed on its own.
+        source: source == PageReviewSource.camera
+            ? PageReviewSource.recovered
+            : source,
+        deleteAfterRead: true,
+        documentGeneration: documentGeneration,
+        report: report,
+      );
+      _showIntakeReport(report);
+    } catch (_) {
+      if (mounted) _showMessage('Could not continue the interrupted import.');
+    } finally {
+      // Whatever was not reviewed is not kept.
+      await journal.clear();
+      if (mounted) setState(() => _isPickingImages = false);
+      _resumeSharedImageIntake();
+    }
+  }
+
+  static String _unfinishedImportMessage(int count, String noun) => count == 1
+      ? 'An interrupted import left 1 $noun unadded. Select it again to add '
+            'it.'
+      : 'An interrupted import left ${groupDigits(count)} ${noun}s unadded. '
+            'Select them again to add them.';
+
   /// Reviews [files] one at a time, recording in [report] each file that is
   /// not added and why. Stops early when the user stops the import or the
   /// document is full. Returns how many files were taken from [files]; the
@@ -1459,31 +1584,53 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     required int documentGeneration,
     required IntakeReport report,
   }) async {
-    var next = 0;
-    while (next < files.length && mounted && !report.hasOutcome) {
-      final index = next++;
-      if (!canRetainDocument(
-        currentBytes: _retainedImageBytes,
-        currentPages: _pages.length,
-        incomingBytes: 1,
-      )) {
-        _logIntake(source, '${index + 1}/${files.length}', 'document full');
-        report.end(_documentLimitMessage);
-        // Not read: the caller deletes app-owned files from here on.
-        return index;
-      }
-      await _addCapturedPhoto(
-        files[index],
-        source: source,
-        isBatchImport: files.length > 1,
-        batchPosition: index + 1,
-        batchCount: files.length,
-        deleteAfterRead: deleteAfterRead,
-        documentGeneration: documentGeneration,
-        report: report,
-      );
+    final journal = widget.reviewJournal;
+    // Journaled so a killed process can offer the rest again: app-owned
+    // files are moved into the journal, the user's gallery images are only
+    // counted.
+    if (journal != null && deleteAfterRead && files.isNotEmpty) {
+      final kept = await journal.keep(source.name, [
+        for (final file in files) file.path,
+      ]);
+      files = [for (final path in kept) XFile(path)];
     }
-    return next;
+    try {
+      var next = 0;
+      while (next < files.length && mounted && !report.hasOutcome) {
+        final index = next++;
+        if (journal != null && !deleteAfterRead) {
+          await journal.notePending(source.name, files.length - index);
+        }
+        if (!canRetainDocument(
+          currentBytes: _retainedImageBytes,
+          currentPages: _pages.length,
+          incomingBytes: 1,
+        )) {
+          _logIntake(source, '${index + 1}/${files.length}', 'document full');
+          report.end(_documentLimitMessage);
+          // Not read: the caller deletes app-owned files from here on.
+          return index;
+        }
+        final file = files[index];
+        // A journaled file stays until its review is over.
+        final journaled = journal?.owns(file.path) ?? false;
+        await _addCapturedPhoto(
+          file,
+          source: source,
+          isBatchImport: files.length > 1,
+          batchPosition: index + 1,
+          batchCount: files.length,
+          deleteAfterRead: deleteAfterRead && !journaled,
+          documentGeneration: documentGeneration,
+          report: report,
+        );
+        if (journaled) await journal!.release(file.path);
+      }
+      return next;
+    } finally {
+      // Unreviewed journaled files go too, like the caller's own copies.
+      await journal?.clear();
+    }
   }
 
   static const _discardedIntakeMessage =
