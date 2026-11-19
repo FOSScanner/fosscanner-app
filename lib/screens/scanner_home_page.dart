@@ -205,17 +205,67 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         incomingBytes: 1,
       );
 
-  void _showDocumentLimit() {
-    _showMessage(
-      'Document memory limit reached. Remove pages before adding more.',
+  static const _documentMemoryLimitMessage =
+      'There is not enough document memory for this image. '
+      'Export a copy, then remove pages or choose a smaller image.';
+
+  String get _documentLimitMessage => _pages.length >= maxDocumentPages
+      ? 'This document has reached the $maxDocumentPages-page limit. '
+            'Export it to keep a copy, then remove pages or clear the draft '
+            'before adding more.'
+      : _documentMemoryLimitMessage;
+
+  String? get _imageIntakeStatus {
+    if (_isRestoringDraft) {
+      return 'Restoring your draft. Wait for restoration to finish before adding images.';
+    }
+    if (_isClearingDraft) {
+      return 'Clearing your draft. Wait for clearing to finish before adding images.';
+    }
+    if (_isGeneratingPdf) {
+      return 'Export is in progress. Finish or cancel the export before adding images.';
+    }
+    if (_isPickingImages || _isOpeningImageRoute) {
+      return 'Image selection or page review is in progress. Finish or cancel it '
+          'before adding more images.';
+    }
+    if (!_canStartImagePick) {
+      if (_pages.length >= maxDocumentPages) return _documentLimitMessage;
+      return '$_documentMemoryLimitMessage '
+          'Memory held by Undo or a pending draft save is released when they finish.';
+    }
+    if (!_cameraSupported) {
+      return 'Camera capture is unavailable on this device. '
+          'Use Import from gallery to add images.';
+    }
+    return null;
+  }
+
+  void _showImageIntakeStatus() {
+    final status = _imageIntakeStatus;
+    if (status == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Adding images'),
+        scrollable: true,
+        content: Text(status),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
+  void _showDocumentLimit() => _showMessage(_documentLimitMessage);
+
   void _showUnsupportedImageDimensions() {
     _showMessage(
-      'This image has unsupported dimensions. Choose an image from 3x3 '
-      'up to ${maxSourceImageEdge}px per edge and '
-      '$maxSourceImagePixels pixels.',
+      'This image is too small or has unsupported dimensions. '
+      'Choose another image, or resize a large image and try again.',
     );
   }
 
@@ -745,7 +795,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           replacementBytes:
               _retainedImageBytesFor(replacementPages) - retainedWithoutPage,
         )) {
-          _showDocumentLimit();
+          _showMessage(_documentMemoryLimitMessage);
           return;
         }
         setState(() => _pages[index] = result);
@@ -1261,16 +1311,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       body: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
-            if (_pages.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
+            if (_imageIntakeStatus != null || _pages.isNotEmpty)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: constraints.maxHeight * 0.4,
                 ),
-                child: Text(
-                  'Drafts are temporary. Export a PDF to keep a copy.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_imageIntakeStatus != null)
+                        TextButton.icon(
+                          onPressed: _showImageIntakeStatus,
+                          icon: const Icon(Icons.info_outline),
+                          label: const Text('Image intake help'),
+                        ),
+                      if (_pages.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          child: Text(
+                            'Drafts are temporary. Export a PDF to keep a copy.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             if (_draftSaveFailed)

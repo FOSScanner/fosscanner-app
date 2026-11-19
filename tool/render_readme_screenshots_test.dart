@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
+import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 
@@ -261,6 +262,12 @@ void main() {
     }
     await tester.pumpAndSettle();
     await save('ui-filters-panel');
+    await tester.pumpWidget(const SizedBox());
+    await show(home(maxDocumentPages));
+    await save('ui-intake-page-limit');
+    await tester.tap(find.text('Image intake help'));
+    await tester.pumpAndSettle();
+    await save('ui-intake-limit-guidance');
     debugDisableShadows = previousShadows;
   });
 }
