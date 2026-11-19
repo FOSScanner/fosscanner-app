@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import 'package:fosscanner/widgets/corner_overlay.dart';
 
 import '../support/layout_stability.dart';
 
@@ -14,16 +15,18 @@ const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 /// Final previews complete only when the test says so, so every preview
 /// status can be held on screen while rects are measured.
 class _Operations implements CornerAdjustOperations {
-  _Operations(this.bytes);
+  _Operations(this.bytes, {this.detection, this.holdFinalPreviews = true});
 
   final Uint8List bytes;
+  final List<Offset>? detection;
+  final bool holdFinalPreviews;
   final finalPreviews = <Completer<Uint8List>>[];
 
   @override
   Future<Size> decodeSize(Uint8List imageBytes) async => const Size(100, 100);
 
   @override
-  Future<List<Offset>?> detectCorners(Uint8List imageBytes) async => null;
+  Future<List<Offset>?> detectCorners(Uint8List imageBytes) async => detection;
 
   @override
   Future<Map<PageFilter, Uint8List>> buildPreviews(
@@ -38,6 +41,8 @@ class _Operations implements CornerAdjustOperations {
     required double brightness,
     required double contrast,
   }) {
+    // The processing queue is serial: a held preview would block crop work.
+    if (!holdFinalPreviews) return Future.value(imageBytes);
     final completer = Completer<Uint8List>();
     finalPreviews.add(completer);
     return completer.future;
@@ -60,6 +65,15 @@ const _phoneCases = [
   LayoutCase(Size(320, 568), 1.0),
   LayoutCase(Size(320, 568), 1.3),
 ];
+
+const _reviewCases = [
+  LayoutCase(Size(390, 844), 1.0),
+  LayoutCase(Size(390, 844), 1.3),
+  LayoutCase(Size(360, 740), 1.0),
+  LayoutCase(Size(360, 740), 1.3),
+];
+
+const _fullImageNotice = 'No page edges detected. Full image selected.';
 
 void main() {
   late Uint8List bytes;
@@ -171,5 +185,147 @@ void main() {
       },
       cases: const [LayoutCase(Size(640, 300), 2.0)],
     );
+  });
+
+  group('crop canvas (#150)', () {
+    final canvas = find.byType(CornerOverlay);
+
+    testLayoutMatrix(
+      'fallback canvas keeps its rect when the notice fades after a drag',
+      (tester, layoutCase) async {
+        final semantics = tester.ensureSemantics();
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: withTextScale(layoutCase.textScale),
+            home: CornerAdjustScreen(
+              originalBytes: bytes,
+              operations: _Operations(bytes, holdFinalPreviews: false),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(_fullImageNotice), findsOneWidget);
+        expect(
+          tester
+              .getSemantics(find.text(_fullImageNotice))
+              .getSemanticsData()
+              .flagsCollection
+              .isLiveRegion,
+          isTrue,
+        );
+        final anchors = {
+          'canvas': canvas,
+          'preview page': find.widgetWithText(FilledButton, 'Preview page'),
+        };
+        await expectStableRects(tester, anchors, () async {
+          await tester.dragFrom(
+            tester.getCenter(find.byKey(const ValueKey('corner-handle-0'))),
+            const Offset(30, 30),
+          );
+          await tester.pumpAndSettle();
+        });
+        expect(find.text(_fullImageNotice), findsNothing);
+        expect(
+          tester.widget<CornerOverlay>(canvas).corners.first,
+          isNot(Offset.zero),
+        );
+        expect(tester.takeException(), isNull);
+        semantics.dispose();
+      },
+      cases: _reviewCases,
+    );
+
+    testLayoutMatrix(
+      'the notice does not block a drag that starts beneath it',
+      (tester, layoutCase) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: withTextScale(layoutCase.textScale),
+            home: CornerAdjustScreen(
+              originalBytes: bytes,
+              operations: _Operations(bytes, holdFinalPreviews: false),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final notice = tester.getRect(
+          find.byKey(const Key('full_image_notice')),
+        );
+        expect(tester.getRect(canvas).contains(notice.center), isTrue);
+        expect(
+          find.byKey(const Key('full_image_notice')).hitTestable(),
+          findsNothing,
+        );
+      },
+      cases: const [LayoutCase(Size(390, 844), 2.0)],
+    );
+
+    testLayoutMatrix('canvas and actions match on batch images 1/3 to 3/3', (
+      tester,
+      layoutCase,
+    ) async {
+      var stops = 0;
+      Future<void> showImage(int position) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: withTextScale(layoutCase.textScale),
+            home: CornerAdjustScreen(
+              key: ValueKey(position),
+              originalBytes: bytes,
+              source: PageReviewSource.gallery,
+              isBatchImport: true,
+              batchPosition: position,
+              batchCount: 3,
+              onStopImport: () => stops++,
+              operations: _Operations(
+                bytes,
+                detection: _corners,
+                holdFinalPreviews: false,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Image $position of 3'), findsOneWidget);
+        expect(
+          find.text(
+            'Skip this image only. Any remaining images will still be '
+            'reviewed.',
+          ),
+          findsNothing,
+        );
+      }
+
+      final anchors = {
+        'canvas': canvas,
+        'title': find.byKey(const Key('batch_progress')),
+        'stop': find.byTooltip('Stop importing'),
+        'skip': find.widgetWithText(OutlinedButton, 'Skip image'),
+        'preview page': find.widgetWithText(FilledButton, 'Preview page'),
+      };
+      IconButton stop() => tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.stop_circle_outlined),
+      );
+
+      await showImage(1);
+      expect(stop().onPressed, isNotNull);
+      await expectStableRects(
+        tester,
+        anchors,
+        () => showImage(2),
+        reason: '1/3 -> 2/3',
+      );
+      expect(stop().onPressed, isNotNull);
+      await expectStableRects(
+        tester,
+        anchors,
+        () => showImage(3),
+        reason: '2/3 -> 3/3',
+      );
+      // Nothing remains to stop, but the action keeps its place.
+      expect(stop().onPressed, isNull);
+      expect(stops, 0);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

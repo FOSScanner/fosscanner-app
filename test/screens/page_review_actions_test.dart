@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -10,7 +11,8 @@ import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
 
-const _skipNotice =
+// Removed as filler: Image n of m plus Skip/Stop say enough.
+const _skipHint =
     'Skip this image only. Any remaining images will still be reviewed.';
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 
@@ -218,7 +220,7 @@ void main() {
       expect(editor.isBatchImport, isFalse);
       expect(find.text('Cancel'), findsOneWidget);
       expect(find.text('Skip image'), findsNothing);
-      expect(find.text(_skipNotice), findsNothing);
+      expect(find.text(_skipHint), findsNothing);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(find.byType(Card), findsNothing);
@@ -241,7 +243,8 @@ void main() {
       );
       expect(first.source, PageReviewSource.gallery);
       expect(first.isBatchImport, isTrue);
-      expect(find.text(_skipNotice), findsOneWidget);
+      expect(find.text(_skipHint), findsNothing);
+      expect(find.text('Image 1 of 3'), findsOneWidget);
       final skip = tester
           .widget<OutlinedButton>(
             find.widgetWithText(OutlinedButton, 'Skip image'),
@@ -642,9 +645,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text(_skipNotice), findsOneWidget);
-      // The position scales down instead of being ellipsized beside Stop.
-      expect(find.text('Image 2 of 5').hitTestable(), findsOneWidget);
+      expect(find.text(_skipHint), findsNothing);
+      // The app-bar title shows the whole position, not an ellipsis.
+      final title = tester.renderObject<RenderParagraph>(
+        find.descendant(
+          of: find.byKey(const Key('batch_progress')),
+          matching: find.byType(RichText),
+        ),
+      );
+      expect(title.text.toPlainText(), 'Image 2 of 5');
+      expect(title.didExceedMaxLines, isFalse);
+      expect(
+        title.getMaxIntrinsicWidth(double.infinity),
+        lessThanOrEqualTo(title.size.width + 0.5),
+      );
       expect(find.byTooltip('Stop importing').hitTestable(), findsOneWidget);
       expect(find.text('Skip image'), findsOneWidget);
       await tester.ensureVisible(find.text('Skip image'));

@@ -118,6 +118,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
   bool _showFullImageNotice = false;
+  // Kept in the tree while the notice fades out after the first adjustment.
+  bool _fullImageNoticeMounted = false;
   bool _isProcessing = false;
   bool _isLeaving = false;
   bool _isScanNextRequested = false;
@@ -189,6 +191,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _imageSize = size;
         _corners = corners;
         _showFullImageNotice = !hasCorners;
+        _fullImageNoticeMounted = !hasCorners;
       });
       if (widget.startWithAdjustments && hasCorners) _enterFilterStep();
       unawaited(_updatePreviews());
@@ -450,8 +453,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       widget.batchPosition != null &&
       widget.batchCount != null;
 
-  /// Stop importing is laid out on every batch image so the app bar does not
-  /// change between images; it is only enabled while images remain.
+  /// Stop importing is laid out on every batch image so the app bar never
+  /// changes between images; it is only enabled while images remain.
   bool get _offersStopImport =>
       _hasBatchProgress && widget.onStopImport != null;
 
@@ -576,82 +579,60 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   ) {
     final preview = Padding(
       padding: const EdgeInsets.all(8),
-      child: CornerOverlay(
-        imageBytes: widget.originalBytes,
-        imageSize: imageSize,
-        corners: corners,
-        onChanged: _setCrop,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CornerOverlay(
+              imageBytes: widget.originalBytes,
+              imageSize: imageSize,
+              corners: corners,
+              onChanged: _setCrop,
+            ),
+          ),
+          if (_fullImageNoticeMounted) _fullImageNotice(context),
+        ],
       ),
     );
-    final actions = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_showFullImageNotice)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: Text(
-                'No page edges detected. Full image selected.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
+    final actions = SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _isLeaving || _isProcessing
+                    ? null
+                    : _canRetake
+                    ? _retake
+                    : _cancelReview,
+                child: Text(
+                  _canSkipImage
+                      ? 'Skip image'
+                      : _canRetake
+                      ? 'Retake'
+                      : 'Cancel',
+                ),
               ),
             ),
-          ),
-        if (_canSkipImage)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: const Text(
-                'Skip this image only. Any remaining images will still be reviewed.',
+            const SizedBox(width: 16),
+            Expanded(
+              child: FilledButton(
+                onPressed: _isGeneratingPreviews || _isLeaving || _isProcessing
+                    ? null
+                    : _goToFilterStep,
+                child: _isGeneratingPreviews
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Preview page'),
               ),
             ),
-          ),
-
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isLeaving || _isProcessing
-                        ? null
-                        : _canRetake
-                        ? _retake
-                        : _cancelReview,
-                    child: Text(
-                      _canSkipImage
-                          ? 'Skip image'
-                          : _canRetake
-                          ? 'Retake'
-                          : 'Cancel',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: FilledButton(
-                    onPressed:
-                        _isGeneratingPreviews || _isLeaving || _isProcessing
-                        ? null
-                        : _goToFilterStep,
-                    child: _isGeneratingPreviews
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Preview page'),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -685,6 +666,52 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           ],
         );
       },
+    );
+  }
+
+  /// Overlaid on the canvas (never in the column) so the canvas keeps its
+  /// size when the notice fades after the first adjustment. Inset
+  /// horizontally to stay clear of the top corner handles, and ignores
+  /// pointers so a drag that starts beneath it still reaches the canvas.
+  Widget _fullImageNotice(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Positioned(
+      top: 8,
+      left: 56,
+      right: 56,
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: _showFullImageNotice ? 1 : 0,
+          duration: const Duration(milliseconds: 200),
+          onEnd: () {
+            if (mounted && !_showFullImageNotice) {
+              setState(() => _fullImageNoticeMounted = false);
+            }
+          },
+          child: Center(
+            child: Material(
+              key: const Key('full_image_notice'),
+              color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
+              elevation: 1,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    'No page edges detected. Full image selected.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

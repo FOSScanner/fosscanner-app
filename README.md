@@ -30,7 +30,8 @@ No account, no cloud processing, no tracking.
    Gallery, Files or a messenger; they are reviewed one by one and appended to
    the current draft.
 2. **Check the crop.** Drag the corners to the page edges. If detection fails,
-   the full image is selected rather than trimmed.
+   the full image is selected rather than trimmed, and a brief notice over the
+   image says so.
 3. **Preview and adjust.** Choose **Preview page**, then tap the **Filters** icon
    to open filter choices, rotate, or adjust brightness and contrast. **Reset adjustments** restores
    neutral brightness/contrast without changing your crop, filter, or rotation.
