@@ -207,6 +207,29 @@ void main() {
     expect(bottom.blue, greaterThan(bottom.red + 100));
   });
 
+  test('negative and over-full quarter turns normalize mod 4', () async {
+    final input = await _drawPng(40, 20, (canvas) {
+      canvas.drawRect(
+        const Rect.fromLTWH(0, 0, 20, 20),
+        Paint()..color = const Color(0xffff0000),
+      );
+      canvas.drawRect(
+        const Rect.fromLTWH(20, 0, 20, 20),
+        Paint()..color = const Color(0xff0000ff),
+      );
+    });
+
+    expect(identical(rotateImage(input, -4), input), isTrue);
+    expect(identical(rotateImage(input, 8), input), isTrue);
+    for (final (turns, equivalent) in [(-1, 3), (-3, 1), (5, 1), (-2, 2)]) {
+      expect(
+        rotateImage(input, turns),
+        orderedEquals(rotateImage(input, equivalent)),
+        reason: '$turns quarter turns should equal $equivalent',
+      );
+    }
+  });
+
   test('the export pipeline can run in a worker isolate', () async {
     final input = await _drawPng(200, 100, (canvas) {
       canvas.drawColor(const Color.fromARGB(255, 30, 90, 150), BlendMode.src);
