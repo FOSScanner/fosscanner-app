@@ -236,7 +236,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('FOSScanner'), findsOneWidget);
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
     expect(find.byIcon(Icons.camera_alt), findsWidgets);
 
     // No captured pages yet, so there's nothing to clear or export.
@@ -255,7 +255,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('Capture Image'), findsNothing);
-      expect(find.textContaining('Import from your gallery'), findsOneWidget);
+      expect(
+        find.text('Import from your gallery to add your first page.'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(OutlinedButton, 'Import from gallery'),
+        findsOneWidget,
+      );
     },
   );
 

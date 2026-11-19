@@ -182,7 +182,7 @@ void main() {
     final restored = [page(1), page(2)];
 
     await pumpHome(tester, store);
-    expect(find.text('Restoring draft...'), findsOneWidget);
+    expect(find.text('Restoring draft…'), findsOneWidget);
 
     completer.complete(restored);
     await tester.pump();
@@ -357,7 +357,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
     expect(store.clearCalls, 1);
   });
 
@@ -412,7 +412,7 @@ void main() {
       clearCompleter.complete();
       await tester.pump();
       await tester.pump();
-      expect(find.text('Ready to Scan'), findsOneWidget);
+      expect(find.text('Ready to scan'), findsOneWidget);
       expect(store.saves, hasLength(1));
       expect(iconButton(tester, 'Import from gallery').onPressed, isNotNull);
     },
@@ -439,7 +439,7 @@ void main() {
     clearCompleter.complete();
     await tester.pump();
     await tester.pump();
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
 
     pickerCompleter.complete([
       XFile.fromData(imageBytes, name: 'late-picker-result.png'),
@@ -447,7 +447,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
     expect(store.saves, isEmpty);
     expect(store.clearCalls, 1);
   });
@@ -569,7 +569,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
       await tester.pumpAndSettle();
       expect(store.clearCalls, 1);
-      expect(find.text('Ready to Scan'), findsOneWidget);
+      expect(find.text('Ready to scan'), findsOneWidget);
     });
   }
 

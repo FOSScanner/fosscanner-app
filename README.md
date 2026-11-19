@@ -25,7 +25,8 @@ No account, no cloud processing, no tracking.
 
 ## A simple scanning workflow
 
-1. **Add pages** with the camera button or import photos from your gallery.
+1. **Add pages** with the camera button, or with **Import from gallery** (in
+   the toolbar, and on the empty home screen).
    On Android you can also **share** one or more images to FOSScanner from
    Gallery, Files or a messenger; they are reviewed one by one and appended to
    the current draft.

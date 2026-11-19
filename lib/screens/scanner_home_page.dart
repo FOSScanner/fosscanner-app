@@ -2037,12 +2037,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final textScaler = MediaQuery.textScalerOf(context);
-    // Nominal height of the ready state (icon, one-line title and two lines
-    // of copy). The top inset centers that block, but
+    // Nominal height of the ready state (icon, one-line title, two lines of
+    // copy and the gallery button). The top inset centers that block, but
     // depends only on the viewport: the restoring and ready states start at
     // the same place, so the icon and title never move between them.
     final readyHeight =
-        80 + 16 + textScaler.scale(32) + 8 + textScaler.scale(40);
+        80 + 16 + textScaler.scale(32) + 8 + textScaler.scale(40) + 24 + 48;
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
@@ -2075,28 +2075,34 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  _isRestoringDraft ? 'Restoring draft...' : 'Ready to Scan',
+                  _isRestoringDraft ? 'Restoring draft…' : 'Ready to scan',
                   key: const Key('empty_state_title'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                  style: theme.textTheme.headlineSmall,
+                ),
+                if (!_isRestoringDraft) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _cameraSupported
+                        ? 'Scan your first page, or import from your gallery.'
+                        : 'Import from your gallery to add your first page.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: muted),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _isRestoringDraft
-                      ? 'Your saved pages will appear here.'
-                      : _cameraSupported
-                      ? 'Tap the camera button to add your first document. '
-                            'FOSS & Privacy-first: everything is processed '
-                            'on your device.'
-                      : 'Import from your gallery to add your first '
-                            'document. FOSS & Privacy-first: everything is '
-                            'processed on your device.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: muted),
-                ),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          _isPickingImages ||
+                              _isClearingDraft ||
+                              !_canStartImagePick
+                          ? null
+                          : _importFromGallery,
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('Import from gallery'),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

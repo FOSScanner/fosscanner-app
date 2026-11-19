@@ -227,7 +227,7 @@ void main() {
     staleMove(-1);
     await tester.pumpAndSettle();
     expect(store.saves, isEmpty);
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
   });
 
   testWidgets('stale selections cannot move the wrong page after a reorder', (

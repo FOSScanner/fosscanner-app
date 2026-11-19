@@ -257,7 +257,7 @@ void main() {
   ) async {
     final restore = Completer<List<ScannedPage>>();
     await pumpHome(tester, layoutCase, store: _Store(loaded: restore.future));
-    expect(find.text('Restoring draft...'), findsOneWidget);
+    expect(find.text('Restoring draft…'), findsOneWidget);
     final title = find.byKey(const Key('empty_state_title'));
     final restoringTitle = tester.getRect(title);
     await expectStableRects(
@@ -266,7 +266,7 @@ void main() {
       () async {
         restore.complete(const []);
         await tester.pumpAndSettle();
-        expect(find.text('Ready to Scan'), findsOneWidget);
+        expect(find.text('Ready to scan'), findsOneWidget);
       },
     );
     // The text differs, so only its height may: it starts at the same place

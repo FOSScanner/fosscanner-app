@@ -14,6 +14,7 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 
 class _Picker extends ImagePickerPlatform {
   Completer<List<XFile>>? selection;
+  var galleryCalls = 0;
 
   @override
   bool supportsImageSource(ImageSource source) => true;
@@ -24,7 +25,10 @@ class _Picker extends ImagePickerPlatform {
   @override
   Future<List<XFile>> getMultiImageWithOptions({
     MultiImagePickerOptions options = const MultiImagePickerOptions(),
-  }) async => await selection?.future ?? const [];
+  }) async {
+    galleryCalls++;
+    return await selection?.future ?? const [];
+  }
 }
 
 void main() {
@@ -290,6 +294,31 @@ void main() {
       );
     }
   }
+  testWidgets(
+    'empty home offers scanning and gallery import as first actions',
+    (tester) async {
+      await pumpHome(tester, pageCount: 0);
+      final title = tester.widget<Text>(find.text('Ready to scan'));
+      expect(
+        title.style,
+        Theme.of(
+          tester.element(find.text('Ready to scan')),
+        ).textTheme.headlineSmall,
+      );
+      expect(
+        find.text('Scan your first page, or import from your gallery.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Privacy-first'), findsNothing);
+      expect(find.byTooltip('Capture Image'), findsOneWidget);
+
+      final import = find.widgetWithText(OutlinedButton, 'Import from gallery');
+      expect(import, findsOneWidget);
+      await tester.tap(import);
+      await tester.pumpAndSettle();
+      expect(picker.galleryCalls, 1);
+    },
+  );
 
   testWidgets('short empty home scrolls without large-text overflow', (
     tester,
@@ -297,7 +326,7 @@ void main() {
     setViewport(tester, const Size(640, 260));
     await pumpHome(tester, pageCount: 0, textScale: 2);
     expect(tester.takeException(), isNull);
-    await tester.ensureVisible(find.textContaining('Tap the camera button'));
+    await tester.ensureVisible(find.textContaining('Scan your first page'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
