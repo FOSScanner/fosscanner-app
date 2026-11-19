@@ -410,10 +410,7 @@ void main() {
       store.loaded.complete([]);
       await settle(tester);
       expect(
-        find.text(
-          'Some shared files could not be added. Share images under '
-          '${maxEncodedImageBytes ~/ (1024 * 1024)} MB.',
-        ),
+        find.text("2 images couldn't be added: 2 unreadable files."),
         findsOneWidget,
       );
       expect(find.byType(CornerAdjustScreen), findsNothing);

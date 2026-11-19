@@ -480,7 +480,7 @@ void main() {
     await settle(tester);
     expect(find.text('Export PDF (1 page)'), findsOneWidget);
     expect(
-      find.text('Some pages of this PDF could not be added.'),
+      find.text("2 of 3 pages couldn't be added: 2 too large to render."),
       findsOneWidget,
     );
   }, variant: _iOS);

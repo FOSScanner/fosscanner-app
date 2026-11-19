@@ -1030,7 +1030,7 @@ void main() {
         .onPressed!();
     await tester.pumpAndSettle();
 
-    expect(find.text('Could not read this photo.'), findsOneWidget);
+    expect(find.text('Could not read this image.'), findsOneWidget);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 

@@ -20,6 +20,7 @@ import '../services/document_memory.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
 import '../services/image_pdf_service.dart' as image_pdf;
+import '../services/intake_report.dart';
 import '../services/ocr_service.dart' as ocr_service;
 import '../services/pdf_document_saver.dart';
 import '../services/pdf_export_files.dart';
@@ -66,7 +67,12 @@ class _DocumentCapacityException implements Exception {
 
 enum _PhotoIntakeResult {
   added,
+
+  /// The user skipped or cancelled the review.
   skipped,
+
+  /// The image could not be added; the reason is in the intake report.
+  rejected,
   capacityReached,
   stopped,
 
@@ -332,43 +338,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           documentGeneration != _documentGeneration) {
         return;
       }
-      if (batch.rejected > 0) {
-        _showMessage(
-          'Some shared files could not be added. Share images under '
-          '${maxEncodedImageBytes ~/ (1024 * 1024)} MB.',
-        );
-      }
-      var limitReported = false;
-      var stopped = false;
-      while (nextPath < paths.length) {
-        final index = nextPath++;
+      // Items the platform could not hand over are rejections of the same
+      // share, reported in the one summary after the review.
+      final report = IntakeReport(total: paths.length + batch.rejected)
+        ..reject(IntakeRejection.unavailable, count: batch.rejected);
+      nextPath = await _reviewBatch(
+        [for (final path in paths) XFile(path)],
+        source: PageReviewSource.shared,
         // The copies are app-owned cache files, deleted once read.
-        final result = await _addCapturedPhoto(
-          XFile(paths[index]),
-          source: PageReviewSource.shared,
-          isBatchImport: paths.length > 1,
-          batchPosition: index + 1,
-          batchCount: paths.length,
-          deleteAfterRead: true,
-          documentGeneration: documentGeneration,
-        );
-        if (!mounted) return;
-        if (result == _PhotoIntakeResult.stopped) {
-          stopped = true;
-          _showImportStopped();
-          break;
-        }
-        if (result == _PhotoIntakeResult.capacityReached) {
-          limitReported = true;
-          break;
-        }
-      }
-      if (batch.truncated && !limitReported && !stopped) {
-        _showMessage(
+        deleteAfterRead: true,
+        documentGeneration: documentGeneration,
+        report: report,
+      );
+      if (batch.truncated) {
+        report.end(
           'Some shared images were not added: a document can have up to '
           '$maxDocumentPages pages.',
         );
       }
+      _showIntakeReport(report);
     } on MissingPluginException {
       // No native share handler (tests, unsupported embedders).
     } catch (_) {
@@ -688,21 +676,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   void _showDocumentLimit() => _showMessage(_documentLimitMessage);
 
-  void _showUnsupportedImageDimensions() {
-    _showMessage(
-      'This image is too small or has unsupported dimensions. '
-      'Choose another image, or resize a large image and try again.',
-    );
-  }
-
-  void _showImageProcessingMemoryLimit() {
-    _showMessage(
-      'This image needs too much temporary memory to process safely. '
-      'Remove pages or choose a smaller image.',
-    );
-  }
-
-  bool _tryAddPage(ScannedPage page, {required int documentGeneration}) {
+  bool _tryAddPage(
+    ScannedPage page, {
+    required int documentGeneration,
+    required IntakeReport report,
+  }) {
     if (_isClearingDraft ||
         _isGeneratingPdf ||
         !mounted ||
@@ -714,7 +692,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       currentPages: _pages.length,
       incomingBytes: 0,
     )) {
-      _showDocumentLimit();
+      report.end(_documentLimitMessage);
       return false;
     }
     setState(() => _pages.add(page));
@@ -837,34 +815,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
       final files =
           response.files ?? [if (response.file != null) response.file!];
-      for (var index = 0; index < files.length; index++) {
-        if (!mounted) {
-          for (final remaining in files.skip(index)) {
-            await _deleteFileQuietly(remaining.path);
-          }
-          return;
-        }
+      final report = IntakeReport(total: files.length);
+      var reviewed = 0;
+      try {
         // Android image_picker recovery paths are app-owned cache copies.
-        final result = await _addCapturedPhoto(
-          files[index],
+        reviewed = await _reviewBatch(
+          files,
           source: PageReviewSource.recovered,
-          isBatchImport: files.length > 1,
-          batchPosition: index + 1,
-          batchCount: files.length,
           deleteAfterRead: true,
           documentGeneration: documentGeneration,
+          report: report,
         );
-        if (result == _PhotoIntakeResult.capacityReached ||
-            result == _PhotoIntakeResult.stopped) {
-          // Recovered files are app-owned copies, so the rest of a stopped or
-          // full batch is deleted rather than left in the cache.
-          for (final remaining in files.skip(index + 1)) {
-            await _deleteFileQuietly(remaining.path);
-          }
-          if (result == _PhotoIntakeResult.stopped) _showImportStopped();
-          break;
+      } finally {
+        for (final remaining in files.skip(reviewed)) {
+          await _deleteFileQuietly(remaining.path);
         }
       }
+      _showIntakeReport(report);
     } catch (_) {
       _showMessage('Could not recover the interrupted image selection.');
     } finally {
@@ -977,15 +944,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         retakenBytes = null;
         if (captured == null && previous == null) return;
         // Camera capture writes a fresh file that's genuinely ours to delete.
+        final report = IntakeReport(total: 1);
         final result = await _addCapturedPhoto(
           captured ?? XFile.fromData(previous!),
           source: PageReviewSource.camera,
           deleteAfterRead: captured != null,
           documentGeneration: documentGeneration,
           onRetake: (bytes) => retakenBytes = bytes,
+          report: report,
         );
-        // Every other outcome has already been reported where it happened
-        // (limits included), so the loop just ends.
+        _showIntakeReport(report);
+        // Any other outcome ends the loop; it has just been reported.
         if (result != _PhotoIntakeResult.addedScanNext &&
             result != _PhotoIntakeResult.retake) {
           return;
@@ -1030,45 +999,24 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         maxHeight: maxPickerEdge,
         limit: maxDocumentPages - _pages.length,
       );
-      for (var index = 0; index < photos.length; index++) {
-        final photo = photos[index];
-        if (_isClearingDraft) break;
-        if (!_canStartImagePick) {
-          _showDocumentLimit();
-          break;
-        }
-        // Unlike camera capture, a gallery pick's path isn't reliably an
-        // app-owned temp copy across platforms — don't risk deleting a file
-        // that might actually be the user's original photo.
-        final result = await _addCapturedPhoto(
-          photo,
-          source: PageReviewSource.gallery,
-          isBatchImport: photos.length > 1,
-          batchPosition: index + 1,
-          batchCount: photos.length,
-          deleteAfterRead: false,
-          documentGeneration: documentGeneration,
-        );
-        if (result == _PhotoIntakeResult.stopped) {
-          _showImportStopped();
-          break;
-        }
-        if (result == _PhotoIntakeResult.capacityReached) break;
-      }
+      final report = IntakeReport(total: photos.length);
+      // Unlike camera capture, a gallery pick's path isn't reliably an
+      // app-owned temp copy across platforms — don't risk deleting a file
+      // that might actually be the user's original image.
+      await _reviewBatch(
+        photos,
+        source: PageReviewSource.gallery,
+        deleteAfterRead: false,
+        documentGeneration: documentGeneration,
+        report: report,
+      );
+      _showIntakeReport(report);
     } catch (_) {
       _showMessage('Could not open the photo gallery.');
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
       _resumeSharedImageIntake();
     }
-  }
-
-  void _showImportStopped() {
-    if (!mounted) return;
-    _showMessage(
-      'Import stopped. Pages already added were kept; the remaining images '
-      'were not added.',
-    );
   }
 
   static const _importPdfMenuValue = 'import_pdf';
@@ -1127,46 +1075,29 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       final batch = await _renderPdfWithProgress(importer, request);
       paths = batch.paths;
       if (!isCurrent()) return;
-      var limitReported = false;
-      var stopped = false;
-      while (nextPath < paths.length) {
-        final index = nextPath++;
+      final report = IntakeReport(
+        total: paths.length + batch.rejected,
+        noun: 'page',
+      )..reject(IntakeRejection.notRendered, count: batch.rejected);
+      nextPath = await _reviewBatch(
+        [for (final path in paths) XFile(path)],
+        source: PageReviewSource.pdf,
         // The renders are app-owned cache files, deleted once read.
-        final result = await _addCapturedPhoto(
-          XFile(paths[index]),
-          source: PageReviewSource.pdf,
-          isBatchImport: paths.length > 1,
-          batchPosition: index + 1,
-          batchCount: paths.length,
-          deleteAfterRead: true,
-          documentGeneration: documentGeneration,
-        );
-        if (!mounted) return;
-        if (result == _PhotoIntakeResult.stopped) {
-          stopped = true;
-          _showMessage(
-            'Import stopped. Pages already added were kept; the remaining '
-            'pages were not added.',
-          );
-          break;
-        }
-        if (result == _PhotoIntakeResult.capacityReached) {
-          limitReported = true;
-          break;
-        }
-      }
+        deleteAfterRead: true,
+        documentGeneration: documentGeneration,
+        report: report,
+      );
       // Reported after the review so the message never covers its buttons.
-      if (batch.truncated && !limitReported && !stopped) {
-        _showMessage(
+      if (batch.truncated) {
+        report.end(
           batch.pageCount > request.maxPages
               ? 'Some PDF pages were not added: a document can have up to '
                     '$maxDocumentPages pages.'
               : 'Some PDF pages were not added: the document memory limit '
                     'was reached.',
         );
-      } else if (batch.rejected > 0 && !limitReported && !stopped) {
-        _showMessage('Some pages of this PDF could not be added.');
       }
+      _showIntakeReport(report);
     } on PdfImportException catch (error) {
       if (mounted) {
         _showMessage(switch (error.failure) {
@@ -1268,12 +1199,59 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// Reviews [files] one at a time, recording in [report] each file that is
+  /// not added and why. Stops early when the user stops the import or the
+  /// document is full. Returns how many files were taken from [files]; the
+  /// rest were never read.
+  Future<int> _reviewBatch(
+    List<XFile> files, {
+    required PageReviewSource source,
+    required bool deleteAfterRead,
+    required int documentGeneration,
+    required IntakeReport report,
+  }) async {
+    var next = 0;
+    while (next < files.length && mounted && !report.hasOutcome) {
+      final index = next++;
+      if (!canRetainDocument(
+        currentBytes: _retainedImageBytes,
+        currentPages: _pages.length,
+        incomingBytes: 1,
+      )) {
+        report.end(_documentLimitMessage);
+        // Not read: the caller deletes app-owned files from here on.
+        return index;
+      }
+      await _addCapturedPhoto(
+        files[index],
+        source: source,
+        isBatchImport: files.length > 1,
+        batchPosition: index + 1,
+        batchCount: files.length,
+        deleteAfterRead: deleteAfterRead,
+        documentGeneration: documentGeneration,
+        report: report,
+      );
+    }
+    return next;
+  }
+
+  /// Shows the one message summarizing an intake, if it needs one.
+  void _showIntakeReport(IntakeReport report) {
+    final message = report.message;
+    if (message != null && mounted) _showMessage(message);
+  }
+
   /// Shared by camera capture and gallery import: read the file's bytes,
   /// optionally delete the source file, then (native only) run the photo
   /// through the detect/adjust flow before adding it as a page.
+  ///
+  /// Nothing is shown here: why an image was not added goes into [report],
+  /// which the caller shows once the whole intake has been reviewed.
   Future<_PhotoIntakeResult> _addCapturedPhoto(
     XFile photo, {
     required PageReviewSource source,
+    required IntakeReport report,
     bool isBatchImport = false,
     int? batchPosition,
     int? batchCount,
@@ -1281,6 +1259,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     required int documentGeneration,
     ValueSetter<Uint8List>? onRetake,
   }) async {
+    _PhotoIntakeResult reject(IntakeRejection reason) {
+      report.reject(reason);
+      return _PhotoIntakeResult.rejected;
+    }
+
+    _PhotoIntakeResult reachLimit() {
+      report.end(_documentLimitMessage);
+      return _PhotoIntakeResult.capacityReached;
+    }
+
     if (_isClearingDraft || documentGeneration != _documentGeneration) {
       if (deleteAfterRead) await _deleteFileQuietly(photo.path);
       return _PhotoIntakeResult.skipped;
@@ -1319,17 +1307,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         }
       }
     } on _DocumentCapacityException {
-      _showDocumentLimit();
-      return _PhotoIntakeResult.capacityReached;
+      return reachLimit();
     } on EncodedImageTooLargeError {
-      _showMessage(
-        'This image file is too large to process safely. Choose a file under '
-        '${maxEncodedImageBytes ~/ (1024 * 1024)} MB.',
-      );
-      return _PhotoIntakeResult.skipped;
+      return reject(IntakeRejection.fileTooLarge);
     } catch (_) {
-      _showMessage('Could not read this photo.');
-      return _PhotoIntakeResult.skipped;
+      return reject(IntakeRejection.unreadable);
     }
 
     if (_isClearingDraft || documentGeneration != _documentGeneration) {
@@ -1340,8 +1322,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       currentPages: _pages.length,
       incomingBytes: bytes.length,
     )) {
-      _showDocumentLimit();
-      return _PhotoIntakeResult.capacityReached;
+      return reachLimit();
     }
 
     late final Size imageSize;
@@ -1349,11 +1330,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       imageSize = await readEncodedImageSize(bytes);
       validateSourceImageSize(imageSize);
     } on UnsupportedError {
-      _showUnsupportedImageDimensions();
-      return _PhotoIntakeResult.skipped;
+      return reject(IntakeRejection.unsupportedSize);
     } catch (_) {
-      _showMessage('Could not read this photo.');
-      return _PhotoIntakeResult.skipped;
+      return reject(IntakeRejection.notImage);
     }
     if (!mounted ||
         _isClearingDraft ||
@@ -1366,8 +1345,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       encodedBytes: bytes.length,
       size: imageSize,
     )) {
-      _showImageProcessingMemoryLimit();
-      return _PhotoIntakeResult.skipped;
+      return reject(IntakeRejection.needsTooMuchMemory);
     }
 
     var stopRequested = false;
@@ -1389,7 +1367,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         ),
       ),
     );
-    if (stopRequested) return _PhotoIntakeResult.stopped;
+    if (stopRequested) {
+      report.end(
+        'Import stopped. Pages already added were kept; the remaining '
+        '${report.noun}s were not added.',
+      );
+      return _PhotoIntakeResult.stopped;
+    }
     if (retakeRequested && result == null) {
       onRetake?.call(bytes);
       return _PhotoIntakeResult.retake;
@@ -1400,7 +1384,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         documentGeneration != _documentGeneration) {
       return _PhotoIntakeResult.skipped;
     }
-    if (!_tryAddPage(result, documentGeneration: documentGeneration)) {
+    if (!_tryAddPage(
+      result,
+      documentGeneration: documentGeneration,
+      report: report,
+    )) {
       return _PhotoIntakeResult.capacityReached;
     }
     _lastNewPageFilter = result.filter;
@@ -1462,10 +1450,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         validateSourceImageSize(imageSize);
       } on UnsupportedError {
         if (!requestIsCurrent()) return;
-        _showUnsupportedImageDimensions();
+        _showMessage(intakeRejectionMessage(IntakeRejection.unsupportedSize));
         return;
       } catch (_) {
-        if (requestIsCurrent()) _showMessage('Could not read this photo.');
+        if (requestIsCurrent()) {
+          _showMessage(intakeRejectionMessage(IntakeRejection.unreadable));
+        }
         return;
       }
       if (!requestIsCurrent()) return;
@@ -1475,7 +1465,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         encodedBytes: 0,
         size: imageSize,
       )) {
-        _showImageProcessingMemoryLimit();
+        _showMessage(
+          intakeRejectionMessage(IntakeRejection.needsTooMuchMemory),
+        );
         return;
       }
 
