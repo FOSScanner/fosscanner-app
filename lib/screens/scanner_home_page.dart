@@ -67,6 +67,19 @@ typedef _PageGridGeometry = ({
   EdgeInsetsDirectional padding,
   double cameraInset,
 });
+
+/// While a long-pressed page is dragged this close to the grid's top or
+/// bottom edge, the grid scrolls towards it.
+const _autoScrollEdge = 64.0;
+
+/// Fastest drag auto-scroll, in logical pixels per [_autoScrollTick].
+const _autoScrollMaxStep = 16.0;
+const _autoScrollTick = Duration(milliseconds: 16);
+
+/// How long card actions ignore taps after a message timed out, so a tap
+/// meant for the message's action cannot land on the card underneath.
+const _tapGuardDuration = Duration(milliseconds: 400);
+
 const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
 class _DocumentCapacityException implements Exception {
@@ -252,6 +265,24 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   final _gridScroll = ScrollController();
   // The page grid's latest layout, used to scroll a page into view.
   _PageGridGeometry? _gridGeometry;
+  // The grid's viewport and the home scaffold, to find a message's position.
+  final _gridViewportKey = GlobalKey();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  // Messages shown on this screen that have not closed yet.
+  final _openSnackBars = <SnackBarController>{};
+  // How far the open message reaches into the grid. The grid's end padding
+  // grows by this much, so the last row can be scrolled above the message.
+  double _snackBarClearance = 0;
+  // Card actions ignore taps until this timer ends (see _tapGuardDuration).
+  Timer? _tapGuard;
+  // The page being dragged, its pointer, and whether the grid auto-scrolled
+  // since the pointer last moved: the drop target is then found again under
+  // the pointer, by the grid instead of the stale drop target.
+  int? _draggedIndex;
+  Offset? _dragPosition;
+  bool _autoScrolledSinceDragMove = false;
+  bool _isDropHandledByGrid = false;
+  Timer? _autoScroll;
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
   // The name the user chose for a save in progress, once the picker returned.
@@ -306,6 +337,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   @override
   void dispose() {
+    _tapGuard?.cancel();
+    _autoScroll?.cancel();
     _gridScroll.dispose();
     _sharedImageRetry?.cancel();
     widget.sharedImageInbox?.setListener(null);
@@ -736,9 +769,109 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_undoPage != null) {
       _deferredMessage = message;
     } else {
-      showTransientMessage(context, message);
+      showTransientMessage(context, message, onShown: _trackSnackBar);
     }
   }
+
+  /// Keeps the grid clear of [controller]'s message while it is open, and
+  /// guards card actions for a moment after it timed out.
+  void _trackSnackBar(SnackBarController controller) {
+    if (!mounted) return;
+    _openSnackBars.add(controller);
+    _measureSnackBarClearance();
+    unawaited(
+      controller.closed.then((reason) {
+        _openSnackBars.remove(controller);
+        if (!mounted) return;
+        // A message that leaves on its own can vanish just as the user
+        // reaches for its action; that tap must not hit the card below.
+        if (reason == SnackBarClosedReason.timeout) {
+          _tapGuard?.cancel();
+          setState(() {
+            _tapGuard = Timer(_tapGuardDuration, () {
+              if (mounted) setState(() => _tapGuard = null);
+            });
+          });
+        }
+        _releaseSnackBarClearance();
+      }),
+    );
+  }
+
+  bool get _isTapGuarded => _tapGuard?.isActive ?? false;
+
+  /// The open message's rect on this screen, once it is laid out.
+  Rect? _snackBarRect() {
+    RenderBox? found;
+    void visit(Element element) {
+      if (found != null) return;
+      // The pages cannot contain the message; skip them.
+      if (element.widget.key == _gridViewportKey) return;
+      if (element.widget is SnackBar) {
+        final box = element.renderObject;
+        if (box is RenderBox && box.attached && box.hasSize) found = box;
+        return;
+      }
+      element.visitChildElements(visit);
+    }
+
+    _scaffoldKey.currentContext?.visitChildElements(visit);
+    final box = found;
+    return box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  /// Measures, after the next frames, how far the open message overlaps the
+  /// grid, and grows the grid's end padding to match. Only the scrollable
+  /// extent grows, so no card moves.
+  void _measureSnackBarClearance({int attempts = 60, Rect? previous}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _openSnackBars.isEmpty) return;
+      final message = _snackBarRect();
+      final grid = _gridViewportKey.currentContext?.findRenderObject();
+      // A replaced message waits for the previous one to leave, and a new
+      // one grows from nothing while it appears: measure until it settles.
+      if (message != previous || message == null || message.height == 0) {
+        if (attempts > 0) {
+          _measureSnackBarClearance(attempts: attempts - 1, previous: message);
+        }
+      }
+      if (message == null || grid is! RenderBox || !grid.hasSize) return;
+      final gridBottom = grid.localToGlobal(Offset(0, grid.size.height)).dy;
+      final clearance = math.max(0.0, gridBottom - message.top);
+      if (clearance > _snackBarClearance + 0.5) {
+        setState(() => _snackBarClearance = clearance);
+      }
+    });
+  }
+
+  /// Drops the message clearance once no message is open, unless that would
+  /// pull the cards down: then it waits until the user scrolls away.
+  void _releaseSnackBarClearance() {
+    if (!mounted || _snackBarClearance == 0 || _openSnackBars.isNotEmpty) {
+      return;
+    }
+    if (_gridScroll.hasClients) {
+      final position = _gridScroll.position;
+      final geometry = _gridGeometry;
+      final extra = geometry == null
+          ? _snackBarClearance
+          : _gridPadding(geometry).bottom - geometry.padding.bottom;
+      if (position.pixels > position.maxScrollExtent - extra + 0.5) return;
+    }
+    setState(() => _snackBarClearance = 0);
+  }
+
+  /// The grid's padding, with room to scroll the last row above an open
+  /// message.
+  EdgeInsetsDirectional _gridPadding(_PageGridGeometry geometry) =>
+      _snackBarClearance == 0
+      ? geometry.padding
+      : geometry.padding.copyWith(
+          bottom: math.max(
+            geometry.padding.bottom,
+            _snackBarClearance + _pageGridSpacing,
+          ),
+        );
 
   Future<void> _openSourceCode() async {
     try {
@@ -1678,6 +1811,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         ),
       ),
     );
+    _trackSnackBar(controller);
     unawaited(
       controller.closed.then((_) {
         if (!mounted || undoGeneration != _undoGeneration) return;
@@ -1748,6 +1882,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         return;
       }
       final position = _gridScroll.position;
+      // Without the message clearance: Undo, the usual reason to reveal a
+      // page while a message is open, closes its message.
       final padding = geometry.padding;
       final row = index ~/ geometry.columns;
       final top =
@@ -2803,32 +2939,169 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Widget _buildPageGrid() => LayoutBuilder(
     builder: (context, constraints) {
       final geometry = _gridGeometry = _pageGridGeometry(constraints.biggest);
+      if (_openSnackBars.isNotEmpty) _measureSnackBarClearance();
       return Padding(
         padding: EdgeInsets.only(bottom: geometry.cameraInset),
-        child: GridView.builder(
-          key: const Key('page_grid'),
-          controller: _gridScroll,
-          padding: geometry.padding,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: geometry.columns,
-            crossAxisSpacing: _pageGridSpacing,
-            mainAxisSpacing: _pageGridSpacing,
-            mainAxisExtent: geometry.cardSize.height,
+        child: KeyedSubtree(
+          key: _gridViewportKey,
+          // A drag that ends anywhere stops auto-scrolling, even when its
+          // card has been scrolled out of the grid and disposed.
+          child: Listener(
+            onPointerUp: (_) => _onGridPointerUp(),
+            onPointerCancel: (_) => _stopAutoScroll(),
+            child: NotificationListener<ScrollEndNotification>(
+              onNotification: (_) {
+                _releaseSnackBarClearance();
+                return false;
+              },
+              child: GridView.builder(
+                key: const Key('page_grid'),
+                controller: _gridScroll,
+                padding: _gridPadding(geometry),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: geometry.columns,
+                  crossAxisSpacing: _pageGridSpacing,
+                  mainAxisSpacing: _pageGridSpacing,
+                  mainAxisExtent: geometry.cardSize.height,
+                ),
+                itemCount: _pages.length,
+                itemBuilder: (context, index) =>
+                    _buildPageCard(context, index, geometry.cardSize),
+              ),
+            ),
           ),
-          itemCount: _pages.length,
-          itemBuilder: (context, index) =>
-              _buildPageCard(context, index, geometry.cardSize),
         ),
       );
     },
   );
+
+  /// The grid's viewport in global coordinates.
+  Rect? get _gridViewportRect {
+    final box = _gridViewportKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  void _onPageDragUpdate(DragUpdateDetails details) {
+    _dragPosition = details.globalPosition;
+    _autoScrolledSinceDragMove = false;
+    if (_autoScrollStep() != 0) {
+      _autoScroll ??= Timer.periodic(_autoScrollTick, (_) => _autoScrollOnce());
+    }
+  }
+
+  /// How far to scroll for the current drag position: towards the edge it is
+  /// near, faster the closer it gets.
+  double _autoScrollStep() {
+    final position = _dragPosition;
+    final viewport = _gridViewportRect;
+    if (position == null || viewport == null) return 0;
+    final edge = math.min(_autoScrollEdge, viewport.height / 4);
+    if (position.dy < viewport.top + edge) {
+      final depth = (viewport.top + edge - position.dy) / edge;
+      return -_autoScrollMaxStep * depth.clamp(0.0, 1.0);
+    }
+    if (position.dy > viewport.bottom - edge) {
+      final depth = (position.dy - (viewport.bottom - edge)) / edge;
+      return _autoScrollMaxStep * depth.clamp(0.0, 1.0);
+    }
+    return 0;
+  }
+
+  void _autoScrollOnce() {
+    final step = _autoScrollStep();
+    if (!mounted || step == 0 || !_gridScroll.hasClients) {
+      _stopAutoScroll();
+      return;
+    }
+    final position = _gridScroll.position;
+    final target = (position.pixels + step).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((target - position.pixels).abs() < 0.5) return;
+    _gridScroll.jumpTo(target);
+    _autoScrolledSinceDragMove = true;
+  }
+
+  void _stopAutoScroll() {
+    _autoScroll?.cancel();
+    _autoScroll = null;
+  }
+
+  /// The page under [global] in the grid, or null over a gap or padding.
+  int? _pageIndexAt(Offset global) {
+    final box = _gridViewportKey.currentContext?.findRenderObject();
+    final geometry = _gridGeometry;
+    if (box is! RenderBox ||
+        !box.hasSize ||
+        geometry == null ||
+        !_gridScroll.hasClients) {
+      return null;
+    }
+    final local = box.globalToLocal(global);
+    if (!(Offset.zero & box.size).contains(local)) return null;
+    final padding = _gridPadding(geometry).resolve(Directionality.of(context));
+    final x = Directionality.of(context) == TextDirection.rtl
+        ? box.size.width - padding.right - local.dx
+        : local.dx - padding.left;
+    final y = local.dy + _gridScroll.position.pixels - padding.top;
+    final columnStride = geometry.cardSize.width + _pageGridSpacing;
+    final rowStride = geometry.cardSize.height + _pageGridSpacing;
+    if (x < 0 || y < 0) return null;
+    final column = x ~/ columnStride;
+    final row = y ~/ rowStride;
+    if (column >= geometry.columns ||
+        x - column * columnStride > geometry.cardSize.width ||
+        y - row * rowStride > geometry.cardSize.height) {
+      return null;
+    }
+    final index = row * geometry.columns + column;
+    return index < _pages.length ? index : null;
+  }
+
+  /// Drops a dragged page when its finger lifts after the grid auto-scrolled
+  /// under it. Drop targets only update when the pointer moves, so the card
+  /// that last reported the hover is no longer the one under the finger, and
+  /// the dragged card itself may have been scrolled out and disposed. The
+  /// grid then finds the card under the finger itself, before the drag ends.
+  void _onGridPointerUp() {
+    _stopAutoScroll();
+    final from = _draggedIndex;
+    final position = _dragPosition;
+    if (from == null || position == null || !_autoScrolledSinceDragMove) {
+      return;
+    }
+    _isDropHandledByGrid = true;
+    final target = _pageIndexAt(position);
+    if (target != null && target != from) _reorderPage(from, target);
+  }
+
+  void _startPageDrag(int index) {
+    _draggedIndex = index;
+    _dragPosition = null;
+    _autoScrolledSinceDragMove = false;
+    _isDropHandledByGrid = false;
+  }
+
+  void _endPageDrag() {
+    _stopAutoScroll();
+    _draggedIndex = null;
+    _dragPosition = null;
+    _autoScrolledSinceDragMove = false;
+    _isDropHandledByGrid = false;
+  }
 
   Widget _buildPageCard(BuildContext context, int index, Size cardSize) {
     final page = _pages[index];
     final card = Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: _isDocumentInteractionLocked ? null : () => _openPage(index),
+        onTap: _isDocumentInteractionLocked
+            ? null
+            : () {
+                if (!_isTapGuarded) unawaited(_openPage(index));
+              },
         child: Column(
           children: [
             Expanded(
@@ -2865,13 +3138,20 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       ),
                     ),
                   ),
-                  _pageReorderMenu(index, page),
+                  // A popup menu opens on tap before any callback could
+                  // check the guard, so the guard absorbs the tap instead.
+                  AbsorbPointer(
+                    absorbing: _isTapGuarded,
+                    child: _pageReorderMenu(index, page),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.delete_outline),
                     tooltip: 'Delete page ${index + 1}',
                     onPressed: _isDocumentInteractionLocked
                         ? null
-                        : () => _removePage(index),
+                        : () {
+                            if (!_isTapGuarded) _removePage(index);
+                          },
                   ),
                 ],
               ),
@@ -2900,12 +3180,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       child: DragTarget<int>(
         onWillAcceptWithDetails: (details) =>
             !_isDocumentInteractionLocked && details.data != index,
-        onAcceptWithDetails: (details) => _reorderPage(details.data, index),
+        onAcceptWithDetails: (details) {
+          final handled = _isDropHandledByGrid;
+          _endPageDrag();
+          if (!handled) _reorderPage(details.data, index);
+        },
         builder: (context, candidateData, rejectedData) {
           final isDropTarget = candidateData.isNotEmpty;
           return LongPressDraggable<int>(
             data: index,
             maxSimultaneousDrags: _isDocumentInteractionLocked ? 0 : 1,
+            onDragStarted: () => _startPageDrag(index),
+            onDragUpdate: _onPageDragUpdate,
+            onDragEnd: (_) => _endPageDrag(),
             // The dragged copy has the card's own size, so its label and
             // controls are laid out exactly as on the card.
             feedback: SizedBox.fromSize(
@@ -2949,6 +3236,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Widget _buildScaffold(BuildContext context) {
     _fabLocation.estimatedBarHeight = _reservedExportBarHeight(context);
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
         // Scales down rather than truncating at large text sizes.
         title: const FittedBox(

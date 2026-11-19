@@ -402,6 +402,8 @@ void main() {
         await tester.pump(const Duration(seconds: 11));
         await tester.pumpAndSettle();
         expect(_undo, findsNothing);
+        // Card actions ignore taps for a moment after Undo times out.
+        await tester.pump(const Duration(milliseconds: 400));
 
         pressIconButton(tester, 'Delete page 1');
         await tester.pumpAndSettle();
