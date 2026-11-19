@@ -21,6 +21,7 @@ import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
 import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
+import '../services/pdf_document_saver.dart';
 import '../services/pdf_export_files.dart';
 import '../services/pdf_export_options.dart';
 import '../services/platform_capabilities.dart';
@@ -61,6 +62,9 @@ enum _CameraRecovery { retry, gallery }
 /// the Dart image-only exporter only polls the flag this screen already sets.
 enum _PdfExporter { searchable, imageOnly }
 
+/// Where a finished PDF goes: the share sheet, or a user-chosen document.
+enum _ExportAction { share, save }
+
 typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
 
 class ScannerHomePage extends StatefulWidget {
@@ -75,6 +79,7 @@ class ScannerHomePage extends StatefulWidget {
     this.sharedImageInbox,
     this.preferencesStore,
     this.temporaryDirectory = getTemporaryDirectory,
+    this.documentSaver = const PlatformPdfDocumentSaver(),
   });
 
   final List<ScannedPage> initialPages;
@@ -93,6 +98,9 @@ class ScannerHomePage extends StatefulWidget {
 
   /// The cache directory exported PDFs are written to before handing off.
   final DirectoryProvider temporaryDirectory;
+
+  /// Saves exports to device storage where the platform supports it.
+  final PdfDocumentSaver documentSaver;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -122,6 +130,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _preferencesChanged = false;
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
+  _ExportAction _exportAction = _ExportAction.share;
   bool _isCancellingPdf = false;
   double? _pdfProgress;
   _PdfExporter? _pdfExporter;
@@ -1390,13 +1399,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   Future<bool> _confirmImageOnlyFallback() async {
     if (!mounted) return false;
+    final verb = _exportAction == _ExportAction.save ? 'Save' : 'Share';
     final fallback = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Searchable export failed'),
-        content: const Text(
+        content: Text(
           'OCR could not create a searchable PDF for this document. '
-          'Share an image-only PDF instead?',
+          '$verb an image-only PDF instead?',
         ),
         actions: [
           TextButton(
@@ -1405,7 +1415,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Share image-only PDF'),
+            child: Text('$verb image-only PDF'),
           ),
         ],
       ),
@@ -1471,10 +1481,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     required bool useOcr,
     required PdfExportDirectory directory,
   }) async {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final now = DateTime.now();
     if (useOcr) {
       try {
-        final name = 'FOSScanner_searchable_$timestamp.pdf';
+        final name = pdfExportFileName(now, searchable: true);
         final file = directory.fileNamed(name);
         await _createSearchablePdf(pages, file);
         return (file: file, name: name, searchable: true);
@@ -1495,13 +1505,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _pdfProgress = 0;
       });
     }
-    final name = 'FOSScanner_$timestamp.pdf';
+    final name = pdfExportFileName(now, searchable: false);
     final file = directory.fileNamed(name);
     await _createImageOnlyPdf(pages, file);
     return (file: file, name: name, searchable: false);
   }
 
-  Future<void> _generateAndSharePdf() async {
+  bool get _canSaveToDevice => widget.documentSaver.isSupported;
+
+  Future<void> _generateAndSharePdf() =>
+      _generateAndExportPdf(_ExportAction.share);
+
+  Future<void> _generateAndSavePdf() =>
+      _generateAndExportPdf(_ExportAction.save);
+
+  Future<void> _generateAndExportPdf(_ExportAction action) async {
     if (!_canExport) return;
     // Drop Undo before exporting so a deleted page cannot consume untracked
     // headroom or be restored by a callback captured before the export lock.
@@ -1517,6 +1535,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     setState(() {
       _isGeneratingPdf = true;
       _isSharingPdf = false;
+      _exportAction = action;
       _isCancellingPdf = false;
       _pdfExporter = useOcr ? _PdfExporter.searchable : _PdfExporter.imageOnly;
       _pdfProgress = 0;
@@ -1541,28 +1560,44 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _pdfProgress = null;
         _isSharingPdf = true;
       });
-      await _sharePdfFile(
-        pdf.file,
-        fileName: pdf.name,
-        message: pdf.searchable
-            ? 'Searchable document scanned with FOSScanner'
-            : 'Document scanned with FOSScanner',
-        shareOrigin: shareOrigin,
-      );
+      if (action == _ExportAction.share) {
+        await _sharePdfFile(
+          pdf.file,
+          fileName: pdf.name,
+          message: pdf.searchable
+              ? 'Searchable document scanned with FOSScanner'
+              : 'Document scanned with FOSScanner',
+          shareOrigin: shareOrigin,
+        );
+      } else {
+        // Cancelling the picker is a no-op: the draft stays as it is.
+        final saved = await widget.documentSaver.save(
+          pdf.file,
+          fileName: pdf.name,
+        );
+        if (saved && mounted) _showMessage('PDF saved.');
+      }
     } catch (error) {
       if (ocr_service.isCancellation(error) ||
           error is image_pdf.ImagePdfCancelledException) {
         if (mounted) _showMessage('PDF generation cancelled.');
       } else {
         if (kDebugMode) {
-          debugPrint('PDF generation failed (${error.runtimeType}).');
+          debugPrint('PDF export failed (${error.runtimeType}).');
         }
-        if (mounted) _showMessage('Could not generate or share the PDF.');
+        if (mounted) {
+          _showMessage(
+            action == _ExportAction.share
+                ? 'Could not generate or share the PDF.'
+                : 'Could not save the PDF. Try again or choose another '
+                      'location.',
+          );
+        }
       }
     } finally {
-      // The share call returns once the platform has taken its own copy (or
-      // the share failed), so the exported file is no longer needed. Files
-      // orphaned by a killed process are swept at the next launch.
+      // Sharing and saving return once the platform has taken its own copy
+      // (or failed), so the exported file is no longer needed. Files orphaned
+      // by a killed process are swept at the next launch.
       exportDirectory?.delete();
       if (mounted) {
         setState(() {
@@ -1712,7 +1747,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   String get _exportStatus {
     if (_isClearingDraft) return 'Clearing draft...';
     if (_isCancellingPdf) return 'Cancelling PDF...';
-    if (_isSharingPdf) return 'Opening share sheet...';
+    if (_isSharingPdf) {
+      return _exportAction == _ExportAction.save
+          ? 'Choose where to save...'
+          : 'Opening share sheet...';
+    }
     if (_pdfProgress == null) return 'Preparing PDF...';
     return 'Generating PDF ${(_pdfProgress! * 100).round()}%';
   }
@@ -1800,6 +1839,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ),
                       ),
                     ),
+                    // Android only: the iOS share sheet already offers
+                    // "Save to Files".
+                    if (_canSaveToDevice) ...[
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        onPressed: _canExport ? _generateAndSavePdf : null,
+                        tooltip: 'Save PDF to device',
+                        icon: const Icon(Icons.save_alt),
+                      ),
+                    ],
                     const SizedBox(width: 8),
                     Semantics(
                       value: _exportOptionsSummary,

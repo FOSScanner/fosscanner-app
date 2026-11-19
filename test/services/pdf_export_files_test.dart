@@ -67,4 +67,30 @@ void main() {
       temporaryDirectory: () async => Directory('${cache.path}/missing'),
     );
   });
+
+  group('file names', () {
+    test('are readable, sortable and locale-independent', () {
+      final time = DateTime(2026, 1, 2, 3, 4, 59);
+      expect(
+        pdfExportFileName(time, searchable: false),
+        'Scan 2026-01-02 03-04.pdf',
+      );
+      expect(
+        pdfExportFileName(DateTime(2026, 11, 19, 14, 5), searchable: true),
+        'Scan 2026-11-19 14-05 (searchable).pdf',
+      );
+    });
+
+    test('sanitizing removes separators, reserved and control characters', () {
+      expect(
+        sanitizePdfFileName('a/b\\c:d*e?f"g<h>i|j.pdf'),
+        'a b c d e f g h i j.pdf',
+      );
+      expect(sanitizePdfFileName('tab\there\nnew.PDF'), 'tab here new.pdf');
+      expect(sanitizePdfFileName('../../etc/passwd'), 'etc passwd.pdf');
+      expect(sanitizePdfFileName('   '), 'Scan.pdf');
+      expect(sanitizePdfFileName('.pdf'), 'Scan.pdf');
+      expect(sanitizePdfFileName('x' * 300), '${'x' * 100}.pdf');
+    });
+  });
 }

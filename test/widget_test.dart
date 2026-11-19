@@ -1078,7 +1078,7 @@ void main() {
     expect(params!.fileNameOverrides, hasLength(1));
     expect(
       params.fileNameOverrides!.single,
-      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+      matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
     );
   });
 
@@ -1132,7 +1132,7 @@ void main() {
       expect(find.text('Searchable export failed'), findsNothing);
       expect(
         sharePlatform.lastParams!.fileNameOverrides!.single,
-        matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+        matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
       );
       expect(find.text('Keep this draft?'), findsNothing);
       expect(find.text('Export PDF (1 page)'), findsOneWidget);
@@ -1240,7 +1240,9 @@ void main() {
       expect(params!.sharePositionOrigin, expectedAnchor);
       expect(
         params.fileNameOverrides!.single,
-        matches(RegExp(r'^FOSScanner_searchable_\d+\.pdf$')),
+        matches(
+          RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2} \(searchable\)\.pdf$'),
+        ),
       );
       expect(params.text, 'Searchable document scanned with FOSScanner');
       await tester.tap(find.byTooltip('PDF export options'));
@@ -1305,7 +1307,7 @@ void main() {
     expect(sharePlatform.lastParams, isNotNull);
     expect(
       sharePlatform.lastParams!.fileNameOverrides!.single,
-      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+      matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
     );
   });
 }

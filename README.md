@@ -43,6 +43,10 @@ No account, no cloud processing, no tracking.
    back arrow to revisit the crop; back again leaves the editor without saving.
    Save an edit with **Save changes**.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
+   On Android, **Save PDF to device** (next to Export) opens the system file
+   picker so you can store the PDF directly, even without Google apps. PDFs are
+   named like `Scan 2026-11-19 14-05.pdf` (` (searchable)` with text
+   recognition); you can rename them in the picker.
    **PDF export options** sets the page size (Original, A4 or Letter) and
    quality (High, Balanced or Small); on Android it also turns searchable text
    on or off. Your choices are remembered.
@@ -86,6 +90,7 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | Original, Enhance, Grayscale, Black & white filters | Yes | Yes |
 | Rotation, brightness, contrast, and later re-editing | Yes | Yes |
 | Multi-page PDF export through the system share sheet | Yes | Yes |
+| Save the PDF to device storage | Yes — system file picker | Via the share sheet's "Save to Files" |
 | Offline searchable PDFs with selectable text | Yes — Latin-script OCR | Image-only PDFs |
 | Temporary draft restoration after app restart | Yes | Yes |
 | QR/barcode scanning and full-result inspection | Yes | Yes |
@@ -175,10 +180,12 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 - Unrelated notifications wait while deletion Undo is available. A new deletion
   replaces the previous Undo; export or confirmed clearing discards it.
 
-### Sharing and external links
+### Sharing, saving and external links
 
 Export opens the OS share sheet; it does not prove that another app saved or
-delivered the PDF. FOSScanner writes the PDF to its private cache only for the
+delivered the PDF. On Android, **Save PDF to device** writes the PDF to the
+location you pick in the system file picker; it needs no storage permission,
+and canceling the picker changes nothing. FOSScanner writes the PDF to its private cache only for the
 hand-off and deletes it when the share sheet returns; a copy left by an
 interrupted export is removed at the next launch. The share system may keep
 its own copy in an app/OS cache, whose lifetime is platform-managed. Receiving apps control their own copies and may upload them.

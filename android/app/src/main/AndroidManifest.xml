@@ -6,7 +6,7 @@
          RECORD_AUDIO and legacy storage for video recording, which the
          barcode scanner does not do; its media3 dependency adds
          ACCESS_NETWORK_STATE. Images come from the system photo picker and
-         PDFs are shared through the system share sheet, neither of which
+         PDFs are saved through the system document picker, neither of which
          needs storage permissions on any Android version. CI fails if the
          merged release manifest requests any of them again. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />

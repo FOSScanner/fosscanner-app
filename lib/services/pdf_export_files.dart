@@ -72,3 +72,40 @@ Future<void> sweepStalePdfExports({
     }
   }
 }
+
+/// The default name of an exported PDF, used for both sharing and saving.
+///
+/// Locale-independent so it sorts by date everywhere, e.g.
+/// `Scan 2026-11-19 14-05.pdf` or `Scan 2026-11-19 14-05 (searchable).pdf`.
+String pdfExportFileName(DateTime time, {required bool searchable}) {
+  String two(int value) => value.toString().padLeft(2, '0');
+  final date =
+      '${time.year.toString().padLeft(4, '0')}-${two(time.month)}-'
+      '${two(time.day)}';
+  final clock = '${two(time.hour)}-${two(time.minute)}';
+  return sanitizePdfFileName(
+    'Scan $date $clock${searchable ? ' (searchable)' : ''}.pdf',
+  );
+}
+
+const _maxFileNameBaseLength = 100;
+
+/// Makes [name] safe as a single file name on Android, iOS and common
+/// receiving systems: no path separators, reserved or control characters,
+/// no leading dots, bounded length, always ending in `.pdf`.
+String sanitizePdfFileName(String name) {
+  var base = name
+      .replaceAll(RegExp(r'[\x00-\x1f\x7f/\\:*?"<>|]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (base.toLowerCase().endsWith('.pdf')) {
+    base = base.substring(0, base.length - 4);
+  }
+  // Leading dots would hide the file on many systems.
+  base = base.replaceFirst(RegExp(r'^[.\s]+'), '').trim();
+  if (base.isEmpty) base = 'Scan';
+  if (base.length > _maxFileNameBaseLength) {
+    base = base.substring(0, _maxFileNameBaseLength).trim();
+  }
+  return '$base.pdf';
+}

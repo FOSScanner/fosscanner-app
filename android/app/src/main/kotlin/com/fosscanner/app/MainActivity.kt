@@ -1,5 +1,7 @@
 package com.fosscanner.app
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
@@ -10,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.view.WindowManager
+import android.provider.DocumentsContract
 import com.googlecode.leptonica.android.ReadFile
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.googlecode.tesseract.android.TessPdfRenderer
@@ -20,6 +23,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.util.concurrent.ExecutorService
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -35,6 +39,10 @@ class MainActivity : FlutterActivity() {
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
+    // The one save waiting for the system document picker, if any.
+    private var pendingSave: PendingSave? = null
+
+    private class PendingSave(val result: MethodChannel.Result, val source: File)
 
     // Shared images are copied off the UI thread on their own worker, so a
     // running OCR export never delays them (Dart blocks intake during export).
@@ -161,6 +169,7 @@ class MainActivity : FlutterActivity() {
                 "ensureTessdata" -> handleEnsureTessdata(result)
                 "createSearchablePdf" -> handleCreateSearchablePdf(call, result)
                 "cancelSearchablePdf" -> handleCancelSearchablePdf(result)
+                "savePdfDocument" -> handleSavePdfDocument(call, result)
                 else -> result.notImplemented()
             }
         }
@@ -200,6 +209,8 @@ class MainActivity : FlutterActivity() {
         sharedImageChannel?.setMethodCallHandler(null)
         sharedImageChannel = null
         sharedImageExecutor.shutdown()
+        // Its Dart caller is gone with the engine; nothing is left to answer.
+        pendingSave = null
         // Let the active native call finish and release its resources. Interrupting
         // the Java worker cannot safely interrupt Tesseract's native renderer.
         executor.shutdown()
@@ -303,6 +314,70 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // Lets the user pick a location with the system picker (ACTION_CREATE_DOCUMENT):
+    // no storage permission, works without Google apps, and the user can rename
+    // the suggested file. Replies true when saved and false when cancelled.
+    private fun handleSavePdfDocument(call: MethodCall, result: MethodChannel.Result) {
+        if (pendingSave != null) {
+            result.error("save_busy", "A save is already waiting for a location", null)
+            return
+        }
+        val source = PdfExportContract.exportFile(
+            applicationContext.cacheDir,
+            call.argument<String>("sourcePath"),
+        )
+        if (source == null) {
+            result.error("invalid_args", "An exported PDF is required", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/pdf")
+            .putExtra(Intent.EXTRA_TITLE, PdfExportContract.documentTitle(call.argument<String>("fileName")))
+        pendingSave = PendingSave(result, source)
+        try {
+            startActivityForResult(intent, SAVE_DOCUMENT_REQUEST)
+        } catch (e: ActivityNotFoundException) {
+            pendingSave = null
+            result.error("save_unavailable", "No document picker is available", null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != SAVE_DOCUMENT_REQUEST) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val pending = pendingSave ?: return
+        pendingSave = null
+        val destination = data?.data
+        if (resultCode != Activity.RESULT_OK || destination == null) {
+            pending.result.success(false)
+            return
+        }
+        val resolver = applicationContext.contentResolver
+        // Streams the file in chunks off the main thread; it can be large.
+        Thread {
+            try {
+                val output = resolver.openOutputStream(destination, "w")
+                    ?: throw IOException("No output stream")
+                output.use { stream ->
+                    pending.source.inputStream().use { input -> input.copyTo(stream, 64 * 1024) }
+                }
+                mainHandler.post { pending.result.success(true) }
+            } catch (e: Exception) {
+                // Do not leave an empty or truncated document at the chosen place.
+                try {
+                    DocumentsContract.deleteDocument(resolver, destination)
+                } catch (_: Exception) {
+                    // Best effort; some providers do not support deletion.
+                }
+                // Do not expose paths or provider messages to Dart.
+                mainHandler.post { pending.result.error("save_failed", "Could not write the document", null) }
+            }
+        }.start()
+    }
+
     private fun handleCancelSearchablePdf(result: MethodChannel.Result) {
         if (rendering.get()) cancellationRequested.set(true)
         result.success(null)
@@ -381,6 +456,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
         @Volatile private var secureScreen = false
+        private const val SAVE_DOCUMENT_REQUEST = 0x5AFE
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
 
