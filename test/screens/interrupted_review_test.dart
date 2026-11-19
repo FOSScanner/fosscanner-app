@@ -10,6 +10,7 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 import 'package:fosscanner/services/review_journal.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import '../support/export_bar.dart';
 
 final _iOS = TargetPlatformVariant.only(TargetPlatform.iOS);
 
@@ -22,9 +23,13 @@ class _Journal extends FileReviewJournal {
   var clears = 0;
 
   @override
-  Future<List<String>> keep(String source, List<String> paths) {
+  Future<List<String>> keep(
+    String source,
+    List<String> paths, {
+    List<double?>? sourceDpis,
+  }) {
     keptSources.add(source);
-    return super.keep(source, paths);
+    return super.keep(source, paths, sourceDpis: sourceDpis);
   }
 
   @override
@@ -240,9 +245,9 @@ void main() {
       await accept(tester);
       await waitForEditor(tester, 'Image 2 of 2');
       await accept(tester);
-      await waitFor(tester, find.text('Export 2 pages as PDF'));
+      await waitFor(tester, findShareButton(2));
 
-      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       // Nothing is left on disk once the review is over.
       expect(await journalGone(tester), isTrue);
     }, variant: _iOS);
@@ -354,8 +359,8 @@ void main() {
       expect(review.source, 'camera');
       expect(review.paths, hasLength(1));
       await accept(tester);
-      await waitFor(tester, find.text('Export 1 page as PDF'));
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      await waitFor(tester, findShareButton(1));
+      expect(findShareButton(1), findsOneWidget);
       expect(await journalGone(tester), isTrue);
     }, variant: _iOS);
   });

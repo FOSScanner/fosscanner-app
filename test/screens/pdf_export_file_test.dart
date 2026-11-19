@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:share_plus_platform_interface/share_plus_platform_interface.dart';
 
 import '../support/worker_isolates.dart';
+import '../support/export_bar.dart';
 
 class _Picker extends ImagePickerPlatform {
   @override
@@ -103,7 +104,7 @@ void main() {
   ) async {
     final share = _Share();
     await pumpHome(tester, share);
-    await tester.tap(find.text('Export 1 page as PDF'));
+    await tester.tap(findShareButton(1));
     await pumpUntil(tester, () => share.params != null);
     await pumpUntil(tester, () => exportDirectories().isEmpty);
 
@@ -124,7 +125,7 @@ void main() {
   ) async {
     final share = _Share(fail: true);
     await pumpHome(tester, share);
-    await tester.tap(find.text('Export 1 page as PDF'));
+    await tester.tap(findShareButton(1));
     await pumpUntilFound(
       tester,
       find.text('Could not export the PDF. Try again.'),
@@ -137,7 +138,7 @@ void main() {
   testWidgets('a cancelled export leaves no file behind', (tester) async {
     final share = _Share();
     await pumpHome(tester, share, pages: 2);
-    await tester.tap(find.text('Export 2 pages as PDF'));
+    await tester.tap(findShareButton(2));
     await tester.pump();
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await pumpUntilFound(tester, find.text('Export canceled'));
@@ -172,7 +173,7 @@ void main() {
       searchable: true,
       preferences: const AppPreferences(searchablePdf: true),
     );
-    await tester.tap(find.text('Export 1 page as searchable PDF'));
+    await tester.tap(findShareButton(1, searchable: true));
     await pumpUntil(tester, () => share.params != null);
     await pumpUntil(tester, () => cache.listSync().isEmpty);
     debugDefaultTargetPlatformOverride = null;
@@ -212,7 +213,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ChoiceChip, 'Small'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('email and upload limits'), findsOneWidget);
+    expect(find.text('Smallest file, for email'), findsOneWidget);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(
@@ -223,7 +224,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Export 1 page as PDF'));
+    await tester.tap(findShareButton(1));
     await pumpUntil(tester, () => share.bytes != null);
     expect(latin1.decode(share.bytes!), contains('/MediaBox[0 0 612 792]'));
     await pumpUntil(tester, () => exportDirectories().isEmpty);
@@ -264,7 +265,7 @@ void main() {
     final bar = find.byKey(const Key('pdf_export_bar'));
     final idle = tester.getSize(bar).height;
 
-    await tester.tap(find.text('Export 2 pages as PDF'));
+    await tester.tap(findShareButton(2));
     await tester.pump();
     expect(find.textContaining('Generating PDF'), findsOneWidget);
     expect(tester.getSize(bar).height, idle);

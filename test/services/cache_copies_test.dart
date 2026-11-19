@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/services/cache_copies.dart';
 import 'package:fosscanner/services/pdf_export_files.dart';
@@ -227,4 +228,23 @@ void main() {
       expect(original.existsSync(), isTrue);
     },
   );
+
+  test('a copy that is already gone counts as removed', () async {
+    final logged = <String?>[];
+    final print = debugPrint;
+    debugPrint = (message, {wrapWidth}) => logged.add(message);
+    addTearDown(() => debugPrint = print);
+    final copies = [
+      for (var i = 0; i < 20; i++) file('${cache.path}/$_uuid/IMG_$i.jpg'),
+    ];
+    // After an import the per-image cleanup and the sweep race for the same
+    // files; whichever loses finds nothing left to delete.
+    await Future.wait([
+      for (final copy in copies)
+        deleteImagePickerCopy(copy.path, temporaryDirectory: provider),
+      sweepImagePickerCopies(temporaryDirectory: provider),
+    ]);
+    expect(copies.any((copy) => copy.existsSync()), isFalse);
+    expect(logged, isEmpty);
+  });
 }

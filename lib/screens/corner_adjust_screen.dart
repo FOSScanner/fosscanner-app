@@ -1090,9 +1090,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     _setCrop([...start]);
   }
 
+  /// Off at neutral, where it would change nothing.
   Widget _resetAdjustmentsButton({required VoidCallback onSheetChanged}) =>
       TextButton(
-        onPressed: _isProcessing
+        key: const Key('reset_adjustments'),
+        onPressed: _isProcessing || (_brightness == 0 && _contrast == 1)
             ? null
             : () {
                 setState(() {
@@ -1322,25 +1324,32 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               label: label,
               // Dragging from the track's ends must not trigger system Back.
               child: GestureExclusionRegion(
-                child: Slider(
-                  value: value,
-                  min: min,
-                  max: max,
-                  semanticFormatterCallback: announce,
-                  onChanged: _isProcessing
-                      ? null
-                      : (newValue) {
-                          if (!mounted || _isProcessing) return;
-                          setState(() {
-                            onChanged(newValue);
-                            _finalPreviewGeneration++;
-                            _previewStatus = _PreviewStatus.pending;
-                          });
-                          onSheetChanged();
-                        },
-                  onChangeEnd: _isProcessing
-                      ? null
-                      : (_) => unawaited(_updateFinalPreview()),
+                // Both adjustments are neutral in the middle, so the fill
+                // runs from there to the thumb, showing direction and amount.
+                child: SliderTheme(
+                  data: SliderTheme.of(
+                    context,
+                  ).copyWith(trackShape: const _CenteredSliderTrackShape()),
+                  child: Slider(
+                    value: value,
+                    min: min,
+                    max: max,
+                    semanticFormatterCallback: announce,
+                    onChanged: _isProcessing
+                        ? null
+                        : (newValue) {
+                            if (!mounted || _isProcessing) return;
+                            setState(() {
+                              onChanged(newValue);
+                              _finalPreviewGeneration++;
+                              _previewStatus = _PreviewStatus.pending;
+                            });
+                            onSheetChanged();
+                          },
+                    onChangeEnd: _isProcessing
+                        ? null
+                        : (_) => unawaited(_updateFinalPreview()),
+                  ),
                 ),
               ),
             ),
@@ -1348,6 +1357,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         ],
       ),
     );
+  }
+
+  /// An adjustment on its -100 to +100 scale: "+37", "0", "-12".
+  static String _signedAdjustment(double value) {
+    final rounded = value.round();
+    return rounded > 0 ? '+$rounded' : '$rounded';
   }
 
   /// Header shared by the Filters and Adjust sheets and side panels.
@@ -1412,22 +1427,20 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         value: _brightness,
         min: -100,
         max: 100,
-        describe: (v) => '${v > 0 ? '+' : ''}${v.round()}',
+        describe: _signedAdjustment,
         announce: (v) => '${v.round()}, neutral 0',
         onChanged: (value) => _brightness = value,
         onSheetChanged: refresh,
       ),
       _adjustmentSlider(
         label: 'Contrast',
-        // Log scale: neutral 1.0× sits in the middle.
+        // Log scale: neutral 1.0× sits in the middle. Shown on the same
+        // -100 to +100 scale as brightness, so both read alike.
         value: contrastToSliderPosition(_contrast),
         min: -1,
         max: 1,
-        describe: (position) =>
-            '${sliderPositionToContrast(position).toStringAsFixed(2)}×',
-        announce: (position) =>
-            '${sliderPositionToContrast(position).toStringAsFixed(2)} '
-            'times, neutral 1',
+        describe: (position) => _signedAdjustment(position * 100),
+        announce: (position) => '${(position * 100).round()}, neutral 0',
         onChanged: (position) => _contrast = sliderPositionToContrast(position),
         onSheetChanged: refresh,
       ),
@@ -1826,6 +1839,66 @@ class _InitErrorView extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A slider track filled from its centre to the thumb, for values that are
+/// neutral in the middle of their range.
+class _CenteredSliderTrackShape extends RoundedRectSliderTrackShape {
+  const _CenteredSliderTrackShape();
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 2,
+  }) {
+    final track = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+    );
+    if (track.isEmpty) return;
+    final activeColor = ColorTween(
+      begin: sliderTheme.disabledActiveTrackColor,
+      end: sliderTheme.activeTrackColor,
+    ).evaluate(enableAnimation);
+    final inactiveColor = ColorTween(
+      begin: sliderTheme.disabledInactiveTrackColor,
+      end: sliderTheme.inactiveTrackColor,
+    ).evaluate(enableAnimation);
+    final radius = Radius.circular(track.height / 2);
+    final canvas = context.canvas;
+    if (inactiveColor != null) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(track, radius),
+        Paint()..color = inactiveColor,
+      );
+    }
+    final centre = track.center.dx;
+    final start = math.min(centre, thumbCenter.dx);
+    final end = math.max(centre, thumbCenter.dx);
+    if (activeColor == null || end - start < 0.5) return;
+    canvas.drawRRect(
+      RRect.fromLTRBR(
+        start,
+        track.top - additionalActiveTrackHeight / 2,
+        end,
+        track.bottom + additionalActiveTrackHeight / 2,
+        radius,
+      ),
+      Paint()..color = activeColor,
     );
   }
 }

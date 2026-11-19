@@ -10,6 +10,7 @@ import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
+import '../support/export_bar.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 
@@ -212,7 +213,7 @@ void main() {
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
       expect(picker.cameraCalls, 3);
-      expect(find.text('Export 3 pages as PDF'), findsOneWidget);
+      expect(findShareButton(3), findsOneWidget);
       expect(
         [first, second, third].every((file) => !file.existsSync()),
         isTrue,
@@ -301,7 +302,7 @@ void main() {
       await tester.tap(find.text('Add page'));
       await settleIntake(tester);
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       expect(picker.cameraCalls, 2);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
@@ -321,7 +322,7 @@ void main() {
 
       expect(picker.cameraCalls, 2);
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       expect(find.byType(SnackBar), findsNothing);
 
       await tester.tap(find.byTooltip('Scan a page'));
@@ -348,10 +349,7 @@ void main() {
 
       expect(picker.cameraCalls, 1);
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(
-        find.text('Export $maxDocumentPages pages as PDF'),
-        findsOneWidget,
-      );
+      expect(findShareButton(maxDocumentPages), findsOneWidget);
       expect(
         find.textContaining('reached the $maxDocumentPages-page limit'),
         findsOneWidget,
@@ -377,7 +375,7 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'Add page'), findsOneWidget);
       await tester.tap(find.text('Add page'));
       await settleIntake(tester);
-      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       expect(picker.cameraCalls, 0);
 
       await tester.tap(find.byType(Card).first);
@@ -408,7 +406,7 @@ void main() {
       expect(find.text('Add & scan next'), findsNothing);
       await tester.tap(find.text('Add page'));
       await settleIntake(tester);
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       expect(picker.cameraCalls, 0);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),

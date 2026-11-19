@@ -8,6 +8,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/barcode_scan_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 
+import '../support/export_bar.dart';
 import '../support/layout_stability.dart';
 
 class _Picker extends ImagePickerPlatform {
@@ -159,36 +160,21 @@ void main() {
   );
 
   testLayoutMatrix(
-    'the export label shows the page count',
+    'the export label is shown whole',
     (tester, layoutCase) async {
       await pumpHome(tester, layoutCase, pageCount: 12);
-      const label = 'Export 12 pages as PDF';
-      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
-      // Lay the label out without a line limit: the count has to be on one
-      // of the lines the button shows, so no ellipsis can hide it.
-      final painter = TextPainter(
-        text: paragraph.text,
-        textDirection: TextDirection.ltr,
-        textScaler: paragraph.textScaler,
-      )..layout(maxWidth: paragraph.constraints.maxWidth);
-      final count = label.indexOf('12');
-      final boxes = painter.getBoxesForSelection(
-        TextSelection(baseOffset: count, extentOffset: count + 2),
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.text('Share PDF'),
       );
-      final shownHeight = painter
-          .computeLineMetrics()
-          .take(paragraph.maxLines!)
-          .fold(0.0, (sum, line) => sum + line.height);
-      painter.dispose();
-      expect(boxes, isNotEmpty);
-      for (final box in boxes) {
-        expect(box.bottom, lessThanOrEqualTo(shownHeight + 0.5));
-      }
+      // "Share PDF" on at most the lines the button shows, never cut by an
+      // ellipsis; the page count is in its semantics value.
+      expect(paragraph.didExceedMaxLines, isFalse);
+      expect(findShareButton(12), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     // At 2.0× on 320 and 308 px wide phones the square test font fits
-    // fewer than six glyphs on a line, so even "Export" wraps; Roboto fits
-    // "Export" and the count on the two lines there.
+    // fewer than five glyphs on a line, so even "Share" wraps; Roboto fits
+    // "Share" and "PDF" on the two lines there.
     cases: [
       for (final layoutCase in [...largeDisplayCases, ...layoutMatrix])
         if (layoutCase.textScale < 2 || layoutCase.size.width > 380) layoutCase,

@@ -31,6 +31,24 @@ void main() {
     await scanImage(tester);
     expect(find.text('No code found in this image.'), findsOneWidget);
     expect(find.text('Scanned result'), findsNothing);
+    // The app's usual message style, not a camera-only one.
+    final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect(snackBar.backgroundColor, isNull);
+    expect((snackBar.content as Text).style, isNull);
+  });
+
+  testWidgets('the camera view says what to do until a code is found', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildScreen(
+        () async => const BarcodeScanResult(isValid: true, text: 'hello'),
+      ),
+    );
+    const hint = 'Point the camera at a QR code or barcode';
+    expect(find.text(hint), findsOneWidget);
+    await scanImage(tester);
+    expect(find.text(hint), findsNothing);
   });
 
   testWidgets('a code in an image is shown like a live scan', (tester) async {

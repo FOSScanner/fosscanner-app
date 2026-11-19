@@ -252,15 +252,18 @@ void main() {
       return tester.getRect(find.text('Block screenshots'));
     }
 
+    Icon check() =>
+        tester.widget<Icon>(find.byKey(const Key('block_screenshots_check')));
     final off = await openAndMeasure();
+    // Visible when off too, so the item reads as a setting.
+    expect(check().icon, Icons.check_box_outline_blank);
+    expect(check().color, isNot(Colors.transparent));
     await tester.tap(find.text('Block screenshots'));
     await tester.pumpAndSettle();
     final on = await openAndMeasure();
     expect(on, off);
-    final check = tester.widget<Icon>(
-      find.byKey(const Key('block_screenshots_check')),
-    );
-    expect(check.color, isNot(Colors.transparent));
+    expect(check().icon, Icons.check_box);
+    expect(check().color, isNot(Colors.transparent));
   }, variant: _android);
 
   for (final brightness in Brightness.values) {
@@ -389,8 +392,8 @@ void main() {
   );
 
   for (final brightness in Brightness.values) {
-    testWidgets('a QR image message clears the camera controls and stays '
-        'dark ($brightness)', (tester) async {
+    testWidgets('a QR image message clears the camera controls in the app\'s '
+        'message style ($brightness)', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData(brightness: brightness),
@@ -407,7 +410,8 @@ void main() {
       expect(find.text('No code found in this image.'), findsOneWidget);
 
       final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
-      expect(snackBar.backgroundColor, Colors.black);
+      // The theme's message style, like every other screen.
+      expect(snackBar.backgroundColor, isNull);
       final screen = tester.getRect(find.byType(BarcodeScanScreen));
       final message = tester.getRect(
         find.descendant(

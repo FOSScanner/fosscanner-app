@@ -7,6 +7,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/app_preferences.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import '../support/export_bar.dart';
 
 class _Picker extends ImagePickerPlatform {
   @override
@@ -78,7 +79,7 @@ void main() {
       _Store(const AppPreferences(searchablePdf: true)),
       pages: 2,
     );
-    expect(find.text('Export 2 pages as searchable PDF'), findsOneWidget);
+    expect(findShareButton(2, searchable: true), findsOneWidget);
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
     expect(
@@ -92,7 +93,7 @@ void main() {
   ) async {
     final store = _Store();
     await pumpHome(tester, store);
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
 
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
@@ -101,7 +102,7 @@ void main() {
     expect(store.saved, [const AppPreferences(searchablePdf: true)]);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    expect(find.text('Export 1 page as searchable PDF'), findsOneWidget);
+    expect(findShareButton(1, searchable: true), findsOneWidget);
 
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
@@ -110,7 +111,7 @@ void main() {
     expect(store.saved.last, const AppPreferences());
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
   });
 
   testWidgets('platforms without OCR ignore a stored searchable choice', (
@@ -118,7 +119,7 @@ void main() {
   ) async {
     final store = _Store(const AppPreferences(searchablePdf: true));
     await pumpHome(tester, store, searchable: false);
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     expect(find.textContaining('searchable'), findsNothing);
     expect(store.saved, isEmpty);
   });
@@ -137,7 +138,7 @@ void main() {
 
     store.loaded.complete(const AppPreferences());
     await tester.pumpAndSettle();
-    expect(find.text('Export 1 page as searchable PDF'), findsOneWidget);
+    expect(findShareButton(1, searchable: true), findsOneWidget);
   });
 
   for (final size in [const Size(320, 568), const Size(640, 300)]) {
@@ -171,13 +172,23 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final label = find.text('Export 12 pages as searchable PDF');
+      final label = findShareButton(12, searchable: true);
       expect(label.hitTestable(), findsOneWidget);
       final bar = tester.getRect(find.byKey(const Key('pdf_export_bar')));
       expect(tester.getRect(label).right, lessThanOrEqualTo(bar.right));
+      // The page count and mode are read with the short label.
       expect(
-        find.bySemanticsLabel('Export 12 pages as searchable PDF'),
-        findsOneWidget,
+        tester.getSemantics(find.text('Share PDF')),
+        matchesSemantics(
+          label: 'Share PDF',
+          value: '12 pages, searchable text',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          isFocusable: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+        ),
       );
       semantics.dispose();
     });

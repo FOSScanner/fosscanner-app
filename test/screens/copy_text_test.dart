@@ -9,6 +9,7 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 import '../support/worker_isolates.dart';
+import '../support/export_bar.dart';
 
 class _Picker extends ImagePickerPlatform {
   @override
@@ -92,9 +93,10 @@ void main() {
 
       await tapCopyText(tester);
       await pumpUntil(tester, () => started.isCompleted, settle: false);
-      await tester.pumpAndSettle();
+      // Lets the sheet close; the spinner keeps animating until progress.
+      await tester.pump(const Duration(seconds: 1));
       expect(pagePaths, hasLength(2));
-      expect(find.text('Recognizing text 0%'), findsOneWidget);
+      expect(find.text('Recognizing text…'), findsOneWidget);
       // The document is locked like during a PDF export.
       expect(find.byTooltip('PDF export options'), findsNothing);
       expect(
@@ -117,7 +119,7 @@ void main() {
         (_) {},
       );
       await tester.pump();
-      expect(find.text('Recognizing text 50%'), findsOneWidget);
+      expect(find.text('Recognizing text · page 2 of 2'), findsOneWidget);
 
       finish.complete();
       await pumpUntilFound(tester, find.text('Text copied'));
@@ -125,7 +127,7 @@ void main() {
         'ensureTessdata',
         'copyRecognizedText',
       ]);
-      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       // The page copies written for the native worker are gone.
       expect(File(pagePaths!.first).parent.existsSync(), isFalse);
     },
@@ -160,7 +162,7 @@ void main() {
       await pumpUntilFound(tester, find.text('Could not recognize text.'));
       expect(find.textContaining('ocr_failed'), findsNothing);
       expect(find.textContaining('PlatformException'), findsNothing);
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
@@ -187,7 +189,8 @@ void main() {
       await pumpHome(tester, pages: 1);
       await tapCopyText(tester);
       await pumpUntil(tester, () => started.isCompleted, settle: false);
-      await tester.pumpAndSettle();
+      // Lets the sheet close; the spinner keeps animating until progress.
+      await tester.pump(const Duration(seconds: 1));
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pump();
       expect(cancelled, isTrue);

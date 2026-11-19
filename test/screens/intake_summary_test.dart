@@ -15,6 +15,7 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 import 'package:fosscanner/services/pdf_page_importer.dart';
 import 'package:fosscanner/services/shared_image_inbox.dart';
+import '../support/export_bar.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 final _iOS = TargetPlatformVariant.only(TargetPlatform.iOS);
@@ -253,7 +254,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+    expect(findShareButton(2), findsOneWidget);
     expectOnlyMessage(
       "2 of 4 images couldn't be added: 1 unsupported size, "
       '1 not an image.',
@@ -314,7 +315,7 @@ void main() {
     await accept(tester);
     await settle(tester);
 
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     expectOnlyMessage(
       "2 of 3 pages couldn't be added: 1 not an image, "
       '1 too large to render.',
@@ -330,7 +331,7 @@ void main() {
       await accept(tester);
       await settle(tester);
 
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       expectOnlyMessage("1 of 2 images couldn't be added: 1 unsupported size.");
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
@@ -465,7 +466,7 @@ void main() {
     await accept(tester);
     await settle(tester);
 
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     expect(find.byType(SnackBar), findsNothing);
   }, variant: _iOS);
 
@@ -511,7 +512,7 @@ void main() {
       await accept(tester);
       await settle(tester);
 
-      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       expectOnlyMessage("1 of 3 images couldn't be added: 1 unreadable file.");
     }, variant: _iOS);
   }

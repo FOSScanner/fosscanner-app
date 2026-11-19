@@ -97,9 +97,10 @@ void main() {
   ) async {
     await openOptions(tester, const LayoutCase(Size(390, 844), 1));
     for (var i = 0; i < 2; i++) {
-      expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
       expect(
-        find.text('Supports Latin-script text. Runs on your device.'),
+        find.text(
+          'Search and copy text in the PDF. Latin script, runs on your device.',
+        ),
         findsOneWidget,
       );
       await tester.tap(find.text('Searchable text'));
@@ -116,8 +117,8 @@ void main() {
       const LayoutCase(Size(390, 844), 1),
       preferences: const AppPreferences(),
     );
-    expect(find.bySemanticsLabel('Full resolution. Largest files.'), findsOne);
-    expect(find.bySemanticsLabel(RegExp('Up to 150 DPI')), findsNothing);
+    expect(find.bySemanticsLabel('Full resolution, largest file'), findsOne);
+    expect(find.bySemanticsLabel('Smallest file, for email'), findsNothing);
     semantics.dispose();
   });
 

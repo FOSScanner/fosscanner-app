@@ -18,6 +18,7 @@ import 'package:fosscanner/services/image_metadata.dart';
 
 import 'support/home_menu.dart';
 import 'support/worker_isolates.dart';
+import 'support/export_bar.dart';
 
 class _FakeImagePickerPlatform extends ImagePickerPlatform {
   _FakeImagePickerPlatform({
@@ -1090,7 +1091,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export 1 page as PDF'));
+    await tester.tap(findShareButton(1));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
     final params = sharePlatform.lastParams;
@@ -1138,10 +1139,13 @@ void main() {
         tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isFalse,
       );
-      expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
+      expect(
+        find.textContaining('Search and copy text in the PDF.'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Export 1 page as PDF'));
+      await tester.tap(findShareButton(1));
       await tester.pump();
       expect(find.byTooltip('PDF export options'), findsNothing);
       await pumpUntil(tester, () => sharePlatform.lastParams != null);
@@ -1152,7 +1156,7 @@ void main() {
         matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
       );
       expect(find.text('Keep this draft?'), findsNothing);
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       await tester.tap(find.byTooltip('PDF export options'));
       await tester.pumpAndSettle();
       expect(
@@ -1228,7 +1232,7 @@ void main() {
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       final expectedAnchor = tester.getRect(find.byType(FilledButton));
-      await tester.tap(find.text('Export 1 page as searchable PDF'));
+      await tester.tap(findShareButton(1, searchable: true));
       await pumpUntil(tester, () => started.isCompleted, settle: false);
       expect(find.byType(SwitchListTile), findsNothing);
       expect(find.byTooltip('PDF export options'), findsNothing);
@@ -1247,7 +1251,7 @@ void main() {
       );
       staleDelete();
       await tester.pump();
-      expect(find.text('Recognizing text 0%'), findsOneWidget);
+      expect(find.text('Recognizing text…'), findsOneWidget);
 
       finish.complete();
       await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
@@ -1300,7 +1304,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export 1 page as searchable PDF'));
+    await tester.tap(findShareButton(1, searchable: true));
     await pumpUntilFound(
       tester,
       find.text('Searchable export failed'),

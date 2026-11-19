@@ -14,6 +14,7 @@ import 'package:share_plus_platform_interface/share_plus_platform_interface.dart
 
 import '../support/layout_stability.dart';
 import '../support/worker_isolates.dart';
+import '../support/export_bar.dart';
 
 class _Picker extends ImagePickerPlatform {
   @override
@@ -159,6 +160,8 @@ void main() {
         'options button': find.byTooltip('PDF export options'),
       };
       await pumpHome(tester, layoutCase, pages: 1);
+      // The options are not the editor's Adjust (tune) icon.
+      expect(find.byIcon(Icons.tune_outlined), findsNothing);
       final baseline = captureRects(tester, idle);
       for (final pages in [9, 10, 100]) {
         await pumpHome(tester, layoutCase, pages: pages);
@@ -179,7 +182,7 @@ void main() {
       final idle = captureRects(tester, frame);
       void expectFrame(String state) => expectRects(tester, frame, idle, state);
       Future<void> startExport() async {
-        await tester.tap(find.byIcon(Icons.picture_as_pdf_outlined));
+        await tester.tap(find.byIcon(Icons.share_outlined));
         await tester.pump();
       }
 
@@ -187,7 +190,17 @@ void main() {
       ocr.gate = await newGate(tester);
       await startExport();
       await pumpUntil(tester, () => ocr.jobs == 1, settle: false);
-      expect(find.text('Recognizing text 0%'), findsOneWidget);
+      expect(find.text('Recognizing text…'), findsOneWidget);
+      double? ring() => tester
+          .widget<CircularProgressIndicator>(
+            find.descendant(
+              of: bar,
+              matching: find.byType(CircularProgressIndicator),
+            ),
+          )
+          .value;
+      // Spinning until the first page is done, never an empty ring.
+      expect(ring(), isNull);
       expectFrame('generating');
       await messenger.handlePlatformMessage(
         _ocrChannel.name,
@@ -197,7 +210,8 @@ void main() {
         (_) {},
       );
       await tester.pump();
-      expect(find.text('Recognizing text 33%'), findsOneWidget);
+      expect(find.text('Recognizing text · page 2 of 3'), findsOneWidget);
+      expect(ring(), closeTo(1 / 3, 1e-9));
       expectFrame('generating with progress');
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pump();
@@ -219,7 +233,7 @@ void main() {
       );
       expectFrame('sharing');
       share.gate!.complete();
-      await pumpUntilFound(tester, find.byIcon(Icons.picture_as_pdf_outlined));
+      await pumpUntilFound(tester, find.byIcon(Icons.share_outlined));
       expectFrame('idle after sharing');
 
       // Preparing: the OCR job failed and the fallback is being offered.
@@ -250,8 +264,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Copy text'));
       await pumpUntil(tester, () => ocr.jobs == 4, settle: false);
-      await tester.pumpAndSettle();
-      expect(find.text('Recognizing text 0%'), findsOneWidget);
+      // Lets the sheet close; the spinner keeps animating until progress.
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Recognizing text…'), findsOneWidget);
       expectFrame('recognizing text');
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pump();
@@ -272,7 +287,7 @@ void main() {
       final ocr = _FakeOcr()..fail = true;
       messenger.setMockMethodCallHandler(_ocrChannel, ocr.handle);
       await pumpHome(tester, layoutMatrix.first, pages: 1, share: _Share());
-      await tester.tap(find.byIcon(Icons.picture_as_pdf_outlined));
+      await tester.tap(find.byIcon(Icons.share_outlined));
       await pumpUntilFound(
         tester,
         find.text('Searchable export failed'),
@@ -296,13 +311,12 @@ void main() {
   );
 
   testWidgets(
-    'long labels and statuses wrap to two lines at most',
+    'the label wraps to two lines at most',
     (tester) async {
       applyLayoutCase(tester, const LayoutCase(Size(320, 568), 2.0));
       await pumpHome(tester, const LayoutCase(Size(320, 568), 2.0), pages: 100);
-      final label = tester.widget<Text>(
-        find.text('Export 100 pages as searchable PDF'),
-      );
+      expect(findShareButton(100, searchable: true), findsOneWidget);
+      final label = tester.widget<Text>(find.text('Share PDF'));
       expect(label.maxLines, 2);
       expect(label.overflow, TextOverflow.ellipsis);
       expect(tester.takeException(), isNull);
@@ -335,14 +349,14 @@ void main() {
       }
 
       await pumpHome(tester, layoutMatrix.first, pages: 1, share: _Share());
-      await tester.tap(find.byIcon(Icons.picture_as_pdf_outlined));
+      await tester.tap(find.byIcon(Icons.share_outlined));
       await pumpUntil(tester, () => ocr.jobs == 1, settle: false);
       await pressBack();
       expect(exits, isEmpty);
-      expect(find.text('Recognizing text 0%'), findsOneWidget);
+      expect(find.text('Recognizing text…'), findsOneWidget);
 
       ocr.gate!.complete();
-      await pumpUntilFound(tester, find.byIcon(Icons.picture_as_pdf_outlined));
+      await pumpUntilFound(tester, find.byIcon(Icons.share_outlined));
       await pressBack();
       expect(exits, hasLength(1));
     },

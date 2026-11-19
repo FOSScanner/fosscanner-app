@@ -28,10 +28,13 @@ class ImagePdfCancelledException implements Exception {
 /// falls back to the calling isolate on web.
 ///
 /// [pageSize] and [quality] choose the page box and image resolution; see
-/// [planPdfPage]. The defaults reproduce the historical output exactly.
+/// [planPdfPage]. [sourceDpis], when given, holds each page's source density
+/// (null for photos), which sizes "Original" pages. The defaults reproduce the
+/// historical output exactly.
 Future<void> writeImageOnlyPdf(
   List<Uint8List> pages,
   String outputPath, {
+  List<double?>? sourceDpis,
   PdfPageSize pageSize = PdfPageSize.original,
   PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
@@ -41,6 +44,7 @@ Future<void> writeImageOnlyPdf(
     await _writeImageOnlyPdf(
       pages,
       outputPath,
+      sourceDpis: sourceDpis,
       pageSize: pageSize,
       quality: quality,
       onProgress: onProgress,
@@ -59,6 +63,7 @@ Future<void> writeImageOnlyPdf(
 Future<void> _writeImageOnlyPdf(
   List<Uint8List> pages,
   String outputPath, {
+  required List<double?>? sourceDpis,
   required PdfPageSize pageSize,
   required PdfQuality quality,
   void Function(int completed, int total)? onProgress,
@@ -66,8 +71,12 @@ Future<void> _writeImageOnlyPdf(
 }) async {
   final keepsOriginal =
       pageSize == PdfPageSize.original && quality == PdfQuality.high;
+  if (sourceDpis != null && sourceDpis.length != pages.length) {
+    throw ArgumentError('One source density per page');
+  }
   final jpegPages = <_Page>[];
-  for (final bytes in pages) {
+  for (final (index, bytes) in pages.indexed) {
+    final sourceDpi = sourceDpis?[index];
     if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
     // The PDF library retains raw RGB(A) buffers for non-JPEG images until
     // save(), so a small PNG file would expand into a page-sized uncompressed
@@ -78,15 +87,24 @@ Future<void> _writeImageOnlyPdf(
     // Presets other than Original/High resample or re-encode on the worker
     // too, and return the page's placement with it.
     if (keepsOriginal && im.JpegDecoder().isValidFile(bytes)) {
-      jpegPages.add((bytes: bytes, plan: null));
+      jpegPages.add((
+        bytes: bytes,
+        plan: null,
+        dpi: originalDensity(sourceDpi),
+      ));
     } else {
       final prepared = await compute(preparePdfPage, (
         bytes: bytes,
         pageSize: pageSize,
         quality: quality,
         padToPage: false,
+        sourceDpi: sourceDpi,
       ));
-      jpegPages.add((bytes: prepared.bytes, plan: prepared.plan));
+      jpegPages.add((
+        bytes: prepared.bytes,
+        plan: prepared.plan,
+        dpi: prepared.plan.nativeDpi,
+      ));
     }
     onProgress?.call(jpegPages.length, pages.length);
   }
@@ -100,8 +118,9 @@ Future<void> _writeImageOnlyPdf(
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
 }
 
-/// A page image ready to embed; a null plan keeps the historical layout.
-typedef _Page = ({Uint8List bytes, PdfPagePlan? plan});
+/// A page image ready to embed; a null plan sizes the page from its pixels
+/// at [dpi], which is the historical layout for photos.
+typedef _Page = ({Uint8List bytes, PdfPagePlan? plan, int dpi});
 
 Future<void> _assembleDocument(({List<_Page> pages, String path}) job) async {
   final pdf = pw.Document();
@@ -112,8 +131,8 @@ Future<void> _assembleDocument(({List<_Page> pages, String path}) job) async {
       pw.Page(
         pageFormat: plan == null
             ? PdfPageFormat(
-                image.width! / originalPageDpi * PdfPageFormat.inch,
-                image.height! / originalPageDpi * PdfPageFormat.inch,
+                image.width! / page.dpi * PdfPageFormat.inch,
+                image.height! / page.dpi * PdfPageFormat.inch,
               )
             : PdfPageFormat(plan.pageWidth, plan.pageHeight),
         margin: pw.EdgeInsets.zero,

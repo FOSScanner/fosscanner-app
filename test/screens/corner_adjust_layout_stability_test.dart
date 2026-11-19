@@ -264,9 +264,9 @@ void main() {
       }, reason: 'reopen and Back');
       expect(find.byType(Slider), findsNothing);
       expect(find.text('Appearance'), findsOneWidget);
-      expect(find.text('Contrast: 1.50×'), findsNothing);
+      expect(find.text('Contrast: +58'), findsNothing);
       await openAdjustments(tester);
-      expect(find.text('Contrast: 1.50×'), findsOneWidget);
+      expect(find.text('Contrast: +58'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

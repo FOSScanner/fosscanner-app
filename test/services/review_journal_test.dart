@@ -41,6 +41,21 @@ void main() {
     expect(review.unresumable, 0);
   });
 
+  test('keeps each image\'s source density with it', () async {
+    final journal = FileReviewJournal(directory: root);
+    await journal.keep(
+      'pdf',
+      [image('a.jpg'), image('b.jpg')],
+      sourceDpis: [300, null],
+    );
+    final review = (await FileReviewJournal(directory: root).read())!;
+    expect(review.sourceDpis, [300.0, null]);
+
+    // Journals without densities, such as earlier ones, read as unknown.
+    await journal.keep('shared', [image('c.jpg')]);
+    expect((await journal.read())!.sourceDpis, [null]);
+  });
+
   test('reviewed images are released and the rest stays', () async {
     final journal = FileReviewJournal(directory: root);
     final kept = await journal.keep('shared', [

@@ -12,6 +12,7 @@ import 'package:share_plus_platform_interface/share_plus_platform_interface.dart
 
 import '../support/home_menu.dart';
 import '../support/worker_isolates.dart';
+import '../support/export_bar.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 const _uuid = '3f2a9c1e-7b4d-4e8a-9f0c-12ab34cd56ef';
@@ -176,7 +177,7 @@ void main() {
       }
       await settle(tester);
 
-      expect(find.text('Export 3 pages as PDF'), findsOneWidget);
+      expect(findShareButton(3), findsOneWidget);
       expect(scaled.existsSync(), isFalse);
       expect(copy.existsSync(), isFalse);
       expect(copy.parent.existsSync(), isFalse);
@@ -192,7 +193,7 @@ void main() {
   testWidgets('a dismissed share sheet removes the share copy', (tester) async {
     final share = _Share(cache, ShareResultStatus.dismissed);
     await pumpHome(tester, share: share, pages: [page()]);
-    await tester.tap(find.text('Export 1 page as PDF'));
+    await tester.tap(findShareButton(1));
     await pumpUntil(tester, () => share.copy != null);
     await pumpUntil(tester, () => !share.copy!.existsSync());
     expect(Directory('${cache.path}/share_plus').listSync(), isEmpty);
@@ -206,9 +207,9 @@ void main() {
     final foreign = File('${cache.path}/share_plus/notes.pdf')
       ..createSync(recursive: true);
     await pumpHome(tester, share: share, pages: [page()]);
-    await tester.tap(find.text('Export 1 page as PDF'));
+    await tester.tap(findShareButton(1));
     await pumpUntil(tester, () => share.copy != null);
-    await pumpUntilFound(tester, find.text('Export 1 page as PDF'));
+    await pumpUntilFound(tester, findShareButton(1));
     // The receiving app may still be reading it.
     expect(share.copy!.existsSync(), isTrue);
 

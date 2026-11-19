@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../models/scanned_page.dart' show validSourceDpi;
+
 /// Images whose review was interrupted when the app was closed or killed.
 class InterruptedReview {
   const InterruptedReview({
     required this.source,
     this.paths = const [],
     this.unresumable = 0,
+    this.sourceDpis = const [],
   });
 
   /// The intake's source, as the name of a `PageReviewSource`.
@@ -16,6 +19,10 @@ class InterruptedReview {
 
   /// App-owned images that can be reviewed again, in order.
   final List<String> paths;
+
+  /// The source density of each of [paths] (see `ScannedPage.sourceDpi`),
+  /// null where unknown. Empty when the review recorded none.
+  final List<double?> sourceDpis;
 
   /// Images that were not added and could not be kept: the user's own gallery
   /// images, which are never copied.
@@ -35,7 +42,14 @@ abstract interface class ReviewJournal {
   ///
   /// Returns the paths to read instead, in order; a file that could not be
   /// moved keeps its own path. Replaces any earlier journal. Never throws.
-  Future<List<String>> keep(String source, List<String> paths);
+  ///
+  /// [sourceDpis], when given, holds each file's source density and is
+  /// returned with it by [read].
+  Future<List<String>> keep(
+    String source,
+    List<String> paths, {
+    List<double?>? sourceDpis,
+  });
 
   /// Records that [count] gallery images are still waiting for review.
   /// Never throws.
@@ -109,7 +123,11 @@ class FileReviewJournal implements ReviewJournal {
   }
 
   @override
-  Future<List<String>> keep(String source, List<String> paths) async {
+  Future<List<String>> keep(
+    String source,
+    List<String> paths, {
+    List<double?>? sourceDpis,
+  }) async {
     try {
       final root = await _root();
       await root.create(recursive: true);
@@ -131,6 +149,9 @@ class FileReviewJournal implements ReviewJournal {
         'version': _version,
         'source': source,
         'items': names,
+        // Optional, so the manifest version stays readable by older builds.
+        if (sourceDpis != null && sourceDpis.length == paths.length)
+          'sourceDpis': sourceDpis,
       });
       final kept = <String>[];
       for (final (index, path) in paths.indexed) {
@@ -217,15 +238,22 @@ class FileReviewJournal implements ReviewJournal {
       }
       final items = manifest['items'];
       final pending = manifest['pending'];
+      final dpis = manifest['sourceDpis'];
       final paths = <String>[];
+      final sourceDpis = <double?>[];
       if (items is List) {
-        for (final name in items) {
+        for (final (index, name) in items.indexed) {
           if (name is! String || !_itemName.hasMatch(name)) continue;
           final path = _join(root, name);
           if (await FileSystemEntity.type(path, followLinks: false) ==
                   FileSystemEntityType.file &&
               await File(path).length() > 0) {
             paths.add(path);
+            sourceDpis.add(
+              dpis is List && dpis.length == items.length
+                  ? validSourceDpi(dpis[index])
+                  : null,
+            );
           }
         }
       }
@@ -240,6 +268,7 @@ class FileReviewJournal implements ReviewJournal {
         source: manifest['source'] as String,
         paths: paths,
         unresumable: unresumable,
+        sourceDpis: sourceDpis,
       );
     } catch (_) {
       await clear();

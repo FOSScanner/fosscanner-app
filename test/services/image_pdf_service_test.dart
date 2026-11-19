@@ -31,6 +31,7 @@ String _outputPath() => '${_outputs.path}/document.pdf';
 /// Writes the PDF to a file and reads it back for inspection.
 Future<Uint8List> createImageOnlyPdf(
   List<Uint8List> pages, {
+  List<double?>? sourceDpis,
   PdfPageSize pageSize = PdfPageSize.original,
   PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
@@ -39,6 +40,7 @@ Future<Uint8List> createImageOnlyPdf(
   await writeImageOnlyPdf(
     pages,
     _outputPath(),
+    sourceDpis: sourceDpis,
     pageSize: pageSize,
     quality: quality,
     onProgress: onProgress,
@@ -90,6 +92,24 @@ void main() {
     final written = File(_outputPath());
     expect(latin1.decode(await written.readAsBytes()), startsWith('%PDF-'));
     await written.delete();
+  });
+
+  test('sizes Original pages from their source density when known', () async {
+    // A photo (no density) and an A5 page imported at 300 DPI (1748 x 2480
+    // px), embedded as they are, the import keeping its 148 x 210 mm.
+    final photo = noisyJpeg(300, 150);
+    final imported = noisyJpeg(1748, 2480);
+    for (final quality in [PdfQuality.high, PdfQuality.balanced]) {
+      final pdf = await createImageOnlyPdf(
+        [photo, imported],
+        sourceDpis: [null, 300],
+        quality: quality,
+      );
+      final boxes = mediaBoxes(pdf);
+      expect(boxes[0][2], closeTo(300 / 150 * 72, 0.5), reason: '$quality');
+      expect(boxes[1][2], closeTo(148 / 25.4 * 72, 1), reason: '$quality');
+      expect(boxes[1][3], closeTo(210 / 25.4 * 72, 1), reason: '$quality');
+    }
   });
 
   test('retains original JPEG bytes without another lossy encoding', () async {

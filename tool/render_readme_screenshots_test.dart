@@ -225,7 +225,7 @@ void main() {
     await show(home(0));
     await save('ui-home-empty');
     await show(home(3));
-    expect(find.text('Export 3 pages as PDF'), findsOneWidget);
+    expect(find.text('Share PDF'), findsOneWidget);
     await save('ui-home-pages');
     await tester.tap(find.byTooltip('Reorder page 2'));
     await tester.pumpAndSettle();

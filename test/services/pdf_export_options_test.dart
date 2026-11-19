@@ -57,6 +57,49 @@ void main() {
     expect(p.canvasWidth, isNull);
   });
 
+  group('Original with a known source density (imported PDF pages)', () {
+    // An A4 page rendered at 300 DPI on import.
+    const a4Width = 210 / 25.4 * 72;
+    const a4Height = 297 / 25.4 * 72;
+    PdfPagePlan imported(PdfQuality quality, {double dpi = 300}) => planPdfPage(
+      sourceWidth: 2480,
+      sourceHeight: 3508,
+      pageSize: PdfPageSize.original,
+      quality: quality,
+      sourceDpi: dpi,
+    );
+
+    test('keeps the real page size at every quality', () {
+      for (final quality in PdfQuality.values) {
+        final p = imported(quality);
+        expect(p.pageWidth, closeTo(a4Width, 1), reason: '$quality');
+        expect(p.pageHeight, closeTo(a4Height, 1), reason: '$quality');
+        expect(p.nativeDpi, quality.targetDpi ?? 300, reason: '$quality');
+      }
+      expect((imported(PdfQuality.high).pixelWidth), 2480);
+      expect((imported(PdfQuality.balanced).pixelWidth), 1653);
+    });
+
+    test('a page rendered below the requested density keeps its size', () {
+      // Reduced to fit the memory limit: 1700 px across 8.27 in.
+      final p = planPdfPage(
+        sourceWidth: 1700,
+        sourceHeight: 2405,
+        pageSize: PdfPageSize.original,
+        quality: PdfQuality.high,
+        sourceDpi: 1700 / (210 / 25.4),
+      );
+      expect(p.pageWidth, closeTo(a4Width, a4Width * 0.005));
+      expect(p.pageHeight, closeTo(a4Height, a4Height * 0.005));
+    });
+
+    test('without one, photos keep the historical 150 DPI', () {
+      expect(originalDensity(null), 150);
+      expect(originalDensity(double.nan), 150);
+      expect(originalDensity(299.6), 300);
+    });
+  });
+
   test('Original keeps the page box and honours every preset density', () {
     // A tall receipt-like page: taller than A4, so a cap derived from A4
     // would push Small below its promised 150 DPI.
@@ -189,6 +232,7 @@ void main() {
       pageSize: size,
       quality: quality,
       padToPage: pad,
+      sourceDpi: null,
     ));
 
     test('keeps JPEG bytes when nothing needs to change', () {

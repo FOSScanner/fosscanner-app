@@ -42,6 +42,56 @@ void main() {
     first.delete();
   });
 
+  test('the export copy goes once share_plus has its own copy', () async {
+    final export = await createPdfExportDirectory(
+      temporaryDirectory: () async => cache,
+    );
+    final pdf = export.fileNamed('Scan.pdf')..writeAsStringSync('%PDF-1.5');
+    final shareFolder = Directory('${cache.path}/share_plus')..createSync();
+    // A copy an earlier share left with the same name is not this one.
+    final stale = File('${shareFolder.path}/Scan.pdf')
+      ..writeAsStringSync('%PDF-1.5');
+    final stop = export.deleteOnceShared(
+      pdf,
+      interval: const Duration(milliseconds: 5),
+    );
+    expect(stale.existsSync(), isFalse);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(export.directory.existsSync(), isTrue);
+
+    // A partial copy is not enough.
+    final copy = File('${shareFolder.path}/Scan.pdf')..writeAsStringSync('%P');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(export.directory.existsSync(), isTrue);
+
+    copy.writeAsStringSync('%PDF-1.5');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(export.directory.existsSync(), isFalse);
+    expect(copy.existsSync(), isTrue);
+    stop();
+    // The flow's own cleanup afterwards is harmless.
+    export.delete();
+  });
+
+  test(
+    'without a share copy the export stays until the share returns',
+    () async {
+      final export = await createPdfExportDirectory(
+        temporaryDirectory: () async => cache,
+      );
+      final pdf = export.fileNamed('Scan.pdf')..writeAsStringSync('%PDF-1.5');
+      final stop = export.deleteOnceShared(
+        pdf,
+        interval: const Duration(milliseconds: 5),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(pdf.existsSync(), isTrue);
+      stop();
+      export.delete();
+      expect(export.directory.existsSync(), isFalse);
+    },
+  );
+
   test('the startup sweep removes only stale export directories', () async {
     final stale = Directory('${cache.path}/${pdfExportDirectoryPrefix}abc')
       ..createSync();

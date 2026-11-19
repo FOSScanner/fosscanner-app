@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:share_plus_platform_interface/share_plus_platform_interface.dart';
 
 import '../support/worker_isolates.dart';
+import '../support/export_bar.dart';
 
 class _Picker extends ImagePickerPlatform {
   @override
@@ -161,7 +162,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await pumpHome(tester);
     expect(saveButton(), findsNothing);
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     debugDefaultTargetPlatformOverride = null;
   });
 
@@ -204,7 +205,7 @@ void main() {
     await tester.tap(saveButton());
     await pumpUntil(tester, () => saver.suggestedName != null, settle: false);
     saver.picked.complete(false);
-    await pumpUntilFound(tester, find.text('Export 1 page as PDF'));
+    await pumpUntilFound(tester, findShareButton(1));
     expect(cache.listSync(), isEmpty);
     expect(saver.target, isNull);
     expect(find.byType(SnackBar), findsNothing);
@@ -380,7 +381,7 @@ void main() {
         find.byTooltip('PDF export options').hitTestable(),
         findsOneWidget,
       );
-      expect(find.text('Export 1 page as PDF').hitTestable(), findsOneWidget);
+      expect(findShareButton(1).hitTestable(), findsOneWidget);
     });
   }
 }

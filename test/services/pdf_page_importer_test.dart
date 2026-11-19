@@ -179,6 +179,24 @@ void main() {
       expect(batch.pageCount, 9);
       expect(batch.rejected, 1);
       expect(batch.truncated, isTrue);
+      // An older platform without densities: the requested one applies.
+      expect(batch.dpis, [null, null]);
+      expect(batch.sourceDpiAt(1, request), 300);
+    });
+
+    test('decodes the density each page was rendered at', () {
+      final batch = parsePdfImportBatch({
+        'paths': ['/cache/page_0.jpg', 7, '/cache/page_1.jpg', '/c/p2.jpg'],
+        'dpis': [300.0, 300.0, 212.4, double.nan],
+      });
+      expect(batch.paths, [
+        '/cache/page_0.jpg',
+        '/cache/page_1.jpg',
+        '/c/p2.jpg',
+      ]);
+      expect(batch.dpis, [300.0, 212.4, null]);
+      expect(batch.sourceDpiAt(1, request), 212.4);
+      expect(batch.sourceDpiAt(2, request), 300);
     });
 
     test('a cancelled picker reports false', () async {

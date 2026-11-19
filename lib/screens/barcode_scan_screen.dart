@@ -175,13 +175,12 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
   }
 
-  /// Messages over the camera view sit above the reader's flashlight and
-  /// camera buttons (48 px plus 10 px padding on each side) and share their
-  /// dark style, whatever the app theme.
+  /// Messages over the camera view look like the app's other messages and
+  /// sit above the reader's flashlight and camera buttons (48 px plus 10 px
+  /// padding on each side).
   void _showScanViewMessage(String message) => showTransientMessage(
     context,
     message,
-    overCamera: true,
     margin: const EdgeInsets.fromLTRB(15, 5, 15, 48 + 2 * 10 + 10),
   );
 
@@ -394,6 +393,28 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     );
   }
 
+  /// What to do, at the top of the camera view, styled like the app's
+  /// messages so it stays readable over any picture.
+  Widget _buildScanHint(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Center(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.inverseSurface,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(
+            'Point the camera at a QR code or barcode',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: colors.onInverseSurface),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final result = _latchedResult;
@@ -450,6 +471,13 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                     onCameraCreated: (error) =>
                         _handleCameraCreated(error, cameraAttempt),
                   ),
+            ),
+          if (result == null && cameraError == null)
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: IgnorePointer(child: _buildScanHint(context)),
             ),
           if (result == null && cameraError == null)
             IgnorePointer(

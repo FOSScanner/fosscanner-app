@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:path_provider/path_provider.dart';
+
+import 'cache_copies.dart' show sharePlusCacheDirectoryName;
 
 /// Prefix of the per-export cache directories holding a finished PDF.
 ///
@@ -29,11 +32,63 @@ class PdfExportDirectory {
   void delete() {
     try {
       directory.deleteSync(recursive: true);
+    } on PathNotFoundException {
+      // Already removed once the share target had its own copy.
     } on FileSystemException catch (error) {
       if (kDebugMode) {
         debugPrint('Export cleanup failed (${error.runtimeType}).');
       }
     }
+  }
+
+  /// Deletes this directory once share_plus has its own complete copy of
+  /// [pdf], so a large export is not stored twice while the share sheet is
+  /// open. Returns a function that stops waiting; call it when the share
+  /// returns.
+  ///
+  /// share_plus (Android) copies the file into `cache/share_plus/` before it
+  /// opens the sheet, but does not report when. A copy with [pdf]'s name and
+  /// length is complete. Where no such copy appears (other platforms) this
+  /// gives up after [timeout] and the caller's [delete] runs as before.
+  /// Synchronous file checks keep it off the plugin's way and cheap.
+  void Function() deleteOnceShared(
+    File pdf, {
+    Duration interval = const Duration(milliseconds: 200),
+    Duration timeout = const Duration(seconds: 30),
+  }) {
+    final String copyPath;
+    final int length;
+    try {
+      copyPath = [
+        directory.parent.path,
+        sharePlusCacheDirectoryName,
+        pdf.uri.pathSegments.last,
+      ].join(Platform.pathSeparator);
+      length = pdf.lengthSync();
+      // A copy left by an earlier share of the same name is not this one.
+      if (FileSystemEntity.typeSync(copyPath, followLinks: false) ==
+          FileSystemEntityType.file) {
+        File(copyPath).deleteSync();
+      }
+    } on FileSystemException {
+      return () {};
+    }
+    final deadline = DateTime.now().add(timeout);
+    late final Timer timer;
+    timer = Timer.periodic(interval, (_) {
+      try {
+        final copy = FileStat.statSync(copyPath);
+        if (copy.type == FileSystemEntityType.file && copy.size == length) {
+          timer.cancel();
+          delete();
+          return;
+        }
+      } on FileSystemException {
+        // Not there yet.
+      }
+      if (DateTime.now().isAfter(deadline)) timer.cancel();
+    });
+    return timer.cancel;
   }
 }
 

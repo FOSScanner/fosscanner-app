@@ -207,20 +207,27 @@ void main() {
     expect(tester.getSemantics(sliders.last).label, 'Contrast');
     expect(
       tester.getSemantics(sliders.last).getSemanticsData().value,
-      contains('neutral 1'),
+      contains('neutral 0'),
     );
+    // Nothing to reset at neutral.
+    TextButton reset() =>
+        tester.widget<TextButton>(find.byKey(const Key('reset_adjustments')));
+    expect(reset().onPressed, isNull);
     tester.widget<Slider>(sliders.first).onChanged!(100);
     // The contrast slider's end (log scale) is 2.00×.
     tester.widget<Slider>(sliders.last).onChanged!(1);
     await tester.pump();
     expect(find.text('Brightness: +100'), findsOneWidget);
-    expect(find.text('Contrast: 2.00×'), findsOneWidget);
+    // Both on the same -100 to +100 scale.
+    expect(find.text('Contrast: +100'), findsOneWidget);
+    expect(reset().onPressed, isNotNull);
     await tester.tap(find.text('Reset adjustments'));
     await tester.pumpAndSettle();
     expect(tester.widget<Slider>(sliders.first).value, 0);
     // Neutral contrast sits in the middle of the track.
     expect(tester.widget<Slider>(sliders.last).value, 0);
-    expect(find.text('Contrast: 1.00×'), findsOneWidget);
+    expect(find.text('Contrast: 0'), findsOneWidget);
+    expect(reset().onPressed, isNull);
     await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Back'));

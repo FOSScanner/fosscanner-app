@@ -12,6 +12,7 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 import 'package:fosscanner/services/shared_image_inbox.dart';
+import '../support/export_bar.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 
@@ -224,7 +225,7 @@ void main() {
 
       await accept(tester);
       await settle(tester);
-      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       expect(store.saves.last, hasLength(2));
       expect(store.saves.last.first, same(restored));
     },
@@ -253,7 +254,7 @@ void main() {
       await settle(tester);
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(find.text('Export 1 page as PDF'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       expect(find.textContaining('Import stopped.'), findsOneWidget);
       expect(files.every((file) => !file.existsSync()), isTrue);
 
@@ -343,7 +344,7 @@ void main() {
       expect(inbox.takeCalls, [maxDocumentPages, maxDocumentPages - 1]);
       await accept(tester);
       await settle(tester);
-      expect(find.text('Export 2 pages as PDF'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       // Gallery originals belong to the user.
       expect(gallery.existsSync(), isTrue);
       expect(shared.existsSync(), isFalse);
@@ -393,10 +394,7 @@ void main() {
       await settle(tester);
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
-      expect(
-        find.text('Export $maxDocumentPages pages as PDF'),
-        findsOneWidget,
-      );
+      expect(findShareButton(maxDocumentPages), findsOneWidget);
       expect(
         find.textContaining('reached the $maxDocumentPages-page limit'),
         findsOneWidget,

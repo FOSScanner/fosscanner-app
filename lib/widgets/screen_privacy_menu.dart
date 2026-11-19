@@ -7,8 +7,9 @@ const blockScreenshotsMenuValue = 'blockScreenshots';
 /// item where the platform can block them (see `isSecureScreenSupported`),
 /// otherwise nothing.
 ///
-/// Like the menu's other items it has a leading icon; the check sits in a
-/// trailing slot that keeps its width when cleared, so nothing shifts.
+/// Like the menu's other items it has a leading icon; a trailing check box
+/// shows the setting in both states, filled when on and empty when off, so it
+/// reads as a setting and nothing shifts when it changes.
 ///
 /// Kept separate from the menu's other items so the setting can be added to
 /// any `PopupMenuButton<String>` without restructuring it.
@@ -26,9 +27,8 @@ List<PopupMenuEntry<String>> screenPrivacyMenuItems({
           leading: const Icon(Icons.screenshot_outlined),
           title: const Text('Block screenshots'),
           trailing: Icon(
-            Icons.check,
+            blockScreenshots ? Icons.check_box : Icons.check_box_outline_blank,
             key: const Key('block_screenshots_check'),
-            color: blockScreenshots ? null : Colors.transparent,
           ),
         ),
       ),

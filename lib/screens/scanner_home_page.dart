@@ -118,6 +118,12 @@ enum _PdfExporter { searchable, imageOnly }
 /// user-chosen document, or recognized text for the clipboard.
 enum _ExportAction { share, save, copyText }
 
+/// Pages an export job has finished out of its total. A total of 0 means the
+/// job runs but has not reported yet.
+typedef _JobProgress = ({int completed, int total});
+
+const _JobProgress _jobStarted = (completed: 0, total: 0);
+
 typedef SourceImageSizeReader = Future<Size> Function(Uint8List imageBytes);
 
 /// [FloatingActionButtonLocation.endFloat], but always floating above the
@@ -305,7 +311,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   String? _saveTargetName;
   _ExportAction _exportAction = _ExportAction.share;
   bool _isCancellingPdf = false;
-  double? _pdfProgress;
+  // Null while nothing cancellable runs (choosing a save location, offering
+  // the image-only fallback, opening the share sheet).
+  _JobProgress? _pdfProgress;
   _PdfExporter? _pdfExporter;
   bool _isPickingImages = false;
   bool _isRestoringDraft = false;
@@ -1384,6 +1392,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       final pagesBefore = _pages.length;
       nextPath = await _reviewBatch(
         [for (final path in paths) XFile(path)],
+        // Keeps each page's physical size for the "Original" page size.
+        sourceDpis: [
+          for (var i = 0; i < paths.length; i++) batch.sourceDpiAt(i, request),
+        ],
         source: PageReviewSource.pdf,
         // The renders are app-owned cache files, deleted once read.
         deleteAfterRead: true,
@@ -1577,6 +1589,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       final report = IntakeReport(total: count, noun: noun);
       await _reviewBatch(
         [for (final path in pending.paths) XFile(path)],
+        sourceDpis: pending.sourceDpis.length == count
+            ? pending.sourceDpis
+            : null,
         // The camera loop is not resumed: a capture is reviewed on its own.
         source: source == PageReviewSource.camera
             ? PageReviewSource.recovered
@@ -1605,9 +1620,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// Reviews [files] one at a time, recording in [report] each file that is
   /// not added and why. Stops early when the user stops the import or the
   /// document is full. Returns how many files were taken from [files]; the
-  /// rest were never read.
+  /// rest were never read. [sourceDpis], when given, holds each file's source
+  /// density (see [ScannedPage.sourceDpi]).
   Future<int> _reviewBatch(
     List<XFile> files, {
+    List<double?>? sourceDpis,
     required PageReviewSource source,
     required bool deleteAfterRead,
     required int documentGeneration,
@@ -1620,7 +1637,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (journal != null && deleteAfterRead && files.isNotEmpty) {
       final kept = await journal.keep(source.name, [
         for (final file in files) file.path,
-      ]);
+      ], sourceDpis: sourceDpis);
       files = [for (final path in kept) XFile(path)];
     }
     try {
@@ -1646,6 +1663,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         await _addCapturedPhoto(
           file,
           source: source,
+          sourceDpi: sourceDpis != null && index < sourceDpis.length
+              ? sourceDpis[index]
+              : null,
           isBatchImport: files.length > 1,
           batchPosition: index + 1,
           batchCount: files.length,
@@ -1686,6 +1706,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<_PhotoIntakeResult> _addCapturedPhoto(
     XFile photo, {
     required PageReviewSource source,
+    double? sourceDpi,
     required IntakeReport report,
     bool isBatchImport = false,
     int? batchPosition,
@@ -1842,7 +1863,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
     if (!_tryAddPage(
-      result,
+      result.withSourceDpi(sourceDpi),
       documentGeneration: documentGeneration,
       report: report,
     )) {
@@ -1935,12 +1956,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       }
 
       if (!mounted) return;
-      final result = await Navigator.of(context).push<ScannedPage>(
+      final edited = await Navigator.of(context).push<ScannedPage>(
         MaterialPageRoute(
           builder: (_) => _buildEditor(page.originalBytes, page: page),
         ),
       );
-      if (result != null && requestIsCurrent()) {
+      if (edited != null && requestIsCurrent()) {
+        // The source image is the same, and so is its physical size.
+        final result = edited.withSourceDpi(page.sourceDpi);
         final replacementPages = List<ScannedPage>.of(_pages)..removeAt(index);
         final retainedWithoutPage = _retainedImageBytesFor(replacementPages);
         replacementPages.insert(index, result);
@@ -2241,13 +2264,16 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       defaultTargetPlatform == TargetPlatform.android;
 
   void _updatePdfProgress(int completed, int total) {
-    if (mounted) setState(() => _pdfProgress = completed / total);
+    if (mounted) {
+      setState(() => _pdfProgress = (completed: completed, total: total));
+    }
   }
 
   Future<void> _createSearchablePdf(List<ScannedPage> pages, File output) {
     return ocr_service.createSearchablePdf(
       [for (final page in pages) page.processedBytes],
       outputPath: output.path,
+      sourceDpis: [for (final page in pages) page.sourceDpi],
       pageSize: _preferences.pdfPageSize,
       quality: _preferences.pdfQuality,
       onProgress: _updatePdfProgress,
@@ -2297,6 +2323,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return image_pdf.writeImageOnlyPdf(
       [for (final page in pages) page.processedBytes],
       output.path,
+      sourceDpis: [for (final page in pages) page.sourceDpi],
       pageSize: _preferences.pdfPageSize,
       quality: _preferences.pdfQuality,
       onProgress: _updatePdfProgress,
@@ -2353,7 +2380,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         // A confirmed fallback starts fresh after an OCR failure.
         _isCancellingPdf = false;
         _pdfExporter = _PdfExporter.imageOnly;
-        _pdfProgress = 0;
+        _pdfProgress = _jobStarted;
       });
     }
     final name = pdfExportFileName(now, searchable: false);
@@ -2394,7 +2421,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _exportAction = action;
       _isCancellingPdf = false;
       _pdfExporter = useOcr ? _PdfExporter.searchable : _PdfExporter.imageOnly;
-      _pdfProgress = choosesTarget ? null : 0;
+      _pdfProgress = choosesTarget ? null : _jobStarted;
     });
 
     PdfExportDirectory? exportDirectory;
@@ -2410,7 +2437,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         setState(() {
           _saveTargetName = saveTarget!.fileName;
           _isSharingPdf = false;
-          _pdfProgress = 0;
+          _pdfProgress = _jobStarted;
         });
       }
       // Popping an editor does not interrupt its active worker. Use the same
@@ -2436,11 +2463,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _isSharingPdf = true;
       });
       if (action == _ExportAction.share) {
-        final shared = await _sharePdfFile(
-          pdf.file,
-          fileName: pdf.name,
-          shareOrigin: shareOrigin,
-        );
+        // Only one full copy stays while the sheet is open: ours goes as
+        // soon as the share plugin has copied it.
+        final stopWatching = exportDirectory!.deleteOnceShared(pdf.file);
+        final ShareResult shared;
+        try {
+          shared = await _sharePdfFile(
+            pdf.file,
+            fileName: pdf.name,
+            shareOrigin: shareOrigin,
+          );
+        } finally {
+          stopWatching();
+        }
         // A dismissed sheet handed the copy to nobody. After a successful
         // share the receiving app may still be reading it, so it stays until
         // the next share, Clear all or launch.
@@ -2522,7 +2557,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _exportAction = _ExportAction.copyText;
       _isCancellingPdf = false;
       _pdfExporter = _PdfExporter.searchable;
-      _pdfProgress = 0;
+      _pdfProgress = _jobStarted;
     });
     try {
       final copied = await _imageProcessingQueue.run(() {
@@ -2592,7 +2627,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Searchable text'),
-                    subtitle: const Text('Search and copy text in the PDF.'),
+                    // What the switch does and its limits, right beside it.
+                    subtitle: const Text(
+                      'Search and copy text in the PDF. Latin script, runs '
+                      'on your device.',
+                    ),
                     value: _preferences.searchablePdf,
                     onChanged: (value) {
                       if (!canChange(sheetContext)) return;
@@ -2602,6 +2641,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       updateSheet(() {});
                     },
                   ),
+                  // Below the switch so it never separates the switch from
+                  // its description.
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.content_copy_outlined),
@@ -2611,10 +2652,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       Navigator.of(sheetContext).pop();
                       unawaited(_copyRecognizedText());
                     },
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Supports Latin-script text. Runs on your device.',
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -2646,21 +2683,20 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   },
                 ),
                 const SizedBox(height: 8),
-                // Sized to the longest description so choosing a quality
-                // never resizes the bottom-anchored sheet.
+                // One slot sized to the longest caption, so choosing a
+                // quality never resizes the bottom-anchored sheet; the
+                // captions are about as long, so the text barely moves.
                 IndexedStack(
+                  key: const Key('quality_caption'),
                   index: PdfQuality.values.indexOf(_preferences.pdfQuality),
                   children: [
                     for (final quality in PdfQuality.values)
-                      Text(switch (quality) {
-                        PdfQuality.high => 'Full resolution. Largest files.',
-                        PdfQuality.balanced =>
-                          'Up to 200 DPI with moderate compression. Much '
-                              'smaller files that print well.',
-                        PdfQuality.small =>
-                          'Up to 150 DPI with strong compression, for email '
-                              'and upload limits. Fine print may lose detail.',
-                      }),
+                      Text(
+                        _qualityCaption(quality),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -2678,6 +2714,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       ),
     );
   }
+
+  /// One short line per quality, in the same tone.
+  static String _qualityCaption(PdfQuality quality) => switch (quality) {
+    PdfQuality.high => 'Full resolution, largest file',
+    PdfQuality.balanced => 'Smaller file, good for printing',
+    PdfQuality.small => 'Smallest file, for email',
+  };
 
   // Chips wrap onto new lines at large text sizes instead of overflowing.
   Widget _buildOptionChoices<T>({
@@ -2716,24 +2759,51 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// The step a job is on, by page once it has reported: "Recognizing text
+  /// · page 2 of 3". The page shown is the one being worked on.
+  static String _pageStep(String step, _JobProgress? progress) {
+    if (progress == null || progress.total <= 0) return '$step…';
+    final page = math.min(progress.completed + 1, progress.total);
+    return '$step · page $page of ${progress.total}';
+  }
+
   String get _exportStatus {
     if (_isClearingDraft) return 'Clearing draft…';
-    if (_exportAction == _ExportAction.copyText) {
-      if (_isCancellingPdf) return 'Canceling…';
-      if (_pdfProgress == null) return 'Recognizing text…';
-      return 'Recognizing text ${(_pdfProgress! * 100).round()}%';
-    }
     if (_isCancellingPdf) return 'Canceling…';
+    if (_exportAction == _ExportAction.copyText) {
+      return _pageStep('Recognizing text', _pdfProgress);
+    }
     if (_isSharingPdf) {
       if (_exportAction != _ExportAction.save) return 'Opening share sheet…';
       return _saveTargetName == null ? 'Choose where to save…' : 'Saving PDF…';
     }
-    if (_pdfProgress == null) return 'Preparing PDF…';
-    final percent = (_pdfProgress! * 100).round();
+    final progress = _pdfProgress;
+    if (progress == null) return 'Preparing PDF…';
+    // Every page is done; only assembling the document is left.
+    if (progress.total > 0 && progress.completed >= progress.total) {
+      return 'Finishing PDF…';
+    }
     // The searchable renderer reports pages as Tesseract finishes them.
-    return _pdfExporter == _PdfExporter.searchable
-        ? 'Recognizing text $percent%'
-        : 'Generating PDF $percent%';
+    return _pageStep(
+      _pdfExporter == _PdfExporter.searchable
+          ? 'Recognizing text'
+          : 'Generating PDF',
+      progress,
+    );
+  }
+
+  /// The ring fills only between the first and the last page; before the
+  /// first report and while finishing it spins, so it never sits empty or
+  /// full and looks stuck.
+  double? get _exportProgressValue {
+    final progress = _pdfProgress;
+    if (_isCancellingPdf ||
+        progress == null ||
+        progress.completed <= 0 ||
+        progress.completed >= progress.total) {
+      return null;
+    }
+    return progress.completed / progress.total;
   }
 
   String get _exportOptionsSummary => [
@@ -2743,14 +2813,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     '${_preferences.pdfQuality.label} quality',
   ].join(', ');
 
-  /// The page count comes right after the verb, so it stays visible when a
-  /// large text size truncates the label.
-  String get _exportLabel {
-    final pages = '${_pages.length} ${_pages.length == 1 ? 'page' : 'pages'}';
-    return _exportsSearchable
-        ? 'Export $pages as searchable PDF'
-        : 'Export $pages as PDF';
-  }
+  /// The short, stable action label; what it exports is in [_exportSummary].
+  static const _shareLabel = 'Share PDF';
+
+  /// What Share and Save export, read with them by screen readers: "3 pages,
+  /// searchable text".
+  String get _exportSummary => [
+    '${groupDigits(_pages.length)} ${_pages.length == 1 ? 'page' : 'pages'}',
+    if (_exportsSearchable) 'searchable text',
+  ].join(', ');
 
   /// One height for every export state and page count, so starting,
   /// progressing or finishing an export never shifts the page grid or the
@@ -2789,7 +2860,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     SizedBox.square(
                       dimension: 24,
                       child: CircularProgressIndicator(
-                        value: _isCancellingPdf ? null : _pdfProgress,
+                        value: _exportProgressValue,
                         strokeWidth: 2,
                       ),
                     ),
@@ -2814,20 +2885,29 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   ]
                 : [
                     Expanded(
-                      child: FilledButton.icon(
-                        key: _shareButtonKey,
-                        style: FilledButton.styleFrom(
-                          minimumSize: Size.fromHeight(height),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        onPressed: _canExport ? _generateAndSharePdf : null,
-                        icon: const Icon(Icons.picture_as_pdf_outlined),
-                        // Up to two lines fit the reserved bar height;
-                        // longer labels truncate and semantics keep them.
-                        label: Text(
-                          _exportLabel,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                      // One focus stop: the action with what it exports.
+                      child: MergeSemantics(
+                        child: Semantics(
+                          value: _exportSummary,
+                          child: FilledButton.icon(
+                            key: _shareButtonKey,
+                            style: FilledButton.styleFrom(
+                              minimumSize: Size.fromHeight(height),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                            ),
+                            onPressed: _canExport ? _generateAndSharePdf : null,
+                            icon: const Icon(Icons.share_outlined),
+                            // One label for every page count and mode, so
+                            // the bar never changes; two lines fit its
+                            // height at the largest text size.
+                            label: const Text(
+                              _shareLabel,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -2835,10 +2915,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     // "Save to Files".
                     if (_canSaveToDevice) ...[
                       const SizedBox(width: 8),
-                      IconButton.filledTonal(
-                        onPressed: _canExport ? _generateAndSavePdf : null,
-                        tooltip: 'Save PDF to device',
-                        icon: const Icon(Icons.save_alt_outlined),
+                      MergeSemantics(
+                        child: Semantics(
+                          value: _exportSummary,
+                          child: IconButton.filledTonal(
+                            onPressed: _canExport ? _generateAndSavePdf : null,
+                            tooltip: 'Save PDF to device',
+                            icon: const Icon(Icons.save_alt_outlined),
+                          ),
+                        ),
                       ),
                     ],
                     const SizedBox(width: 8),
@@ -2849,7 +2934,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         child: IconButton.filledTonal(
                           onPressed: _canExport ? _showExportOptions : null,
                           tooltip: 'PDF export options',
-                          icon: const Icon(Icons.tune_outlined),
+                          // Not the editor's Adjust icon: these are document
+                          // settings, not image adjustments.
+                          icon: const Icon(Icons.settings_outlined),
                         ),
                       ),
                     ),

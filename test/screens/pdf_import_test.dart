@@ -13,6 +13,7 @@ import 'package:fosscanner/services/draft_store.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 import 'package:fosscanner/services/pdf_export_options.dart';
 import 'package:fosscanner/services/pdf_page_importer.dart';
+import '../support/export_bar.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 
@@ -143,8 +144,10 @@ void main() {
     int rejected = 0,
     bool truncated = false,
     bool reduced = false,
+    List<double?> dpis = const [],
   }) => PdfImportBatch(
     paths: [for (final file in files) file.path],
+    dpis: dpis,
     pageCount: pageCount ?? files.length,
     rejected: rejected,
     truncated: truncated,
@@ -236,7 +239,8 @@ void main() {
     tester,
   ) async {
     final files = renderedPages(3);
-    importer.batch = batchOf(files);
+    // The third page was rendered below the requested density.
+    importer.batch = batchOf(files, dpis: [300, null, 212.5]);
     await pumpHome(tester);
     store.loaded.complete([]);
     await settle(tester);
@@ -273,8 +277,11 @@ void main() {
 
     expect(operations.detectCalls, 0);
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export 3 pages as PDF'), findsOneWidget);
+    expect(findShareButton(3), findsOneWidget);
     expect(store.saves.last, hasLength(3));
+    // Each page keeps its physical size for the "Original" page size; a
+    // page without a reported density has the requested one.
+    expect(store.saves.last.map((page) => page.sourceDpi), [300, 300, 212.5]);
     expect(files.every((file) => !file.existsSync()), isTrue);
   }, variant: _iOS);
 
@@ -316,7 +323,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     expect(
       find.text('Import stopped. Pages already added were kept.'),
       findsOneWidget,
@@ -341,7 +348,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.text('Export $maxDocumentPages pages as PDF'), findsOneWidget);
+    expect(findShareButton(maxDocumentPages), findsOneWidget);
     expect(
       find.textContaining('reached the $maxDocumentPages-page limit'),
       findsOneWidget,
@@ -538,7 +545,7 @@ void main() {
     await waitForEditor(tester);
     await accept(tester);
     await settle(tester);
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     expect(
       find.text("2 of 3 pages couldn't be added: 2 too large to render."),
       findsOneWidget,

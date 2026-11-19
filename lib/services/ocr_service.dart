@@ -68,15 +68,20 @@ void _checkCancellation() {
 // [pageSize] and [quality] are applied before OCR: each page is resampled,
 // and for A4/Letter centered on a white page-shaped canvas, on a worker, and
 // its density is sent along because Tesseract sizes pages as pixels / DPI.
-// Original/High sends the pages untouched at the historical 150 DPI.
+// Original/High sends the pages untouched at their source density
+// ([sourceDpis], null for photos), or the historical 150 DPI without one.
 Future<void> createSearchablePdf(
   List<Uint8List> pageImages, {
   required String outputPath,
+  List<double?>? sourceDpis,
   PdfPageSize pageSize = PdfPageSize.original,
   PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
 }) async {
   final images = _validatedPages(pageImages);
+  if (sourceDpis != null && sourceDpis.length != images.length) {
+    throw ArgumentError('One source density per page');
+  }
   _startJob(onProgress);
   Directory? jobDirectory;
   final output = File(outputPath);
@@ -95,13 +100,15 @@ Future<void> createSearchablePdf(
       final pageDpis = <int>[];
       for (var i = 0; i < images.length; i++) {
         var bytes = images[i];
-        var dpi = originalPageDpi.round();
+        final sourceDpi = sourceDpis?[i];
+        var dpi = originalDensity(sourceDpi);
         if (!keepsOriginal) {
           final prepared = await compute(preparePdfPage, (
             bytes: bytes,
             pageSize: pageSize,
             quality: quality,
             padToPage: true,
+            sourceDpi: sourceDpi,
           ));
           _checkCancellation();
           bytes = prepared.bytes;

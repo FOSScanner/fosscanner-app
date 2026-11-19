@@ -178,6 +178,9 @@ Future<void> deleteImagePickerCopy(
         await parent.list(followLinks: false).isEmpty) {
       await parent.delete();
     }
+  } on PathNotFoundException {
+    // Already removed, typically by a concurrent [sweepImagePickerCopies]:
+    // the copy is gone, which is all this was for.
   } catch (error) {
     _reportFailure('Picker copy cleanup', error);
   }

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart'
     show MethodCall, MethodChannel, PlatformException;
 
+import '../models/scanned_page.dart' show validSourceDpi;
 import 'corner_geometry.dart' show maxWarpPixels;
 import 'image_metadata.dart';
 import 'pdf_export_options.dart';
@@ -106,6 +107,7 @@ class PdfImportBatch {
     this.rejected = 0,
     this.truncated = false,
     this.reduced = false,
+    this.dpis = const [],
   });
 
   /// One JPEG per page, in order. The receiver deletes each one after reading
@@ -124,6 +126,14 @@ class PdfImportBatch {
   /// Some page was rendered below the chosen quality to fit the document's
   /// memory limit.
   final bool reduced;
+
+  /// The density each of [paths] was rendered at, or null where the platform
+  /// did not report one (the requested density applies then).
+  final List<double?> dpis;
+
+  /// The render density of the page at [paths] index [index].
+  double sourceDpiAt(int index, PdfImportRequest request) =>
+      (index < dpis.length ? dpis[index] : null) ?? request.dpi.toDouble();
 }
 
 enum PdfImportFailure {
@@ -221,12 +231,24 @@ PdfImportBatch parsePdfImportBatch(Map<String, Object?>? reply) {
   final paths = reply['paths'];
   final pageCount = reply['pageCount'];
   final rejected = reply['rejected'];
+  final dpis = reply['dpis'];
+  final validPaths = <String>[];
+  final pathDpis = <double?>[];
+  if (paths is List) {
+    for (final (index, path) in paths.indexed) {
+      if (path is! String || path.isEmpty) continue;
+      validPaths.add(path);
+      // Older platform code sends no densities; a malformed one is unknown.
+      pathDpis.add(
+        dpis is List && dpis.length == paths.length
+            ? validSourceDpi(dpis[index])
+            : null,
+      );
+    }
+  }
   return PdfImportBatch(
-    paths: [
-      if (paths is List)
-        for (final path in paths)
-          if (path is String && path.isNotEmpty) path,
-    ],
+    paths: validPaths,
+    dpis: pathDpis,
     pageCount: pageCount is int && pageCount > 0 ? pageCount : 0,
     rejected: rejected is int && rejected > 0 ? rejected : 0,
     truncated: reply['truncated'] == true,

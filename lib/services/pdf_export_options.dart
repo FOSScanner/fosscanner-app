@@ -8,14 +8,16 @@ import 'image_metadata.dart' show maxSourceImageEdge, maxSourceImagePixels;
 
 /// Density assumed for pages exported at their original size.
 ///
-/// Scanner pages carry no physical size, so "Original" pages have always been
-/// sized as if scanned at this density. Keep it unchanged so existing exports
-/// keep their page dimensions.
+/// Photos carry no physical size, so "Original" pages have always been sized
+/// as if scanned at this density. Keep it unchanged so existing exports keep
+/// their page dimensions. Pages with a known source density (rendered from an
+/// imported PDF) use that instead; see [planPdfPage].
 const originalPageDpi = 150.0;
 
 /// The page box of an exported PDF.
 enum PdfPageSize {
-  /// One page per image, sized from its pixels at [originalPageDpi].
+  /// One page per image, sized from its pixels at the page's source density,
+  /// or at [originalPageDpi] when it has none.
   original('Original'),
 
   /// ISO A4, oriented to match each page image.
@@ -107,8 +109,10 @@ class PdfPagePlan {
 
 /// Plans how a [sourceWidth] x [sourceHeight] page image is exported.
 ///
-/// "Original" keeps today's page size (pixels at [originalPageDpi]); its
-/// image is only resampled when a preset's density is below that, so every
+/// "Original" sizes the page from its pixels at [sourceDpi], the density the
+/// image was rendered at when it came from a PDF, or at [originalPageDpi]
+/// for photos; its image is only resampled when a preset's density is below
+/// that, so every
 /// preset keeps its "up to N DPI" promise on the actual page. A4 and Letter
 /// fit the whole image inside the page, centered, with the page turned to
 /// landscape for landscape images, and cap the image at the preset's DPI.
@@ -123,6 +127,7 @@ PdfPagePlan planPdfPage({
   required int sourceHeight,
   required PdfPageSize pageSize,
   required PdfQuality quality,
+  double? sourceDpi,
 }) {
   if (sourceWidth <= 0 || sourceHeight <= 0) {
     throw ArgumentError('Page images need a positive size');
@@ -130,9 +135,10 @@ PdfPagePlan planPdfPage({
   final targetDpi = quality.targetDpi;
   final format = pageSize.format;
   if (format == null) {
-    final keepsPixels = targetDpi == null || targetDpi >= originalPageDpi;
-    final nativeDpi = keepsPixels ? originalPageDpi.round() : targetDpi;
-    final scale = keepsPixels ? 1.0 : targetDpi / originalPageDpi;
+    final density = originalDensity(sourceDpi);
+    final keepsPixels = targetDpi == null || targetDpi >= density;
+    final nativeDpi = keepsPixels ? density : targetDpi;
+    final scale = keepsPixels ? 1.0 : targetDpi / density;
     final pixelWidth = math.max(1, (sourceWidth * scale).round());
     final pixelHeight = math.max(1, (sourceHeight * scale).round());
     final pageWidth = pixelWidth * PdfPageFormat.inch / nativeDpi;
@@ -233,6 +239,17 @@ PdfPagePlan planPdfPage({
   );
 }
 
+/// The integer density an "Original" page of [sourceDpi] is sized at.
+///
+/// Integer because renderers that size pages as pixels / DPI (Tesseract)
+/// take whole densities; image-only exports use the same value so both
+/// produce identical pages. Rounding moves a page by under half a percent.
+int originalDensity(double? sourceDpi) {
+  final dpi = sourceDpi;
+  if (dpi == null || !dpi.isFinite || dpi < 1) return originalPageDpi.round();
+  return math.max(1, dpi.round());
+}
+
 /// How far the planner may move the integer density to keep fixed page
 /// boxes close to their standard size.
 const _dpiSearchSpan = 3;
@@ -246,6 +263,7 @@ typedef PdfPageJob = ({
   PdfPageSize pageSize,
   PdfQuality quality,
   bool padToPage,
+  double? sourceDpi,
 });
 
 /// Resamples and encodes one page image according to its [PdfPagePlan].
@@ -267,6 +285,7 @@ PreparedPdfPage preparePdfPage(PdfPageJob job) {
     sourceHeight: info.height,
     pageSize: job.pageSize,
     quality: job.quality,
+    sourceDpi: job.sourceDpi,
   );
   final isJpeg = decoder is im.JpegDecoder;
   final resamples =

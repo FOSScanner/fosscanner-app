@@ -11,6 +11,7 @@ import 'package:fosscanner/main.dart' show registerBundledLicenses;
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import '../support/export_bar.dart';
 
 class _Picker extends ImagePickerPlatform {
   Completer<List<XFile>>? selection;
@@ -110,7 +111,7 @@ void main() {
     setViewport(tester, const Size(390, 844));
     await pumpHome(tester, pageCount: 3);
 
-    expect(find.text('Export 3 pages as PDF'), findsOneWidget);
+    expect(findShareButton(3), findsOneWidget);
     expect(find.byTooltip('PDF export options'), findsOneWidget);
     expect(find.byType(SwitchListTile), findsNothing);
     expect(find.text('About FOSScanner'), findsNothing);
@@ -127,9 +128,11 @@ void main() {
     await pumpHome(tester);
     await openOptions(tester);
     expect(find.text('Searchable text'), findsOneWidget);
-    expect(find.textContaining('Latin-script'), findsOneWidget);
+    expect(find.textContaining('Latin script'), findsOneWidget);
     expect(
-      find.text('Supports Latin-script text. Runs on your device.'),
+      find.text(
+        'Search and copy text in the PDF. Latin script, runs on your device.',
+      ),
       findsOneWidget,
     );
     expect(
@@ -139,7 +142,10 @@ void main() {
 
     await tester.tap(find.text('Searchable text'));
     await tester.pumpAndSettle();
-    expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
+    expect(
+      find.textContaining('Search and copy text in the PDF.'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsNothing);
@@ -161,7 +167,7 @@ void main() {
     tester,
   ) async {
     await pumpHome(tester, searchable: false);
-    expect(find.text('Export 1 page as PDF'), findsOneWidget);
+    expect(findShareButton(1), findsOneWidget);
     await openOptions(tester);
     expect(find.byType(SwitchListTile), findsNothing);
     expect(find.textContaining('Latin-script'), findsNothing);
@@ -194,7 +200,7 @@ void main() {
         setViewport(tester, size);
         await pumpHome(tester, textScale: 2, brightness: brightness);
         expect(tester.takeException(), isNull);
-        expect(find.text('Export 1 page as PDF').hitTestable(), findsOneWidget);
+        expect(findShareButton(1).hitTestable(), findsOneWidget);
         await openOptions(tester);
         expect(tester.takeException(), isNull);
         await tester.ensureVisible(find.text('Searchable text'));

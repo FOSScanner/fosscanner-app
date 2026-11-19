@@ -81,6 +81,12 @@ internal data class PdfImportResult(
      * document's processing memory capped its pixels.
      */
     val reduced: Boolean = false,
+    /**
+     * The density each file in [paths] was actually rendered at, in pixels per
+     * inch of the PDF page; below the requested one for reduced pages. Dart
+     * uses it to export the page at its real size.
+     */
+    val dpis: List<Double> = emptyList(),
 ) {
     fun toChannelMap(): Map<String, Any> = mapOf(
         "paths" to paths,
@@ -88,6 +94,7 @@ internal data class PdfImportResult(
         "rejected" to rejected,
         "truncated" to truncated,
         "reduced" to reduced,
+        "dpis" to dpis,
     )
 }
 
@@ -133,6 +140,10 @@ internal object PdfPageImport {
     }
 
     /** How many pages to render: never more than the document can accept. */
+    /** The density a [size] render of a [widthPoints] x [heightPoints] page has. */
+    fun renderedDpi(widthPoints: Int, heightPoints: Int, size: PixelSize): Double =
+        (size.width * 72.0 / widthPoints + size.height * 72.0 / heightPoints) / 2
+
     fun pageLimit(pageCount: Int, maxPages: Int): Int =
         max(0, min(pageCount, min(maxPages, MAX_PAGES)))
 
@@ -160,6 +171,7 @@ internal object PdfPageImport {
         var reduced = false
         var totalBytes = 0L
         val files = ArrayList<File>()
+        val dpis = ArrayList<Double>()
         try {
             if (!directory.isDirectory && !directory.mkdirs()) throw IOException("No cache directory")
             onProgress(0, limit)
@@ -195,6 +207,7 @@ internal object PdfPageImport {
                         }
                         else -> {
                             totalBytes += length
+                            dpis.add(renderedDpi(widthPoints, heightPoints, size))
                             // Smaller than the source limits alone would allow.
                             if (size != renderSize(widthPoints, heightPoints, request.dpi, MAX_PIXELS)) {
                                 reduced = true
@@ -209,7 +222,7 @@ internal object PdfPageImport {
             files.forEach { it.delete() }
             throw error
         }
-        return PdfImportResult(files.map { it.path }, pageCount, rejected, truncated, reduced)
+        return PdfImportResult(files.map { it.path }, pageCount, rejected, truncated, reduced, dpis)
     }
 
     /** Removes renders left behind if the previous activity died mid-import. */

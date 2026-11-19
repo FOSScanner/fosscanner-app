@@ -113,6 +113,7 @@ class PdfPageImportTest {
                 "rejected" to 0,
                 "truncated" to false,
                 "reduced" to false,
+                "dpis" to List(3) { 72.0 },
             ),
             result.toChannelMap(),
         )
@@ -126,6 +127,7 @@ class PdfPageImportTest {
         )
         assertFalse(full.reduced)
         assertEquals(false, full.toChannelMap()["reduced"])
+        assertEquals(300.0, full.dpis.single(), 0.5)
 
         val rendered = mutableListOf<Pair<Int, PixelSize>>()
         val capped = PdfPageImport.renderPages(
@@ -136,6 +138,9 @@ class PdfPageImportTest {
         assertTrue(rendered.all { it.second.width.toLong() * it.second.height <= 4_000_000 })
         assertTrue(capped.reduced)
         assertEquals(true, capped.toChannelMap()["reduced"])
+        // The density each page really has, so Dart keeps its physical size.
+        assertEquals(capped.paths.size, capped.dpis.size)
+        assertTrue(capped.dpis.all { it < 300.0 && it > 150.0 })
 
         // Only pages that were kept count.
         val dropped = PdfPageImport.renderPages(

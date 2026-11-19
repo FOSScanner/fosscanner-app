@@ -39,8 +39,10 @@ No account, no cloud processing, no tracking.
 3. **Preview and adjust.** Choose **Preview page**; the page preview fills the
    screen. Tap the **Filters** icon for filter choices, the **Adjust** icon for
    brightness and contrast (the preview updates when you release a slider), or
-   **Rotate clockwise**. **Reset adjustments** in the Adjust sheet restores neutral
-   brightness/contrast without changing your crop, filter, or rotation.
+   **Rotate clockwise**. Brightness and contrast both read from -100 to +100,
+   with 0 (neutral) in the middle of each slider. **Reset adjustments** in the
+   Adjust sheet restores neutral brightness/contrast without changing your
+   crop, filter, or rotation; it is off while both are already neutral.
 4. **Build your document.** Choose **Add page**, then scan more pages. After a
    camera capture, **Add & scan next** adds the page and reopens the camera
    right away; **Add page** (or canceling the camera) ends the series with every
@@ -49,12 +51,15 @@ No account, no cloud processing, no tracking.
    page to zoom in and choose Edit to change its appearance. Use the editor’s
    back arrow to revisit the crop; back again leaves the editor without saving.
    Save an edit with **Save changes**.
-5. **Export PDF** to the system share sheet and choose where to send or save it.
-   On Android, **Save PDF to device** (next to Export) opens the system file
+5. **Share PDF** opens the system share sheet so you can choose where to send
+   or save the PDF; screen readers also announce the page count and whether
+   the text will be searchable. On Android, **Save PDF to device** (the save
+   icon next to Share PDF) opens the system file
    picker so you can store the PDF directly, even without Google apps. PDFs are
    named like `Scan 2026-11-19 14-05.pdf` (` (searchable)` with text
    recognition); you can rename them in the picker.
-   **PDF export options** sets the page size (Original, A4 or Letter) and
+   **PDF export options** (the settings icon) sets the page size (Original, A4
+   or Letter) and
    quality (High, Balanced or Small); on Android it also turns searchable text
    on or off and offers **Copy text**. Your choices are remembered.
 
@@ -109,19 +114,22 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | System light/dark theme | Yes | Yes |
 
 **Page size and quality.** *Original* sizes each page from its pixels, as
-before. *A4* and *Letter* fit each page image inside the page, centered, and
+before; pages imported from a PDF keep their real size (an A4 page stays A4),
+because the app remembers the density they were rendered at. *A4* and *Letter* fit each page image inside the page, centered, and
 turn the page to landscape for landscape images. *High* keeps full
-resolution; *Balanced* (up to 200 DPI) and *Small* (up to 150 DPI, stronger
-JPEG compression) make much smaller files for email and upload limits. On
-*Original* pages the DPI limit is measured against an A4-sized page. The
+resolution (*Full resolution, largest file*); *Balanced* (up to 200 DPI,
+*Smaller file, good for printing*) and *Small* (up to 150 DPI with stronger
+JPEG compression, *Smallest file, for email*) make much smaller files. On
+*Original* photo pages the DPI limit is measured against an A4-sized page. The
 same settings apply to searchable PDFs; lower resolutions can reduce text
 recognition accuracy on fine print. The app does not predict the file size.
 
 Perspective correction and filters use OpenCV. Searchable PDFs use bundled,
 offline Tesseract data. On Android, searchable text is off by default; enable it
-in **PDF export options**. The app remembers your choice in a small private
-settings file, and the export button reads **Export searchable PDF** while it
-is on. Recognition
+in **PDF export options** with **Searchable text** (*Search and copy text in
+the PDF. Latin script, runs on your device.*). The app remembers your choice
+in a small private settings file; the **PDF export options** button announces
+whether it is on. Recognition
 quality depends on the document, language, lighting, and image quality.
 
 **Copy text** (in **PDF export options**, Android) recognizes the text of every
@@ -136,12 +144,17 @@ The editor keeps the last successful preview visible while processing a new
 adjustment. If it fails, retry the preview before saving. PDF generation shows
 progress and offers cancellation; document editing and intake pause during
 generation and sharing to avoid overlapping memory-heavy operations. The export
-bar keeps one height for every state, page count and text size, so the page
-grid and the camera button never move while exporting. Searchable exports show
-**Recognizing text** while pages are recognized. System Back does nothing while
-an export runs; use **Cancel** to stop it.
+bar keeps one height and one **Share PDF** label for every state, page count
+and text size, so the page grid and the camera button never move while
+exporting. Progress spins until the first page is done, then shows the page
+being worked on, for example **Recognizing text · page 2 of 3** for searchable
+exports and **Copy text**. System Back does nothing while an export runs; use
+**Cancel** to stop it. On Android, the app removes its own copy of the PDF as
+soon as the share sheet has taken one, so a large document is not stored twice
+while the sheet is open.
 
-Barcode results are selectable and can be copied in full. For HTTP/HTTPS links,
+The QR scanner says **Point the camera at a QR code or barcode** until it
+finds one. Barcode results are selectable and can be copied in full. For HTTP/HTTPS links,
 you can inspect the destination hostname before choosing to open the browser.
 
 ## Install
@@ -180,7 +193,7 @@ page content is not shown when you switch apps; screenshots still work. Android
 current screen there.
 
 To also block screenshots and screen recording, check **Block screenshots** in
-the **More options** (⋮) menu (Android). It hides the Recents thumbnail on every
+the **More options** (⋮) menu (Android); its check box shows whether it is on. It hides the Recents thumbnail on every
 Android version too. The choice is stored in the app's private settings file and
 applied again each time the app starts; it is off by default.
 
