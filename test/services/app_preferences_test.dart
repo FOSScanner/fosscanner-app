@@ -114,4 +114,23 @@ void main() {
     );
     expect(await store.load(), const AppPreferences(searchablePdf: true));
   });
+
+  test('the screenshot choice round-trips and defaults to off', () async {
+    expect(const AppPreferences().blockScreenshots, isFalse);
+    const chosen = AppPreferences(blockScreenshots: true);
+    await store.save(chosen);
+    final reopened = FileAppPreferencesStore(directory: () async => directory);
+    expect(await reopened.load(), chosen);
+    expect(chosen, isNot(const AppPreferences()));
+    expect(chosen.copyWith(searchablePdf: true).blockScreenshots, isTrue);
+
+    // Files written before the setting existed, or with a wrong type, keep
+    // screenshots allowed without losing the other choices.
+    await preferencesFile().writeAsString('{"searchablePdf": true}');
+    expect(await store.load(), const AppPreferences(searchablePdf: true));
+    await preferencesFile().writeAsString(
+      '{"searchablePdf": true, "blockScreenshots": "yes"}',
+    );
+    expect(await store.load(), const AppPreferences(searchablePdf: true));
+  });
 }

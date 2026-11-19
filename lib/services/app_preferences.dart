@@ -19,6 +19,7 @@ class AppPreferences {
     this.searchablePdf = false,
     this.pdfPageSize = PdfPageSize.original,
     this.pdfQuality = PdfQuality.high,
+    this.blockScreenshots = false,
   });
 
   /// Whether exports run on-device OCR (where the platform supports it).
@@ -30,14 +31,20 @@ class AppPreferences {
   /// Image resolution and compression of exported PDFs.
   final PdfQuality pdfQuality;
 
+  /// Whether the app window blocks screenshots and screen recording (Android
+  /// `FLAG_SECURE`). Applied at startup through `screen_privacy.dart`.
+  final bool blockScreenshots;
+
   AppPreferences copyWith({
     bool? searchablePdf,
     PdfPageSize? pdfPageSize,
     PdfQuality? pdfQuality,
+    bool? blockScreenshots,
   }) => AppPreferences(
     searchablePdf: searchablePdf ?? this.searchablePdf,
     pdfPageSize: pdfPageSize ?? this.pdfPageSize,
     pdfQuality: pdfQuality ?? this.pdfQuality,
+    blockScreenshots: blockScreenshots ?? this.blockScreenshots,
   );
 
   // Enums are stored by name, so reordering them cannot change a choice.
@@ -45,12 +52,14 @@ class AppPreferences {
     'searchablePdf': searchablePdf,
     'pdfPageSize': pdfPageSize.name,
     'pdfQuality': pdfQuality.name,
+    'blockScreenshots': blockScreenshots,
   };
 
   factory AppPreferences.fromJson(Object? json) {
     if (json is! Map) return const AppPreferences();
     const defaults = AppPreferences();
     final searchable = json['searchablePdf'];
+    final blockScreenshots = json['blockScreenshots'];
     return AppPreferences(
       searchablePdf: searchable is bool ? searchable : defaults.searchablePdf,
       pdfPageSize: _enumByName(
@@ -63,6 +72,9 @@ class AppPreferences {
         json['pdfQuality'],
         defaults.pdfQuality,
       ),
+      blockScreenshots: blockScreenshots is bool
+          ? blockScreenshots
+          : defaults.blockScreenshots,
     );
   }
 
@@ -82,10 +94,12 @@ class AppPreferences {
       other is AppPreferences &&
       other.searchablePdf == searchablePdf &&
       other.pdfPageSize == pdfPageSize &&
-      other.pdfQuality == pdfQuality;
+      other.pdfQuality == pdfQuality &&
+      other.blockScreenshots == blockScreenshots;
 
   @override
-  int get hashCode => Object.hash(searchablePdf, pdfPageSize, pdfQuality);
+  int get hashCode =>
+      Object.hash(searchablePdf, pdfPageSize, pdfQuality, blockScreenshots);
 }
 
 /// Loads and saves [AppPreferences]. Implementations never throw from [load].

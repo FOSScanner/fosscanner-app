@@ -174,6 +174,11 @@ page content is not shown when you switch apps; screenshots still work. Android
 12 and earlier have no way to hide only the thumbnail, so it may show the
 current screen there.
 
+To also block screenshots and screen recording, check **Block screenshots** in
+the **More options** (⋮) menu (Android). It hides the Recents thumbnail on every
+Android version too. The choice is stored in the app's private settings file and
+applied again each time the app starts; it is off by default.
+
 Images shared into the app are read only through the temporary permission that
 comes with the share; FOSScanner keeps no lasting access to them. Each image
 (up to 32 MB, and no more than the document has room for) is copied into the

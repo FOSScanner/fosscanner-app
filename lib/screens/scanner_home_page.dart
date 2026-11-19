@@ -26,8 +26,10 @@ import '../services/pdf_export_files.dart';
 import '../services/pdf_export_options.dart';
 import '../services/pdf_page_importer.dart';
 import '../services/platform_capabilities.dart';
+import '../services/screen_privacy.dart' as screen_privacy;
 import '../services/shared_image_inbox.dart';
 import '../widgets/pdf_import_progress_dialog.dart';
+import '../widgets/screen_privacy_menu.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -367,6 +369,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final loaded = await _preferencesStore.load();
     if (!mounted || _preferencesChanged) return;
     setState(() => _preferences = loaded);
+    // The window starts unprotected each launch; re-apply the saved choice.
+    if (loaded.blockScreenshots) _applySecureScreen(true);
+  }
+
+  void _setBlockScreenshots(bool enabled) {
+    _updatePreferences(_preferences.copyWith(blockScreenshots: enabled));
+    _applySecureScreen(enabled);
+  }
+
+  void _applySecureScreen(bool enabled) {
+    unawaited(
+      screen_privacy.setSecureScreen(enabled).catchError((Object error) {
+        if (kDebugMode) {
+          debugPrint('Could not change screen privacy (${error.runtimeType}).');
+        }
+      }),
+    );
+  }
+
+  void _onOverflowSelected(String value) {
+    if (_handlePdfImportMenuSelection(value)) return;
+    switch (value) {
+      case 'clear':
+        _clearPages();
+      case blockScreenshotsMenuValue:
+        _setBlockScreenshots(!_preferences.blockScreenshots);
+      case _:
+        _showAppInfo();
+    }
   }
 
   void _updatePreferences(AppPreferences next) {
@@ -2526,14 +2557,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
           PopupMenuButton<String>(
             tooltip: 'More options',
-            onSelected: (action) {
-              if (_handlePdfImportMenuSelection(action)) return;
-              if (action == 'clear') {
-                _clearPages();
-              } else {
-                _showAppInfo();
-              }
-            },
+            onSelected: _onOverflowSelected,
             itemBuilder: (_) => [
               ..._pdfImportMenuItems(),
               PopupMenuItem(
@@ -2545,6 +2569,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   leading: const Icon(Icons.delete_sweep_outlined),
                   title: const Text('Clear all pages'),
                 ),
+              ),
+              ...screenPrivacyMenuItems(
+                supported: screen_privacy.isSecureScreenSupported,
+                blockScreenshots: _preferences.blockScreenshots,
               ),
               const PopupMenuItem(
                 value: 'about',
