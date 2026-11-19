@@ -15,6 +15,14 @@ const _schemaVersion = 1;
 const _maxManifestBytes = 1024 * 1024;
 const _manifestName = 'manifest.json';
 
+enum DraftLoadStage {
+  beforeCurrentRead,
+  beforeBackupRead,
+  beforeBackupPromotion,
+}
+
+typedef DraftLoadHook = FutureOr<void> Function(DraftLoadStage stage);
+
 enum DraftSaveStage { afterStaging, afterCurrentMoved }
 
 typedef DraftSaveHook = FutureOr<void> Function(DraftSaveStage stage);
@@ -48,10 +56,13 @@ DraftStore createDraftStore() => FileDraftStore();
 /// [directory] is the draft root itself when supplied. It exists so tests can
 /// exercise the real filesystem protocol without invoking path_provider.
 class FileDraftStore implements DraftStore, DraftSessionStore {
-  FileDraftStore({this.directory, this.beforeCommit});
+  FileDraftStore({this.directory, this.beforeCommit, this.beforeLoad});
 
   final Directory? directory;
   final DraftSaveHook? beforeCommit;
+  final DraftLoadHook? beforeLoad;
+  bool _hasLoaded = false;
+  bool _restoreFailed = false;
   DraftSessionLock? _sessionLock;
 
   @override
@@ -70,29 +81,69 @@ class FileDraftStore implements DraftStore, DraftSessionStore {
 
   @override
   Future<List<ScannedPage>> load() async {
-    final root = await _root();
-    final current = Directory('${root.path}${Platform.pathSeparator}current');
-    final backup = Directory('${root.path}${Platform.pathSeparator}backup');
+    // Keep saves blocked after any failed read/promotion, including callers
+    // that catch the exception. Only a successful retry or explicit clear
+    // authorizes replacing the existing generations.
+    _restoreFailed = true;
     try {
-      final pages = await _loadDirectory(current);
-      if (pages != null) return pages;
-    } catch (_) {
-      // A partial write, unsupported schema, or corrupt image is not fatal.
-    }
-
-    try {
-      final pages = await _loadDirectory(backup);
-      if (pages == null) return const [];
-      // Keep the recovered generation in the current slot. A subsequent save
-      // can then move it to backup before committing its replacement.
-      if (await current.exists()) await current.delete(recursive: true);
-      await backup.rename(current.path);
+      final pages = await _loadDraft();
+      _hasLoaded = true;
+      _restoreFailed = false;
       return pages;
     } catch (_) {
-      // Leave any valid backup in place if promotion fails so a later restart
-      // can retry recovery rather than accepting a partial generation.
+      throw const DraftRestoreException();
+    }
+  }
+
+  Future<List<ScannedPage>> _loadDraft() async {
+    final root = await _root();
+    final rootType = await FileSystemEntity.type(root.path, followLinks: false);
+    if (rootType == FileSystemEntityType.notFound) return const [];
+    if (rootType != FileSystemEntityType.directory) {
+      throw const DraftRestoreException();
+    }
+    final current = Directory('${root.path}${Platform.pathSeparator}current');
+    final backup = Directory('${root.path}${Platform.pathSeparator}backup');
+    final currentType = await FileSystemEntity.type(
+      current.path,
+      followLinks: false,
+    );
+    try {
+      await beforeLoad?.call(DraftLoadStage.beforeCurrentRead);
+      if (currentType == FileSystemEntityType.directory) {
+        final pages = await _loadDirectory(current);
+        if (pages != null) return pages;
+      }
+    } catch (_) {
+      // Try the previous committed generation without treating a read failure
+      // as an absent draft.
+      if (currentType == FileSystemEntityType.notFound) rethrow;
+    }
+
+    final backupType = await FileSystemEntity.type(
+      backup.path,
+      followLinks: false,
+    );
+    if (currentType == FileSystemEntityType.notFound &&
+        backupType == FileSystemEntityType.notFound) {
       return const [];
     }
+    if (backupType != FileSystemEntityType.directory) {
+      throw const DraftRestoreException();
+    }
+    await beforeLoad?.call(DraftLoadStage.beforeBackupRead);
+    final pages = await _loadDirectory(backup);
+    if (pages == null) throw const DraftRestoreException();
+    // Refuse to follow or replace an unexpected filesystem entry. A valid
+    // backup stays untouched if promotion cannot complete.
+    if (currentType != FileSystemEntityType.notFound &&
+        currentType != FileSystemEntityType.directory) {
+      throw const DraftRestoreException();
+    }
+    if (await current.exists()) await current.delete(recursive: true);
+    await beforeLoad?.call(DraftLoadStage.beforeBackupPromotion);
+    await backup.rename(current.path);
+    return pages;
   }
 
   Future<List<ScannedPage>?> _loadDirectory(Directory directory) async {
@@ -258,6 +309,9 @@ class FileDraftStore implements DraftStore, DraftSessionStore {
 
   @override
   Future<void> save(List<ScannedPage> pages) async {
+    if (_restoreFailed) throw const DraftRestoreException();
+    // Also protect callers that create a fresh store and save without loading.
+    if (!_hasLoaded) await load();
     if (pages.length > maxDocumentPages) {
       throw const FormatException('Draft has too many pages');
     }
@@ -346,10 +400,25 @@ class FileDraftStore implements DraftStore, DraftSessionStore {
   @override
   Future<void> clear() async {
     final root = await _root();
-    if (!await root.exists()) return;
-    for (final name in const ['staging', 'current', 'backup']) {
-      final directory = Directory('${root.path}${Platform.pathSeparator}$name');
-      if (await directory.exists()) await directory.delete(recursive: true);
+    final rootType = await FileSystemEntity.type(root.path, followLinks: false);
+    if (rootType != FileSystemEntityType.notFound &&
+        rootType != FileSystemEntityType.directory) {
+      throw const DraftRestoreException();
     }
+    for (final name in const ['staging', 'current', 'backup']) {
+      final path = '${root.path}${Platform.pathSeparator}$name';
+      final type = await FileSystemEntity.type(path, followLinks: false);
+      if (type == FileSystemEntityType.directory) {
+        await Directory(path).delete(recursive: true);
+      } else if (type == FileSystemEntityType.file) {
+        await File(path).delete();
+      } else if (type == FileSystemEntityType.link) {
+        await Link(path).delete();
+      } else if (type != FileSystemEntityType.notFound) {
+        throw const DraftRestoreException();
+      }
+    }
+    _hasLoaded = true;
+    _restoreFailed = false;
   }
 }

@@ -7,6 +7,7 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
+import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
 
 class _Picker extends ImagePickerPlatform {
@@ -204,6 +205,82 @@ void main() {
     }
   }
 
+  for (final size in [const Size(320, 568), const Size(640, 300)]) {
+    testWidgets('intake-limit status and guidance fit large text on $size', (
+      tester,
+    ) async {
+      setViewport(tester, size);
+      await pumpHome(tester, pageCount: maxDocumentPages, textScale: 2);
+      final status = find.text('Image intake help');
+      await tester.ensureVisible(status);
+      await tester.pumpAndSettle();
+      await tester.tap(status);
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('$maxDocumentPages-page limit'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Close'));
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final brightness in Brightness.values) {
+    for (final size in [
+      const Size(320, 568),
+      const Size(640, 300),
+      const Size(1024, 768),
+    ]) {
+      testWidgets(
+        'reorder controls and menu fit $size at 200% text in $brightness',
+        (tester) async {
+          setViewport(tester, size);
+          tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+          addTearDown(tester.view.resetPadding);
+          await pumpHome(
+            tester,
+            pageCount: 8,
+            textScale: 2,
+            brightness: brightness,
+          );
+          final reorder = find.byTooltip('Reorder page 8');
+          await tester.scrollUntilVisible(
+            reorder,
+            200,
+            maxScrolls: 50,
+            scrollable: find.descendant(
+              of: find.byType(GridView),
+              matching: find.byType(Scrollable),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          final preview = find.descendant(
+            of: find.byKey(const ValueKey('page_semantics_7')),
+            matching: find.byType(Image),
+          );
+          expect(
+            tester.getRect(preview).overlaps(tester.getRect(reorder)),
+            isFalse,
+          );
+          await tester.tap(reorder);
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(find.text('Move earlier'));
+          await tester.pumpAndSettle();
+          expect(find.text('Move earlier').hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          expect(find.text('Move earlier'), findsNothing);
+        },
+      );
+    }
+  }
+
   testWidgets('short empty home scrolls without large-text overflow', (
     tester,
   ) async {
@@ -256,7 +333,12 @@ void main() {
   ) async {
     setViewport(tester, const Size(390, 600));
     await pumpHome(tester, pageCount: 8);
-    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    final scroll = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byType(GridView),
+        matching: find.byType(Scrollable),
+      ),
+    );
     scroll.position.jumpTo(scroll.position.maxScrollExtent);
     await tester.pumpAndSettle();
 

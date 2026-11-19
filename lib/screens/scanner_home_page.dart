@@ -33,6 +33,8 @@ class _DocumentCapacityException implements Exception {
 
 enum _PhotoIntakeResult { added, skipped, capacityReached }
 
+enum _CameraRecovery { retry, gallery }
+
 /// Which exporter owns the running PDF generation, and therefore how a
 /// cancellation has to reach it: the native renderer needs a channel message,
 /// the Dart image-only exporter only polls the flag this screen already sets.
@@ -87,6 +89,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   _PdfExporter? _pdfExporter;
   bool _isPickingImages = false;
   bool _isRestoringDraft = false;
+  bool _draftRestoreFailed = false;
   bool _isClearingDraft = false;
   bool _isOpeningImageRoute = false;
   late bool _cameraSupported;
@@ -119,16 +122,113 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           retainedPageImageBytes(restored) > maxRetainedDocumentBytes) {
         throw const _DocumentCapacityException();
       }
-      if (restored.isNotEmpty) setState(() => _pages.addAll(restored));
+      setState(() {
+        _pages.addAll(restored);
+        _draftRestoreFailed = false;
+      });
     } catch (_) {
-      if (mounted) _showMessage('Could not restore the saved draft.');
+      if (mounted) setState(() => _draftRestoreFailed = true);
     } finally {
       if (mounted) setState(() => _isRestoringDraft = false);
     }
   }
 
+  Future<void> _retryDraftRestore() async {
+    if (_isRestoringDraft || _isClearingDraft || !_draftRestoreFailed) return;
+    setState(() => _isRestoringDraft = true);
+    await _restoreDraft();
+    if (mounted &&
+        !_draftRestoreFailed &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_recoverLostImages());
+    }
+  }
+
+  Future<void> _discardFailedDraft() async {
+    if (_isRestoringDraft || _isClearingDraft || !_draftRestoreFailed) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Discard saved draft?'),
+        scrollable: true,
+        content: const Text(
+          'This permanently deletes the cached draft and its backup, including '
+          'any pages that might still be recoverable. Exported PDFs are not removed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Discard draft'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true ||
+        !mounted ||
+        _isRestoringDraft ||
+        _isClearingDraft ||
+        !_draftRestoreFailed) {
+      return;
+    }
+    await _clearCurrentDraft();
+    if (mounted &&
+        !_draftRestoreFailed &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_recoverLostImages());
+    }
+  }
+
+  Widget _buildDraftRestoreFailure() => Scaffold(
+    appBar: AppBar(title: const Text('FOSScanner')),
+    body: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                'Could not restore the saved draft',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Your cached draft may still be recoverable. Adding images is '
+              'paused to avoid replacing it. Check storage access and retry, '
+              'or explicitly discard the draft to start again. '
+              'Drafts are temporary app-cache data, not saved PDFs.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            if (_isRestoringDraft || _isClearingDraft)
+              const CircularProgressIndicator(semanticsLabel: 'Opening draft'),
+            FilledButton(
+              onPressed: _isRestoringDraft || _isClearingDraft
+                  ? null
+                  : _retryDraftRestore,
+              child: const Text('Retry restoration'),
+            ),
+            TextButton(
+              onPressed: _isRestoringDraft || _isClearingDraft
+                  ? null
+                  : _discardFailedDraft,
+              child: const Text('Discard saved draft'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   void _queueDraftSave() {
-    if (_isClearingDraft) return;
+    if (_isClearingDraft || _isRestoringDraft || _draftRestoreFailed) return;
     _pendingDraftSnapshot = List<ScannedPage>.of(_pages);
     _draftRevision++;
     if (_isDraftSaveScheduled) return;
@@ -184,6 +284,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   int get _retainedImageBytes => _retainedImageBytesFor(_pages);
 
   bool get _isDocumentInteractionLocked =>
+      _draftRestoreFailed ||
       _isClearingDraft ||
       _isGeneratingPdf ||
       _isPickingImages ||
@@ -193,6 +294,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pages.isNotEmpty && !_isRestoringDraft && !_isDocumentInteractionLocked;
 
   bool get _canStartImagePick =>
+      !_draftRestoreFailed &&
       !_isRestoringDraft &&
       !_isClearingDraft &&
       !_isGeneratingPdf &&
@@ -203,17 +305,67 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         incomingBytes: 1,
       );
 
-  void _showDocumentLimit() {
-    _showMessage(
-      'Document memory limit reached. Remove pages before adding more.',
+  static const _documentMemoryLimitMessage =
+      'There is not enough document memory for this image. '
+      'Export a copy, then remove pages or choose a smaller image.';
+
+  String get _documentLimitMessage => _pages.length >= maxDocumentPages
+      ? 'This document has reached the $maxDocumentPages-page limit. '
+            'Export it to keep a copy, then remove pages or clear the draft '
+            'before adding more.'
+      : _documentMemoryLimitMessage;
+
+  String? get _imageIntakeStatus {
+    if (_isRestoringDraft) {
+      return 'Restoring your draft. Wait for restoration to finish before adding images.';
+    }
+    if (_isClearingDraft) {
+      return 'Clearing your draft. Wait for clearing to finish before adding images.';
+    }
+    if (_isGeneratingPdf) {
+      return 'Export is in progress. Finish or cancel the export before adding images.';
+    }
+    if (_isPickingImages || _isOpeningImageRoute) {
+      return 'Image selection or page review is in progress. Finish or cancel it '
+          'before adding more images.';
+    }
+    if (!_canStartImagePick) {
+      if (_pages.length >= maxDocumentPages) return _documentLimitMessage;
+      return '$_documentMemoryLimitMessage '
+          'Memory held by Undo or a pending draft save is released when they finish.';
+    }
+    if (!_cameraSupported) {
+      return 'Camera capture is unavailable on this device. '
+          'Use Import from gallery to add images.';
+    }
+    return null;
+  }
+
+  void _showImageIntakeStatus() {
+    final status = _imageIntakeStatus;
+    if (status == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Adding images'),
+        scrollable: true,
+        content: Text(status),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
+  void _showDocumentLimit() => _showMessage(_documentLimitMessage);
+
   void _showUnsupportedImageDimensions() {
     _showMessage(
-      'This image has unsupported dimensions. Choose an image from 3x3 '
-      'up to ${maxSourceImageEdge}px per edge and '
-      '$maxSourceImagePixels pixels.',
+      'This image is too small or has unsupported dimensions. '
+      'Choose another image, or resize a large image and try again.',
     );
   }
 
@@ -332,7 +484,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // Restore the existing pages before admitting a recovered image so its
       // processing budget and next saved snapshot include the whole document.
       await _initialDraftRestore;
-      if (!mounted) return;
+      if (!mounted || _draftRestoreFailed) return;
       final response = await _picker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
       if (response.exception != null) {
@@ -386,6 +538,47 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       error is PlatformException &&
       const {'camera-unavailable', 'no_available_camera'}.contains(error.code);
 
+  Future<_CameraRecovery?> _showCameraFailure(Object error) {
+    final code = error is PlatformException ? error.code : null;
+    final unavailable = _isDefinitiveCameraUnavailable(error);
+    final needsSettings =
+        code == 'camera_access_denied' || code == 'camera_access_restricted';
+    final message = switch (code) {
+      'camera_access_denied' =>
+        'Camera access was denied. Allow camera access for FOSScanner in '
+            'your device settings before trying again. You can also import images.',
+      'camera_access_restricted' =>
+        'Camera access is restricted on this device. Check device restrictions '
+            'with your device administrator. You can still import images.',
+      _ when unavailable =>
+        'No camera is available on this device. Import images instead.',
+      _ => 'Could not open the camera. Try again or import images instead.',
+    };
+    return showDialog<_CameraRecovery>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Camera unavailable'),
+        scrollable: true,
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, _CameraRecovery.gallery),
+            child: const Text('Import images'),
+          ),
+          if (!needsSettings && !unavailable)
+            TextButton(
+              onPressed: () => Navigator.pop(context, _CameraRecovery.retry),
+              child: const Text('Retry'),
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _captureImage() async {
     if (_isRestoringDraft || _isDocumentInteractionLocked) {
       return;
@@ -395,6 +588,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return;
     }
     final documentGeneration = _documentGeneration;
+    _CameraRecovery? recovery;
     setState(() => _isPickingImages = true);
     try {
       await _imageProcessingQueue.idle;
@@ -413,12 +607,22 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         documentGeneration: documentGeneration,
       );
     } catch (error) {
-      if (_isDefinitiveCameraUnavailable(error) && mounted) {
+      if (!mounted) return;
+      if (_isDefinitiveCameraUnavailable(error)) {
         setState(() => _cameraSupported = false);
       }
-      _showMessage('Could not open the camera.');
+      recovery = await _showCameraFailure(error);
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
+    }
+    if (!mounted || documentGeneration != _documentGeneration) return;
+    switch (recovery) {
+      case _CameraRecovery.retry:
+        await _captureImage();
+      case _CameraRecovery.gallery:
+        await _importFromGallery();
+      case null:
+        break;
     }
   }
 
@@ -691,7 +895,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           replacementBytes:
               _retainedImageBytesFor(replacementPages) - retainedWithoutPage,
         )) {
-          _showDocumentLimit();
+          _showMessage(_documentMemoryLimitMessage);
           return;
         }
         setState(() => _pages[index] = result);
@@ -762,6 +966,38 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       }),
     );
   }
+
+  Widget _pageReorderMenu(int index, ScannedPage page) => PopupMenuButton<int>(
+    tooltip: 'Reorder page ${index + 1}',
+    icon: const Icon(Icons.swap_vert),
+    enabled: !_isDocumentInteractionLocked,
+    onSelected: (direction) {
+      // A menu callback must not move a different page if the document changed
+      // while it was open. _reorderPage also rechecks the operation lock.
+      if (index >= _pages.length || !identical(_pages[index], page)) return;
+      _reorderPage(index, index + direction);
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(
+        value: -1,
+        enabled: index > 0,
+        child: const ListTile(
+          leading: Icon(Icons.arrow_upward),
+          title: Text('Move earlier'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      PopupMenuItem(
+        value: 1,
+        enabled: index < _pages.length - 1,
+        child: const ListTile(
+          leading: Icon(Icons.arrow_downward),
+          title: Text('Move later'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+    ],
+  );
 
   void _reorderPage(int fromIndex, int toIndex) {
     if (_isDocumentInteractionLocked ||
@@ -834,6 +1070,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     setState(() {
       if (cleared) {
         _pages.clear();
+        _draftRestoreFailed = false;
         _draftSaveFailed = false;
         _deferredMessage = null;
       }
@@ -1159,6 +1396,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_draftRestoreFailed) return _buildDraftRestoreFailure();
     return Scaffold(
       appBar: AppBar(
         title: const Text('FOSScanner'),
@@ -1207,16 +1445,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       body: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
-            if (_pages.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
+            if (_imageIntakeStatus != null || _pages.isNotEmpty)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: constraints.maxHeight * 0.4,
                 ),
-                child: Text(
-                  'Drafts are temporary. Export a PDF to keep a copy.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_imageIntakeStatus != null)
+                        TextButton.icon(
+                          onPressed: _showImageIntakeStatus,
+                          icon: const Icon(Icons.info_outline),
+                          label: const Text('Image intake help'),
+                        ),
+                      if (_pages.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          child: Text(
+                            'Drafts are temporary. Export a PDF to keep a copy.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             if (_draftSaveFailed)
@@ -1343,24 +1600,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                     left: 12,
                                     right: 4,
                                   ),
-                                  child: Row(
+                                  child: Wrap(
+                                    alignment: WrapAlignment.spaceBetween,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
                                     children: [
-                                      Expanded(
-                                        child: ExcludeSemantics(
-                                          child: Text(
-                                            'Page ${index + 1}',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.labelLarge,
-                                          ),
+                                      ExcludeSemantics(
+                                        child: Text(
+                                          'Page ${index + 1}',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelLarge,
                                         ),
                                       ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline),
-                                        tooltip: 'Delete page ${index + 1}',
-                                        onPressed: _isDocumentInteractionLocked
-                                            ? null
-                                            : () => _removePage(index),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (_pages.length > 1)
+                                            _pageReorderMenu(index, page),
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                            ),
+                                            tooltip: 'Delete page ${index + 1}',
+                                            onPressed:
+                                                _isDocumentInteractionLocked
+                                                ? null
+                                                : () => _removePage(index),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),

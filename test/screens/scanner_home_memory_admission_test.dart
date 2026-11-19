@@ -199,6 +199,14 @@ void main() {
       final reorder = tester
           .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
           .onAcceptWithDetails!;
+      final reorderMenu = tester.widget<PopupMenuButton<int>>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is PopupMenuButton<int> &&
+              widget.tooltip == 'Reorder page 1',
+        ),
+      );
+      final moveLater = reorderMenu.onSelected!;
       final openPage = tester
           .widget<InkWell>(
             find
@@ -211,6 +219,12 @@ void main() {
           .onTap!;
 
       await tester.tap(find.text('Export PDF (2 pages)'));
+      await tester.pump();
+      await tester.tap(find.text('Image intake help'));
+      await tester.pump();
+      expect(find.textContaining('Export is in progress'), findsOneWidget);
+      expect(find.textContaining('page limit'), findsNothing);
+      await tester.tap(find.text('Close'));
       await tester.pump();
       for (final tooltip in [
         'Import from gallery',
@@ -234,6 +248,19 @@ void main() {
             .maxSimultaneousDrags,
         0,
       );
+      expect(
+        tester
+            .widget<PopupMenuButton<int>>(
+              find.byWidgetPredicate(
+                (widget) =>
+                    widget is PopupMenuButton<int> &&
+                    widget.tooltip == 'Reorder page 1',
+              ),
+            )
+            .enabled,
+        isFalse,
+      );
+      moveLater(1);
       gallery();
       camera();
       barcode();
@@ -287,6 +314,11 @@ void main() {
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pump();
     expect(picker.calls, 1);
+    await tester.tap(find.text('Image intake help'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('selection or page review'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
@@ -298,6 +330,7 @@ void main() {
     picker.result.complete([]);
     await tester.pump();
     await tester.pumpAndSettle();
+    expect(find.text('Image intake help'), findsNothing);
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
@@ -374,6 +407,17 @@ void main() {
     allocation.setRange(0, imageBytes.length, imageBytes);
     return Uint8List.sublistView(allocation, 0, imageBytes.length);
   }
+
+  testWidgets('unsupported dimensions give concise resize guidance', (
+    tester,
+  ) async {
+    await pumpHome(tester, sourceSize: const Size(1, 1));
+    await editFirstPage(tester);
+    expect(find.textContaining('unsupported dimensions'), findsOneWidget);
+    expect(find.textContaining('resize a large image'), findsOneWidget);
+    expect(find.textContaining('pixels'), findsNothing);
+    expect(operations.previewCalls, 0);
+  });
 
   testWidgets('Undo-held images remain in the processing budget', (
     tester,

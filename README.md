@@ -38,8 +38,9 @@ No account, no cloud processing, no tracking.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
    On Android, **PDF export options** lets you turn searchable text on or off.
 
-Long-press and drag pages to reorder them. Deleting a page offers **Undo** for
-four seconds. In a multi-image gallery import, **Skip image** skips only the
+Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
+**Move later**, or long-press and drag pages to reorder them. Deleting a page
+offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
 current photo; remaining images are still reviewed. Canceling an unsaved
 capture or single-image review adds no page.
 
@@ -129,6 +130,11 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 - Sharing keeps the draft by default. Use the **Clear all** toolbar action and
   confirm when you want to start over. Clearing app storage or uninstalling also
   removes draft data; Android OS backups do not include it.
+- If restoration fails, adding images and draft saves are paused so they cannot
+  silently replace the cached draft. Use **Retry restoration** after checking
+  storage access. **Discard saved draft** requires confirmation and deletes both
+  cached generations, including potentially recoverable pages; exported PDFs
+  are not removed. A valid backup is recovered automatically when possible.
 - If saving fails, a persistent warning offers **Retry saving draft**. Keep the
   app open and retry; the retry saves your current pages, not an old snapshot.
 - Unrelated notifications wait while deletion Undo is available. A new deletion
