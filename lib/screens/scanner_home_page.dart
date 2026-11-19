@@ -930,6 +930,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final documentGeneration = _documentGeneration;
     _CameraRecovery? recovery;
     setState(() => _isPickingImages = true);
+    // The shot discarded by Retake, kept only until the next capture so that
+    // cancelling the camera returns to its review instead of losing it.
+    Uint8List? retakenBytes;
     try {
       for (var isFirstCapture = true; ; isFirstCapture = false) {
         if (!isFirstCapture) {
@@ -947,18 +950,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         }
         await _imageProcessingQueue.idle;
         if (!mounted || documentGeneration != _documentGeneration) return;
-        final XFile? photo = await _picker.pickImage(
+        final XFile? captured = await _picker.pickImage(
           source: ImageSource.camera,
           maxWidth: maxPickerEdge,
           maxHeight: maxPickerEdge,
         );
-        if (photo == null) return;
+        final previous = retakenBytes;
+        retakenBytes = null;
+        if (captured == null && previous == null) return;
         // Camera capture writes a fresh file that's genuinely ours to delete.
         final result = await _addCapturedPhoto(
-          photo,
+          captured ?? XFile.fromData(previous!),
           source: PageReviewSource.camera,
-          deleteAfterRead: true,
+          deleteAfterRead: captured != null,
           documentGeneration: documentGeneration,
+          onRetake: (bytes) => retakenBytes = bytes,
         );
         // Every other outcome has already been reported where it happened
         // (limits included), so the loop just ends.
@@ -1255,6 +1261,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     int? batchCount,
     required bool deleteAfterRead,
     required int documentGeneration,
+    ValueSetter<Uint8List>? onRetake,
   }) async {
     if (_isClearingDraft || documentGeneration != _documentGeneration) {
       if (deleteAfterRead) await _deleteFileQuietly(photo.path);
@@ -1365,7 +1372,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       ),
     );
     if (stopRequested) return _PhotoIntakeResult.stopped;
-    if (retakeRequested && result == null) return _PhotoIntakeResult.retake;
+    if (retakeRequested && result == null) {
+      onRetake?.call(bytes);
+      return _PhotoIntakeResult.retake;
+    }
     if (result == null ||
         !mounted ||
         _isClearingDraft ||

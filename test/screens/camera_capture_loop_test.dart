@@ -255,6 +255,38 @@ void main() {
   );
 
   testWidgets(
+    'canceling the camera after Retake returns to the previous review',
+    (tester) async {
+      final first = queueCapture();
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Capture Image'));
+      final editor = await waitForEditor(tester);
+
+      // The relaunched camera is canceled: the fake returns null.
+      await tester.tap(find.text('Retake'));
+      await waitForEditor(tester, previous: editor);
+      expect(picker.cameraCalls, 2);
+      expect(first.existsSync(), isFalse);
+      expect(
+        tester
+            .widget<CornerAdjustScreen>(find.byType(CornerAdjustScreen))
+            .originalBytes,
+        bytes,
+      );
+      expect(find.text('Retake'), findsOneWidget);
+
+      // The restored shot can still be added.
+      await preview(tester);
+      await tester.tap(find.text('Add page'));
+      await settleIntake(tester);
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(picker.cameraCalls, 2);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
     'canceling the system camera mid-loop keeps the accepted pages',
     (tester) async {
       queueCapture();

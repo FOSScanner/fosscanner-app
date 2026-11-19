@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, listEquals;
 import 'package:flutter/material.dart';
 
 import '../models/scanned_page.dart';
@@ -204,7 +205,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       }
       final hasCorners = _hasRenderableCorners(candidateCorners);
       final corners = hasCorners
-          ? sortCornersIfConvex(candidateCorners!)
+          ? sortCornersIfConvex([
+              // Match the overlay's clamping so that it never reports a
+              // change the user did not make.
+              for (final corner in candidateCorners!)
+                Offset(
+                  corner.dx.clamp(0.0, size.width - 1),
+                  corner.dy.clamp(0.0, size.height - 1),
+                ),
+            ])
           : _fullBoundsCorners(size);
 
       if (!mounted) return;
@@ -455,6 +464,62 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   bool get _isEditingExistingPage => widget.initialCorners != null;
 
+  /// Whether leaving now would lose anything the user changed: the crop or
+  /// any appearance setting, relative to how this review opened.
+  bool get _hasUnsavedChanges {
+    final corners = _corners;
+    final start = _startCorners;
+    return (corners != null && start != null && !listEquals(corners, start)) ||
+        _selectedFilter != widget.initialFilter ||
+        _rotationQuarterTurns != widget.initialRotationQuarterTurns ||
+        _brightness != widget.initialBrightness ||
+        _contrast != widget.initialContrast;
+  }
+
+  bool _isConfirmingDiscard = false;
+
+  Future<void> _confirmDiscard() async {
+    if (!mounted ||
+        _isConfirmingDiscard ||
+        _isLeaving ||
+        _isProcessing ||
+        _step != _Step.corners) {
+      return;
+    }
+    _isConfirmingDiscard = true;
+    final bool? discard;
+    try {
+      discard = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Discard changes?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Keep editing'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Discard'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _isConfirmingDiscard = false;
+    }
+    if (discard != true ||
+        !mounted ||
+        _isLeaving ||
+        _isProcessing ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    // Navigator.pop bypasses canPop; onPopInvokedWithResult still runs, so
+    // a batch review still stops the import as Back always did.
+    Navigator.of(context).pop();
+  }
+
   bool get _isNewCameraCapture =>
       !_isEditingExistingPage && widget.source == PageReviewSource.camera;
 
@@ -523,9 +588,16 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final ready = imageSize != null && corners != null;
 
     return PopScope(
-      canPop: !_isProcessing,
+      // Back from the appearance step only returns to the crop step, which
+      // keeps every setting; leaving the review with edits asks first.
+      canPop:
+          !_isProcessing &&
+          (_step != _Step.corners || _isLeaving || !_hasUnsavedChanges),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) return;
+        if (!didPop) {
+          unawaited(_confirmDiscard());
+          return;
+        }
         // Back during batch review leaves the import instead of silently
         // skipping to the next image; Skip image remains the explicit skip.
         if (!_isLeaving &&
