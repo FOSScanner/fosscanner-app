@@ -21,4 +21,12 @@ class PdfExportContractTest {
         assertNull(PdfExportContract.pageDpis(listOf(150.0, 150), 2))
         assertNull(PdfExportContract.pageDpis("150", 1))
     }
+
+    @Test fun savedNamesAreShownAsReportedButSafe() {
+        assertEquals("Scan 2026-11-19 14-05.pdf", PdfExportContract.savedName("Scan 2026-11-19 14-05.pdf"))
+        assertEquals("My scan (1).pdf", PdfExportContract.savedName("  My\u0000scan\n(1).pdf "))
+        assertEquals(255, PdfExportContract.savedName("a".repeat(400))!!.length)
+        assertNull(PdfExportContract.savedName(null))
+        assertNull(PdfExportContract.savedName(" \u0001 "))
+    }
 }

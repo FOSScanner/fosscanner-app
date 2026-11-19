@@ -1249,7 +1249,7 @@ void main() {
           RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2} \(searchable\)\.pdf$'),
         ),
       );
-      expect(params.text, 'Searchable document scanned with FOSScanner');
+      expect(params.text, isNull);
       await tester.tap(find.byTooltip('PDF export options'));
       await tester.pumpAndSettle();
       expect(

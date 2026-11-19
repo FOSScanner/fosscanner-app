@@ -62,10 +62,6 @@ enum PdfQuality {
   final int jpegQuality;
 }
 
-/// Long edge of the reference page used to cap "Original" pages, whose
-/// physical size is nominal: A4's long edge, in inches.
-const _referenceLongEdgeInches = 297 / 25.4;
-
 /// How one page image is placed on its PDF page.
 class PdfPagePlan {
   const PdfPagePlan({
@@ -111,11 +107,17 @@ class PdfPagePlan {
 
 /// Plans how a [sourceWidth] x [sourceHeight] page image is exported.
 ///
-/// "Original" keeps today's page size (pixels at [originalPageDpi]) and caps
-/// the image's long edge at the preset's DPI over an A4 long edge. A4 and
-/// Letter fit the whole image inside the page, centered, with the page turned
-/// to landscape for landscape images, and cap the image at the preset's DPI.
+/// "Original" keeps today's page size (pixels at [originalPageDpi]); its
+/// image is only resampled when a preset's density is below that, so every
+/// preset keeps its "up to N DPI" promise on the actual page. A4 and Letter
+/// fit the whole image inside the page, centered, with the page turned to
+/// landscape for landscape images, and cap the image at the preset's DPI.
 /// Images are never upscaled.
+///
+/// The page box is exactly what a pixels / DPI renderer (Tesseract) produces
+/// from the plan, so image-only and searchable exports get identical pages.
+/// For A4 and Letter the integer density is chosen among a few neighbours to
+/// keep that box as close as possible to the standard size (Letter exactly).
 PdfPagePlan planPdfPage({
   required int sourceWidth,
   required int sourceHeight,
@@ -128,14 +130,13 @@ PdfPagePlan planPdfPage({
   final targetDpi = quality.targetDpi;
   final format = pageSize.format;
   if (format == null) {
-    final longEdge = math.max(sourceWidth, sourceHeight);
-    final scale = targetDpi == null
-        ? 1.0
-        : math.min(1.0, targetDpi * _referenceLongEdgeInches / longEdge);
+    final keepsPixels = targetDpi == null || targetDpi >= originalPageDpi;
+    final nativeDpi = keepsPixels ? originalPageDpi.round() : targetDpi;
+    final scale = keepsPixels ? 1.0 : targetDpi / originalPageDpi;
     final pixelWidth = math.max(1, (sourceWidth * scale).round());
     final pixelHeight = math.max(1, (sourceHeight * scale).round());
-    final pageWidth = sourceWidth / originalPageDpi * PdfPageFormat.inch;
-    final pageHeight = sourceHeight / originalPageDpi * PdfPageFormat.inch;
+    final pageWidth = pixelWidth * PdfPageFormat.inch / nativeDpi;
+    final pageHeight = pixelHeight * PdfPageFormat.inch / nativeDpi;
     return PdfPagePlan(
       pageWidth: pageWidth,
       pageHeight: pageHeight,
@@ -143,18 +144,15 @@ PdfPagePlan planPdfPage({
       imageHeight: pageHeight,
       pixelWidth: pixelWidth,
       pixelHeight: pixelHeight,
-      nativeDpi: math.max(
-        1,
-        (originalPageDpi * pixelWidth / sourceWidth).round(),
-      ),
+      nativeDpi: nativeDpi,
     );
   }
 
   final landscape = sourceWidth > sourceHeight;
-  final pageWidth = landscape ? format.height : format.width;
-  final pageHeight = landscape ? format.width : format.height;
-  final pageWidthInches = pageWidth / PdfPageFormat.inch;
-  final pageHeightInches = pageHeight / PdfPageFormat.inch;
+  final formatWidth = landscape ? format.height : format.width;
+  final formatHeight = landscape ? format.width : format.height;
+  final pageWidthInches = formatWidth / PdfPageFormat.inch;
+  final pageHeightInches = formatHeight / PdfPageFormat.inch;
   // The density at which the unscaled image exactly fits the page.
   final fitDpi = math.max(
     sourceWidth / pageWidthInches,
@@ -162,23 +160,53 @@ PdfPagePlan planPdfPage({
   );
   // A padded canvas must stay within the native renderer's page-image limits,
   // which caps the density even at High (about 450 DPI on A4).
-  final maxCanvasDpi = math
-      .min(
-        maxSourceImageEdge / math.max(pageWidthInches, pageHeightInches),
-        math.sqrt(maxSourceImagePixels / (pageWidthInches * pageHeightInches)),
-      )
-      .floorToDouble();
-  final dpi = math.min(
-    maxCanvasDpi,
-    targetDpi == null ? fitDpi : math.min(fitDpi, targetDpi * 1.0),
-  );
-  final nativeDpi = math.max(
+  final maxCanvasDpi = math.max(
     1,
-    math.min(maxCanvasDpi, dpi.ceilToDouble()).toInt(),
+    math
+        .min(
+          maxSourceImageEdge / math.max(pageWidthInches, pageHeightInches),
+          math.sqrt(
+            maxSourceImagePixels / (pageWidthInches * pageHeightInches),
+          ),
+        )
+        .floor(),
   );
+  final capDpi = targetDpi == null
+      ? maxCanvasDpi
+      : math.min(maxCanvasDpi, targetDpi);
+  // Below the cap the image keeps all its pixels at any density from the
+  // fit density up; above it, densities just under the cap are allowed.
+  final keepsPixels = fitDpi <= capDpi;
+  final preferredDpi = keepsPixels ? math.max(1, fitDpi.ceil()) : capDpi;
+  final candidates = keepsPixels
+      ? [
+          for (
+            var dpi = preferredDpi;
+            dpi <= math.min(capDpi, preferredDpi + _dpiSearchSpan);
+            dpi++
+          )
+            dpi,
+        ]
+      : [
+          for (
+            var dpi = preferredDpi;
+            dpi >= math.max(1, preferredDpi - _dpiSearchSpan);
+            dpi--
+          )
+            dpi,
+        ];
+  double drift(int dpi) =>
+      ((pageWidthInches * dpi).round() / dpi - pageWidthInches).abs() +
+      ((pageHeightInches * dpi).round() / dpi - pageHeightInches).abs();
+  var nativeDpi = candidates.first;
+  for (final dpi in candidates.skip(1)) {
+    // Only switch for a clearly smaller drift, so the preferred density wins
+    // whenever neighbours are about as good.
+    if (drift(dpi) < drift(nativeDpi) - 1e-9) nativeDpi = dpi;
+  }
   final canvasWidth = math.max(1, (pageWidthInches * nativeDpi).round());
   final canvasHeight = math.max(1, (pageHeightInches * nativeDpi).round());
-  final scale = math.min(1.0, dpi / fitDpi);
+  final scale = keepsPixels ? 1.0 : nativeDpi / fitDpi;
   final pixelWidth = math.min(
     canvasWidth,
     math.max(1, (sourceWidth * scale).round()),
@@ -187,6 +215,8 @@ PdfPagePlan planPdfPage({
     canvasHeight,
     math.max(1, (sourceHeight * scale).round()),
   );
+  final pageWidth = canvasWidth * PdfPageFormat.inch / nativeDpi;
+  final pageHeight = canvasHeight * PdfPageFormat.inch / nativeDpi;
   return PdfPagePlan(
     pageWidth: pageWidth,
     pageHeight: pageHeight,
@@ -202,6 +232,10 @@ PdfPagePlan planPdfPage({
     canvasHeight: canvasHeight,
   );
 }
+
+/// How far the planner may move the integer density to keep fixed page
+/// boxes close to their standard size.
+const _dpiSearchSpan = 3;
 
 /// One page ready for a PDF writer.
 typedef PreparedPdfPage = ({Uint8List bytes, PdfPagePlan plan});

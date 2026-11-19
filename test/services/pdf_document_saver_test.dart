@@ -18,7 +18,7 @@ void main() {
   setUp(() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     calls = [];
-    reply = (_) => true;
+    reply = (_) => null;
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       return reply(call);
@@ -30,31 +30,59 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  test('sends the exported path and suggested name', () async {
-    expect(
-      await saver.save(pdf, fileName: 'Scan 2026-11-19 14-05.pdf'),
-      isTrue,
+  test('chooses a location, then writes the exported path', () async {
+    reply = (call) =>
+        call.method == 'chooseSaveTarget' ? {'fileName': 'Taxes.pdf'} : null;
+    final target = await saver.chooseTarget(
+      fileName: 'Scan 2026-11-19 14-05.pdf',
     );
-    expect(calls.single.method, 'savePdfDocument');
-    expect(calls.single.arguments, {
-      'sourcePath': pdf.path,
-      'fileName': 'Scan 2026-11-19 14-05.pdf',
-    });
+    expect(target!.fileName, 'Taxes.pdf');
+    await target.write(pdf);
+    expect(calls.map((call) => call.method), [
+      'chooseSaveTarget',
+      'writeSaveTarget',
+    ]);
+    expect(calls.first.arguments, {'fileName': 'Scan 2026-11-19 14-05.pdf'});
+    expect(calls.last.arguments, {'sourcePath': pdf.path});
   });
 
-  test('a cancelled picker reports false', () async {
-    reply = (_) => false;
-    expect(await saver.save(pdf, fileName: 'a.pdf'), isFalse);
+  test('without a reported name the suggestion is kept', () async {
+    for (final answer in [
+      <String, Object?>{},
+      {'fileName': null},
+      true,
+    ]) {
+      reply = (_) => answer;
+      final target = await saver.chooseTarget(fileName: 'a.pdf');
+      expect(target!.fileName, 'a.pdf');
+    }
+  });
+
+  test('a cancelled picker reports null', () async {
     reply = (_) => null;
-    expect(await saver.save(pdf, fileName: 'a.pdf'), isFalse);
+    expect(await saver.chooseTarget(fileName: 'a.pdf'), isNull);
+  });
+
+  test('discarding asks the platform and never throws', () async {
+    reply = (call) => call.method == 'chooseSaveTarget'
+        ? {'fileName': 'a.pdf'}
+        : throw PlatformException(code: 'x');
+    final target = await saver.chooseTarget(fileName: 'a.pdf');
+    await target!.discard();
+    expect(calls.last.method, 'discardSaveTarget');
   });
 
   test('native failures propagate to the caller', () async {
-    reply = (_) => throw PlatformException(code: 'save_failed');
+    reply = (_) => throw PlatformException(code: 'save_busy');
     await expectLater(
-      saver.save(pdf, fileName: 'a.pdf'),
+      saver.chooseTarget(fileName: 'a.pdf'),
       throwsA(isA<PlatformException>()),
     );
+    reply = (call) => call.method == 'chooseSaveTarget'
+        ? {'fileName': 'a.pdf'}
+        : throw PlatformException(code: 'save_failed');
+    final target = await saver.chooseTarget(fileName: 'a.pdf');
+    await expectLater(target!.write(pdf), throwsA(isA<PlatformException>()));
   });
 
   test('is offered on Android only', () async {
@@ -63,7 +91,7 @@ void main() {
       debugDefaultTargetPlatformOverride = platform;
       expect(saver.isSupported, isFalse);
       await expectLater(
-        saver.save(pdf, fileName: 'a.pdf'),
+        saver.chooseTarget(fileName: 'a.pdf'),
         throwsUnsupportedError,
       );
     }

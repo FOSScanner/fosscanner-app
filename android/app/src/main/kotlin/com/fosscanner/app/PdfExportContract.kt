@@ -74,4 +74,18 @@ internal object PdfExportContract {
         if (base.isEmpty()) base = "Scan"
         return base.take(MAX_TITLE_LENGTH).trim() + ".pdf"
     }
+
+    private const val MAX_SAVED_NAME_LENGTH = 255
+
+    /**
+     * The name a document provider reports for a saved file, made safe to
+     * show in a message, or null when it reported none.
+     */
+    fun savedName(displayName: String?): String? {
+        val name = (displayName ?: return null)
+            .replace(Regex("[\\u0000-\\u001f\\u007f]"), " ")
+            .replace(whitespace, " ")
+            .trim()
+        return name.take(MAX_SAVED_NAME_LENGTH).trim().ifEmpty { null }
+    }
 }

@@ -179,7 +179,8 @@ void main() {
 
     expect(share.header, '%PDF-');
     expect(share.sharedPath, contains('/$pdfExportDirectoryPrefix'));
-    expect(share.params!.text, 'Searchable document scanned with FOSScanner');
+    // Nothing is added to the user's message.
+    expect(share.params!.text, isNull);
   });
 
   testWidgets('chosen page size and quality persist and shape the export', (

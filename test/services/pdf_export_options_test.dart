@@ -57,38 +57,95 @@ void main() {
     expect(p.canvasWidth, isNull);
   });
 
-  test('Original/Balanced keeps the page box but caps the long edge', () {
-    final p = plan(2480, 3508, PdfPageSize.original, PdfQuality.balanced);
-    expect(p.pageWidth, closeTo(2480 / 150 * 72, 1e-9));
-    expect(p.pixelHeight, (200 * 297 / 25.4).round());
-    expect(p.pixelWidth / p.pixelHeight, closeTo(2480 / 3508, 0.001));
-    // Tesseract's page = pixels / DPI stays close to the same page box.
-    expect(p.pixelWidth / p.nativeDpi * 72, closeTo(p.pageWidth, 6));
+  test('Original keeps the page box and honours every preset density', () {
+    // A tall receipt-like page: taller than A4, so a cap derived from A4
+    // would push Small below its promised 150 DPI.
+    for (final source in [(2480, 3508), (804, 2181), (300, 120)]) {
+      for (final quality in PdfQuality.values) {
+        final p = plan(source.$1, source.$2, PdfPageSize.original, quality);
+        expect(p.pageWidth, closeTo(source.$1 / 150 * 72, 1e-9));
+        expect(p.pageHeight, closeTo(source.$2 / 150 * 72, 1e-9));
+        expect((p.pixelWidth, p.pixelHeight), source);
+        expect(p.nativeDpi, 150);
+        final density = p.pixelHeight / (p.pageHeight / 72);
+        expect(density, closeTo(150, 1e-9));
+        expect(density, lessThanOrEqualTo(quality.targetDpi ?? 150));
+      }
+    }
   });
 
-  test('A4/High fits a 300 DPI scan exactly without resampling', () {
+  test('A4/High fits a 300 DPI scan without resampling', () {
     final p = plan(2480, 3508, PdfPageSize.a4, PdfQuality.high);
-    expect(p.pageWidth, PdfPageFormat.a4.width);
-    expect(p.pageHeight, PdfPageFormat.a4.height);
+    expect(p.pageWidth, closeTo(PdfPageFormat.a4.width, 0.1));
+    expect(p.pageHeight, closeTo(PdfPageFormat.a4.height, 0.1));
     expect((p.pixelWidth, p.pixelHeight), (2480, 3508));
     expect(p.imageWidth, lessThanOrEqualTo(p.pageWidth + 1e-9));
-    expect(p.imageHeight, closeTo(p.pageHeight, 1e-6));
-    expect(p.nativeDpi, 301);
-    // The padded canvas renders as A4 at the native density (within a pixel).
-    expect(p.canvasWidth! / p.nativeDpi * 72, closeTo(p.pageWidth, 0.3));
-    expect(p.canvasHeight! / p.nativeDpi * 72, closeTo(p.pageHeight, 0.3));
+    expect(p.imageHeight, closeTo(p.pageHeight, 0.1));
+    expect(p.nativeDpi, inInclusiveRange(301, 304));
     expect(p.pixelWidth, lessThanOrEqualTo(p.canvasWidth!));
     expect(p.pixelHeight, lessThanOrEqualTo(p.canvasHeight!));
   });
 
   test('A4/Balanced and Small downscale to their target density', () {
     final balanced = plan(2480, 3508, PdfPageSize.a4, PdfQuality.balanced);
-    expect(balanced.nativeDpi, 200);
-    expect(balanced.pixelHeight, closeTo(3508 * 200 / 300, 2));
+    expect(balanced.nativeDpi, inInclusiveRange(197, 200));
+    expect(balanced.pixelHeight, closeTo(3508 * balanced.nativeDpi / 300, 2));
     final small = plan(2480, 3508, PdfPageSize.a4, PdfQuality.small);
-    expect(small.nativeDpi, 150);
-    expect(small.pixelHeight, closeTo(3508 * 150 / 300, 2));
-    expect(small.pageWidth, PdfPageFormat.a4.width);
+    expect(small.nativeDpi, inInclusiveRange(147, 150));
+    expect(small.pixelHeight, closeTo(3508 * small.nativeDpi / 300, 2));
+    expect(small.pageWidth, closeTo(PdfPageFormat.a4.width, 0.1));
+  });
+
+  group('page boxes match a pixels / DPI renderer exactly', () {
+    const sources = [
+      (2480, 3508),
+      (3508, 2480),
+      (3024, 4032),
+      (1700, 2200),
+      (1653, 2339),
+      (804, 2181),
+      (4000, 3000),
+      (1240, 1754),
+    ];
+    for (final size in PdfPageSize.values) {
+      for (final quality in PdfQuality.values) {
+        test('${size.label} / ${quality.label}', () {
+          for (final (w, h) in sources) {
+            final p = plan(w, h, size, quality);
+            // What Tesseract's renderer writes: page = image pixels * 72 / DPI,
+            // where the image is the padded canvas for fixed sizes.
+            final rendererWidth =
+                (p.canvasWidth ?? p.pixelWidth) * 72.0 / p.nativeDpi;
+            final rendererHeight =
+                (p.canvasHeight ?? p.pixelHeight) * 72.0 / p.nativeDpi;
+            expect(p.pageWidth, rendererWidth, reason: '$w x $h');
+            expect(p.pageHeight, rendererHeight, reason: '$w x $h');
+            final format = size.format;
+            if (format == null) continue;
+            final landscape = w > h;
+            final expectedWidth = landscape ? format.height : format.width;
+            final expectedHeight = landscape ? format.width : format.height;
+            if (size == PdfPageSize.letter) {
+              expect(
+                (p.pageWidth, p.pageHeight),
+                (expectedWidth, expectedHeight),
+              );
+            } else {
+              // Within a fraction of a canvas pixel of the standard size.
+              expect(p.pageWidth, closeTo(expectedWidth, 0.25));
+              expect(p.pageHeight, closeTo(expectedHeight, 0.25));
+            }
+            // Never above the promised density, never upscaled.
+            final target = quality.targetDpi;
+            if (target != null) {
+              expect(p.nativeDpi, lessThanOrEqualTo(target));
+            }
+            expect(p.pixelWidth, lessThanOrEqualTo(w));
+            expect(p.pixelHeight, lessThanOrEqualTo(h));
+          }
+        });
+      }
+    }
   });
 
   test('wide images get a landscape page, centered by aspect ratio', () {
@@ -103,8 +160,8 @@ void main() {
   test('small images are never upscaled', () {
     final p = plan(100, 200, PdfPageSize.a4, PdfQuality.small);
     expect((p.pixelWidth, p.pixelHeight), (100, 200));
-    // Still drawn to fit the page.
-    expect(p.imageHeight, closeTo(PdfPageFormat.a4.height, 1e-6));
+    // Still drawn to fit the page, within one canvas pixel.
+    expect(p.imageHeight, closeTo(PdfPageFormat.a4.height, 72 / p.nativeDpi));
   });
 
   test('the padded canvas stays within the native page-image limits', () {

@@ -243,6 +243,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   _PageGridGeometry? _gridGeometry;
   bool _isGeneratingPdf = false;
   bool _isSharingPdf = false;
+  // The name the user chose for a save in progress, once the picker returned.
+  String? _saveTargetName;
   _ExportAction _exportAction = _ExportAction.share;
   bool _isCancellingPdf = false;
   double? _pdfProgress;
@@ -1893,14 +1895,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   Future<ShareResult> _sharePdfFile(
     File pdf, {
     required String fileName,
-    required String message,
     required Rect? shareOrigin,
   }) {
     return _sharePlus.share(
       ShareParams(
         files: [XFile(pdf.path, name: fileName, mimeType: 'application/pdf')],
         fileNameOverrides: [fileName],
-        text: message,
         sharePositionOrigin: shareOrigin,
         downloadFallbackEnabled: true,
       ),
@@ -1945,8 +1945,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     List<ScannedPage> pages, {
     required bool useOcr,
     required PdfExportDirectory directory,
+    required DateTime now,
   }) async {
-    final now = DateTime.now();
     if (useOcr) {
       try {
         final name = pdfExportFileName(now, searchable: true);
@@ -1996,18 +1996,37 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final useOcr = _exportsSearchable;
     // Capture the required iPad popover anchor before awaiting worker results.
     final shareOrigin = _shareOrigin;
+    final now = DateTime.now();
+    // Saving asks for the location first, so cancelling the picker never
+    // throws away a finished (possibly OCR'd) document.
+    final choosesTarget = action == _ExportAction.save;
 
     setState(() {
       _isGeneratingPdf = true;
-      _isSharingPdf = false;
+      _isSharingPdf = choosesTarget;
+      _saveTargetName = null;
       _exportAction = action;
       _isCancellingPdf = false;
       _pdfExporter = useOcr ? _PdfExporter.searchable : _PdfExporter.imageOnly;
-      _pdfProgress = 0;
+      _pdfProgress = choosesTarget ? null : 0;
     });
 
     PdfExportDirectory? exportDirectory;
+    PdfSaveTarget? saveTarget;
+    var saved = false;
     try {
+      if (choosesTarget) {
+        saveTarget = await widget.documentSaver.chooseTarget(
+          fileName: pdfExportFileName(now, searchable: useOcr),
+        );
+        // A cancelled picker is a silent no-op: nothing was generated.
+        if (saveTarget == null || !mounted) return;
+        setState(() {
+          _saveTargetName = saveTarget!.fileName;
+          _isSharingPdf = false;
+          _pdfProgress = 0;
+        });
+      }
       // Popping an editor does not interrupt its active worker. Use the same
       // queue so PDF/OCR processing cannot overlap that native allocation.
       final pdf = await _imageProcessingQueue.run(() async {
@@ -2018,7 +2037,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         exportDirectory = await createPdfExportDirectory(
           temporaryDirectory: widget.temporaryDirectory,
         );
-        return _createPdf(pages, useOcr: useOcr, directory: exportDirectory!);
+        return _createPdf(
+          pages,
+          useOcr: useOcr,
+          directory: exportDirectory!,
+          now: now,
+        );
       });
       if (pdf == null || !mounted || _isCancellingPdf) return;
       setState(() {
@@ -2029,9 +2053,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         final shared = await _sharePdfFile(
           pdf.file,
           fileName: pdf.name,
-          message: pdf.searchable
-              ? 'Searchable document scanned with FOSScanner'
-              : 'Document scanned with FOSScanner',
           shareOrigin: shareOrigin,
         );
         // A dismissed sheet handed the copy to nobody. After a successful
@@ -2046,12 +2067,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           );
         }
       } else {
-        // Cancelling the picker is a no-op: the draft stays as it is.
-        final saved = await widget.documentSaver.save(
-          pdf.file,
-          fileName: pdf.name,
-        );
-        if (saved && mounted) _showMessage('PDF saved.');
+        await saveTarget!.write(pdf.file);
+        saved = true;
+        if (mounted) _showMessage('Saved “${saveTarget.fileName}”');
       }
     } catch (error) {
       if (ocr_service.isCancellation(error) ||
@@ -2075,10 +2093,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // (or failed), so the exported file is no longer needed. Files orphaned
       // by a killed process are swept at the next launch.
       exportDirectory?.delete();
+      // The picker already created an empty document; remove it when the
+      // export was cancelled, declined or failed.
+      if (saveTarget != null && !saved) unawaited(saveTarget.discard());
       if (mounted) {
         setState(() {
           _isGeneratingPdf = false;
           _isSharingPdf = false;
+          _saveTargetName = null;
           _isCancellingPdf = false;
           _pdfExporter = null;
           _pdfProgress = null;
@@ -2302,9 +2324,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
     if (_isCancellingPdf) return 'Cancelling PDF...';
     if (_isSharingPdf) {
-      return _exportAction == _ExportAction.save
+      if (_exportAction != _ExportAction.save) return 'Opening share sheet...';
+      return _saveTargetName == null
           ? 'Choose where to save...'
-          : 'Opening share sheet...';
+          : 'Saving PDF…';
     }
     if (_pdfProgress == null) return 'Preparing PDF...';
     final percent = (_pdfProgress! * 100).round();

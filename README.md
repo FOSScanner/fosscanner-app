@@ -226,9 +226,13 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 
 Export opens the OS share sheet; it does not prove that another app saved or
 delivered the PDF. On Android, **Save PDF to device** writes the PDF to the
-location you pick in the system file picker; it needs no storage permission,
-and canceling the picker changes nothing. FOSScanner writes the PDF to its private cache only for the
-hand-off and deletes it when the share sheet returns; a copy left by an
+location you pick in the system file picker; it needs no storage permission.
+The picker opens before the PDF is generated, so canceling it changes nothing
+and wastes no text recognition; if the export is then canceled or fails, the
+empty file the picker created is removed where the storage provider allows it. FOSScanner writes the PDF to its private cache only for the
+hand-off and deletes it when the share sheet returns; nothing is added to the
+message you send. Exported PDFs carry no document metadata (no app or OCR
+engine version, no creation time); a copy left by an
 interrupted export is removed at the next launch. On Android the share plugin
 keeps its own copy in the app's private cache (`share_plus/`): it is deleted
 right away when you dismiss the share sheet, and otherwise, because the

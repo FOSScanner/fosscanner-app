@@ -213,18 +213,18 @@ void main() {
   });
 
   test('A4 and Letter exports use exact page boxes for every page', () async {
-    final portrait = noisyJpeg(200, 300);
-    final landscape = noisyJpeg(300, 200);
+    final portrait = noisyJpeg(1240, 1754);
+    final landscape = noisyJpeg(1754, 1240);
     final a4 = await createImageOnlyPdf([
       portrait,
       landscape,
     ], pageSize: PdfPageSize.a4);
     final boxes = mediaBoxes(a4);
     expect(boxes, hasLength(2));
-    expect(boxes[0][2], closeTo(PdfPageFormat.a4.width, 0.01));
-    expect(boxes[0][3], closeTo(PdfPageFormat.a4.height, 0.01));
-    expect(boxes[1][2], closeTo(PdfPageFormat.a4.height, 0.01));
-    expect(boxes[1][3], closeTo(PdfPageFormat.a4.width, 0.01));
+    expect(boxes[0][2], closeTo(PdfPageFormat.a4.width, 0.1));
+    expect(boxes[0][3], closeTo(PdfPageFormat.a4.height, 0.1));
+    expect(boxes[1][2], closeTo(PdfPageFormat.a4.height, 0.1));
+    expect(boxes[1][3], closeTo(PdfPageFormat.a4.width, 0.1));
     // High keeps the JPEG untouched even on a fixed page size.
     expect(embeddedJpegs(a4).first, orderedEquals(portrait));
 
@@ -251,5 +251,46 @@ void main() {
     expect(small.length, lessThan(balanced.length));
     expect(small.length, lessThan(high.length / 2));
     expect(mediaBoxes(small), hasLength(10));
+  });
+
+  test('page boxes equal what the searchable renderer produces', () async {
+    // Tesseract sizes each page as image pixels * 72 / DPI, using the padded
+    // canvas and density from the same plan; the image-only PDF must match.
+    final sources = [(1240, 1754), (1754, 1240), (804, 2181), (1653, 2339)];
+    for (final size in PdfPageSize.values) {
+      for (final quality in PdfQuality.values) {
+        final pdf = await createImageOnlyPdf(
+          [for (final (w, h) in sources) noisyJpeg(w, h)],
+          pageSize: size,
+          quality: quality,
+        );
+        final boxes = mediaBoxes(pdf);
+        expect(boxes, hasLength(sources.length));
+        for (var i = 0; i < sources.length; i++) {
+          final (w, h) = sources[i];
+          final plan = planPdfPage(
+            sourceWidth: w,
+            sourceHeight: h,
+            pageSize: size,
+            quality: quality,
+          );
+          final dpi = plan.nativeDpi;
+          final rendererWidth =
+              (plan.canvasWidth ?? plan.pixelWidth) * 72 / dpi;
+          final rendererHeight =
+              (plan.canvasHeight ?? plan.pixelHeight) * 72 / dpi;
+          final reason = '${size.label}/${quality.label} $w x $h';
+          expect(boxes[i][2], closeTo(rendererWidth, 0.001), reason: reason);
+          expect(boxes[i][3], closeTo(rendererHeight, 0.001), reason: reason);
+        }
+      }
+    }
+  });
+
+  test('image-only PDFs carry no information dictionary', () async {
+    final pdf = latin1.decode(await createImageOnlyPdf([noisyJpeg(40, 60)]));
+    expect(pdf, isNot(contains('/Info')));
+    expect(pdf, isNot(contains('/Producer')));
+    expect(pdf, isNot(contains('/CreationDate')));
   });
 }

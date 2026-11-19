@@ -21,6 +21,7 @@ import android.os.PersistableBundle
 import android.view.View
 import android.view.WindowManager
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import com.googlecode.leptonica.android.ReadFile
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.googlecode.tesseract.android.TessPdfRenderer
@@ -48,10 +49,10 @@ class MainActivity : FlutterActivity() {
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
-    // The one save waiting for the system document picker, if any.
-    private var pendingSave: PendingSave? = null
-
-    private class PendingSave(val result: MethodChannel.Result, val source: File)
+    // The one save waiting for the system document picker, if any, and the
+    // location it returned, held until Dart writes or discards it.
+    private var pendingSaveTarget: MethodChannel.Result? = null
+    private var saveTarget: Uri? = null
 
     // Shared images are copied off the UI thread on their own worker, so a
     // running OCR export never delays them (Dart blocks intake during export).
@@ -194,7 +195,12 @@ class MainActivity : FlutterActivity() {
                 // Cancels whichever OCR job is running, PDF or text copy.
                 "cancelSearchablePdf" -> handleCancelSearchablePdf(result)
                 "copyRecognizedText" -> handleCopyRecognizedText(call, result)
-                "savePdfDocument" -> handleSavePdfDocument(call, result)
+                "chooseSaveTarget" -> handleChooseSaveTarget(call, result)
+                "writeSaveTarget" -> handleWriteSaveTarget(call, result)
+                "discardSaveTarget" -> {
+                    discardSaveTarget()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -271,8 +277,10 @@ class MainActivity : FlutterActivity() {
         pickedPdf = null
         // A running render sees the detached flag and deletes its files.
         pdfImportExecutor.shutdown()
-        // Its Dart caller is gone with the engine; nothing is left to answer.
-        pendingSave = null
+        // Its Dart caller is gone with the engine; nothing is left to answer,
+        // and an unwritten location would stay an empty document.
+        pendingSaveTarget = null
+        discardSaveTarget()
         // Let the active native call finish and release its resources. Interrupting
         // the Java worker cannot safely interrupt Tesseract's native renderer.
         executor.shutdown()
@@ -501,33 +509,80 @@ class MainActivity : FlutterActivity() {
         clipboard.setPrimaryClip(clip)
     }
 
-    // Lets the user pick a location with the system picker (ACTION_CREATE_DOCUMENT):
-    // no storage permission, works without Google apps, and the user can rename
-    // the suggested file. Replies true when saved and false when cancelled.
-    private fun handleSavePdfDocument(call: MethodCall, result: MethodChannel.Result) {
-        if (pendingSave != null) {
+    // Lets the user pick a location with the system picker (ACTION_CREATE_DOCUMENT)
+    // before anything is generated: no storage permission, works without Google
+    // apps, and the user can rename the suggested file. Replies with the chosen
+    // name, or null when cancelled; the location is kept for writeSaveTarget.
+    private fun handleChooseSaveTarget(call: MethodCall, result: MethodChannel.Result) {
+        if (pendingSaveTarget != null) {
             result.error("save_busy", "A save is already waiting for a location", null)
             return
         }
-        val source = PdfExportContract.exportFile(
-            applicationContext.cacheDir,
-            call.argument<String>("sourcePath"),
-        )
-        if (source == null) {
-            result.error("invalid_args", "An exported PDF is required", null)
-            return
-        }
+        // A location Dart never used is an empty document; remove it.
+        discardSaveTarget()
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("application/pdf")
             .putExtra(Intent.EXTRA_TITLE, PdfExportContract.documentTitle(call.argument<String>("fileName")))
-        pendingSave = PendingSave(result, source)
+        pendingSaveTarget = result
         try {
             startActivityForResult(intent, SAVE_DOCUMENT_REQUEST)
         } catch (e: ActivityNotFoundException) {
-            pendingSave = null
+            pendingSaveTarget = null
             result.error("save_unavailable", "No document picker is available", null)
         }
+    }
+
+    private fun handleWriteSaveTarget(call: MethodCall, result: MethodChannel.Result) {
+        val destination = saveTarget
+        val source = PdfExportContract.exportFile(
+            applicationContext.cacheDir,
+            call.argument<String>("sourcePath"),
+        )
+        if (destination == null || source == null) {
+            result.error("invalid_args", "A chosen location and an exported PDF are required", null)
+            return
+        }
+        saveTarget = null
+        val resolver = applicationContext.contentResolver
+        // Streams the file in chunks off the main thread; it can be large.
+        Thread {
+            try {
+                val output = resolver.openOutputStream(destination, "w")
+                    ?: throw IOException("No output stream")
+                output.use { stream ->
+                    source.inputStream().use { input -> input.copyTo(stream, 64 * 1024) }
+                }
+                mainHandler.post { result.success(null) }
+            } catch (e: Exception) {
+                // Do not leave an empty or truncated document at the chosen place.
+                deleteDocumentQuietly(destination)
+                // Do not expose paths or provider messages to Dart.
+                mainHandler.post { result.error("save_failed", "Could not write the document", null) }
+            }
+        }.start()
+    }
+
+    /** Removes the empty document of an unused save location, best effort. */
+    private fun discardSaveTarget() {
+        val destination = saveTarget ?: return
+        saveTarget = null
+        Thread { deleteDocumentQuietly(destination) }.start()
+    }
+
+    private fun deleteDocumentQuietly(document: Uri) {
+        try {
+            DocumentsContract.deleteDocument(applicationContext.contentResolver, document)
+        } catch (_: Exception) {
+            // Best effort; some providers do not support deletion.
+        }
+    }
+
+    private fun displayNameOf(document: Uri): String? = try {
+        contentResolver.query(document, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    } catch (_: Exception) {
+        null
     }
 
     // Opens the system document picker for one PDF. Replies true once a PDF
@@ -672,34 +727,18 @@ class MainActivity : FlutterActivity() {
             super.onActivityResult(requestCode, resultCode, data)
             return
         }
-        val pending = pendingSave ?: return
-        pendingSave = null
+        val pending = pendingSaveTarget ?: return
+        pendingSaveTarget = null
         val destination = data?.data
         if (resultCode != Activity.RESULT_OK || destination == null) {
-            pending.result.success(false)
+            pending.success(null)
             return
         }
-        val resolver = applicationContext.contentResolver
-        // Streams the file in chunks off the main thread; it can be large.
-        Thread {
-            try {
-                val output = resolver.openOutputStream(destination, "w")
-                    ?: throw IOException("No output stream")
-                output.use { stream ->
-                    pending.source.inputStream().use { input -> input.copyTo(stream, 64 * 1024) }
-                }
-                mainHandler.post { pending.result.success(true) }
-            } catch (e: Exception) {
-                // Do not leave an empty or truncated document at the chosen place.
-                try {
-                    DocumentsContract.deleteDocument(resolver, destination)
-                } catch (_: Exception) {
-                    // Best effort; some providers do not support deletion.
-                }
-                // Do not expose paths or provider messages to Dart.
-                mainHandler.post { pending.result.error("save_failed", "Could not write the document", null) }
-            }
-        }.start()
+        saveTarget = destination
+        pending.success(
+            // Null keeps the suggested name on the Dart side.
+            mapOf("fileName" to PdfExportContract.savedName(displayNameOf(destination))),
+        )
     }
 
     private fun handleCancelSearchablePdf(result: MethodChannel.Result) {
@@ -744,6 +783,10 @@ class MainActivity : FlutterActivity() {
             baseApi.recycle()
         }
         check(File("$outputPath.pdf").length() in 1..MAX_DOCUMENT_BYTES)
+        // Drop Tesseract's version and creation time so searchable PDFs carry
+        // the same minimal metadata as image-only ones. Best effort: an
+        // unexpected layout is left as Tesseract wrote it.
+        PdfMetadata.blankInfoDictionary(File("$outputPath.pdf"))
         // Tesseract4Android 4.9.0's JNI addPageToDocument ignores ProcessPage's
         // boolean result. Validate the finished document before reporting success.
         ParcelFileDescriptor.open(File("$outputPath.pdf"), ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->

@@ -5,14 +5,31 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/services.dart' show MethodChannel;
 
 /// Saves a finished PDF to a user-chosen location outside the app.
+///
+/// The location is chosen before the PDF is generated, so cancelling the
+/// picker never wastes an export (OCR can take a while).
 abstract interface class PdfDocumentSaver {
   /// Whether this platform offers a save action at all.
   bool get isSupported;
 
-  /// Asks the user where to save [pdf] as [fileName] and copies it there.
+  /// Asks the user where to save a PDF suggested as [fileName].
   ///
-  /// Returns false when the user cancelled the picker. Throws on failure.
-  Future<bool> save(File pdf, {required String fileName});
+  /// Returns null when the user cancelled the picker. Throws on failure.
+  Future<PdfSaveTarget?> chooseTarget({required String fileName});
+}
+
+/// A location the user picked; exactly one of [write] or [discard] is called.
+abstract interface class PdfSaveTarget {
+  /// The file name the user chose, for confirmation messages.
+  String get fileName;
+
+  /// Copies [pdf] to the location. Throws on failure, leaving no partial
+  /// document behind.
+  Future<void> write(File pdf);
+
+  /// Removes the empty document the picker created, best effort. Never
+  /// throws.
+  Future<void> discard();
 }
 
 /// Android's system document picker (ACTION_CREATE_DOCUMENT) via MainActivity.
@@ -32,13 +49,42 @@ class PlatformPdfDocumentSaver implements PdfDocumentSaver {
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   @override
-  Future<bool> save(File pdf, {required String fileName}) async {
+  Future<PdfSaveTarget?> chooseTarget({required String fileName}) async {
     if (!isSupported) throw UnsupportedError('Saving requires Android');
-    // Keep the contract in sync with MainActivity.handleSavePdfDocument.
-    final saved = await _channel.invokeMethod<bool>('savePdfDocument', {
-      'sourcePath': pdf.path,
+    // Keep the contract in sync with MainActivity.handleChooseSaveTarget.
+    final chosen = await _channel.invokeMethod<Object?>('chooseSaveTarget', {
       'fileName': fileName,
     });
-    return saved ?? false;
+    if (chosen == null) return null;
+    final name = chosen is Map ? chosen['fileName'] : null;
+    return _PlatformSaveTarget(
+      name is String && name.trim().isNotEmpty ? name : fileName,
+    );
+  }
+}
+
+class _PlatformSaveTarget implements PdfSaveTarget {
+  _PlatformSaveTarget(this.fileName);
+
+  @override
+  final String fileName;
+
+  @override
+  Future<void> write(File pdf) async {
+    await PlatformPdfDocumentSaver._channel.invokeMethod<void>(
+      'writeSaveTarget',
+      {'sourcePath': pdf.path},
+    );
+  }
+
+  @override
+  Future<void> discard() async {
+    try {
+      await PlatformPdfDocumentSaver._channel.invokeMethod<void>(
+        'discardSaveTarget',
+      );
+    } catch (_) {
+      // Best effort: some providers cannot delete documents.
+    }
   }
 }
