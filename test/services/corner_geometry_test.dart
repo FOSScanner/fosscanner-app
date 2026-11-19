@@ -210,4 +210,117 @@ void main() {
     expect(height, greaterThanOrEqualTo(2));
     expect(width / height, closeTo(100, 1));
   });
+
+  group('sortCornersIfConvex', () {
+    test('re-sorts a bow-tie made by dragging a corner past another', () {
+      // Top-left dragged to the right of top-right: edges 1-2 and 3-0 cross.
+      const dragged = [
+        Offset(90, 30),
+        Offset(60, 10),
+        Offset(60, 90),
+        Offset(10, 90),
+      ];
+
+      expect(sortCornersIfConvex(dragged), const [
+        Offset(60, 10),
+        Offset(90, 30),
+        Offset(60, 90),
+        Offset(10, 90),
+      ]);
+      expect(cropProblem(sortCornersIfConvex(dragged)), isNull);
+    });
+
+    test('re-sorts counter-clockwise corners to clockwise', () {
+      const ccw = [
+        Offset(10, 10),
+        Offset(10, 90),
+        Offset(90, 90),
+        Offset(90, 10),
+      ];
+
+      expect(sortCornersIfConvex(ccw), const [
+        Offset(10, 10),
+        Offset(90, 10),
+        Offset(90, 90),
+        Offset(10, 90),
+      ]);
+    });
+
+    test('keeps ordered, concave and collapsed corners unchanged', () {
+      const ordered = [
+        Offset(10, 10),
+        Offset(90, 10),
+        Offset(90, 90),
+        Offset(10, 90),
+      ];
+      const concave = [
+        Offset(10, 10),
+        Offset(90, 10),
+        Offset(30, 30),
+        Offset(10, 90),
+      ];
+      const collapsed = [
+        Offset(50, 50),
+        Offset(50, 50),
+        Offset(50, 50),
+        Offset(50, 50),
+      ];
+
+      expect(sortCornersIfConvex(ordered), ordered);
+      expect(sortCornersIfConvex(concave), concave);
+      expect(sortCornersIfConvex(collapsed), collapsed);
+    });
+  });
+
+  group('cropProblem', () {
+    test('a valid crop has no problem', () {
+      expect(
+        cropProblem(const [
+          Offset(10, 10),
+          Offset(90, 10),
+          Offset(90, 90),
+          Offset(10, 90),
+        ]),
+        isNull,
+      );
+    });
+
+    test('crossing edges are reported as crossing', () {
+      expect(
+        cropProblem(const [
+          Offset(10, 10),
+          Offset(90, 90),
+          Offset(90, 10),
+          Offset(10, 90),
+        ]),
+        CropProblem.cornersCross,
+      );
+    });
+
+    test('a corner inside the others is reported as inside', () {
+      expect(
+        cropProblem(const [
+          Offset(10, 10),
+          Offset(90, 10),
+          Offset(30, 30),
+          Offset(10, 90),
+        ]),
+        CropProblem.cornerInside,
+      );
+    });
+
+    test('collapsed, collinear and sliver crops are too small', () {
+      for (final corners in const [
+        [Offset(50, 50), Offset(50, 50), Offset(50, 50), Offset(50, 50)],
+        [Offset(10, 10), Offset(50, 10), Offset(90, 10), Offset(10, 90)],
+        [Offset(10, 10), Offset(90, 10), Offset(90, 10.4), Offset(10, 10.4)],
+      ]) {
+        expect(
+          cropProblem(corners),
+          CropProblem.areaTooSmall,
+          reason: '$corners',
+        );
+      }
+    });
+  });
 }

@@ -3,9 +3,15 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart'
-    show computeHitSlop, kPrimaryButton, EagerGestureRecognizer;
+    show
+        computeHitSlop,
+        kPrimaryButton,
+        DoubleTapGestureRecognizer,
+        EagerGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
+
+import '../services/corner_geometry.dart';
 
 const _cornerLabels = [
   'Top-left corner',
@@ -24,6 +30,10 @@ const _previewDecodeSize = 2048;
 /// caller never has to think about how the image happens to be scaled on
 /// screen.
 ///
+/// A drag that leaves the four points convex but mis-ordered (one handle
+/// pulled past its neighbour) is re-sorted clockwise from top-left when it
+/// ends, so corner labels always follow positions.
+///
 /// Live visual feedback while dragging is handled entirely inside this
 /// widget via local state — [onChanged] fires once, when a drag ends, not
 /// on every pointer move. Firing it every frame used to make the caller
@@ -36,12 +46,17 @@ class CornerOverlay extends StatefulWidget {
     required this.imageSize,
     required this.corners,
     required this.onChanged,
+    this.onReset,
   });
 
   final Uint8List imageBytes;
   final Size imageSize;
   final List<Offset> corners;
   final ValueChanged<List<Offset>> onChanged;
+
+  /// Called on a double-tap away from the handles (and by the matching
+  /// accessibility action) to restore the starting corners.
+  final VoidCallback? onReset;
 
   @override
   State<CornerOverlay> createState() => _CornerOverlayState();
@@ -163,8 +178,16 @@ class _CornerOverlayState extends State<CornerOverlay> {
           return nearestIndex;
         }
 
-        return RawGestureDetector(
+        final onReset = widget.onReset;
+        final detector = RawGestureDetector(
           gestures: <Type, GestureRecognizerFactory>{
+            if (widget.onReset != null)
+              DoubleTapGestureRecognizer:
+                  GestureRecognizerFactoryWithHandlers<
+                    DoubleTapGestureRecognizer
+                  >(DoubleTapGestureRecognizer.new, (recognizer) {
+                    recognizer.onDoubleTap = widget.onReset;
+                  }),
             _CornerEagerGestureRecognizer:
                 GestureRecognizerFactoryWithHandlers<
                   _CornerEagerGestureRecognizer
@@ -215,8 +238,8 @@ class _CornerOverlayState extends State<CornerOverlay> {
               final shouldCommit = _draggingIndex != null;
               _clearPointerState();
               if (shouldCommit) {
-                setState(() => _draggingIndex = null);
-                widget.onChanged([..._liveCorners]);
+                _draggingIndex = null;
+                _commit(_liveCorners);
               }
             },
             onPointerCancel: (event) {
@@ -264,6 +287,14 @@ class _CornerOverlayState extends State<CornerOverlay> {
             ),
           ),
         );
+        if (onReset == null) return detector;
+        return Semantics(
+          container: true,
+          customSemanticsActions: {
+            const CustomSemanticsAction(label: 'Reset corners'): onReset,
+          },
+          child: detector,
+        );
       },
     );
   }
@@ -286,8 +317,13 @@ class _CornerOverlayState extends State<CornerOverlay> {
   void _moveCornerForAccessibility(int index, Offset delta) {
     final next = [..._liveCorners];
     next[index] = _clampToImage(next[index] + delta);
-    setState(() => _liveCorners = next);
-    widget.onChanged(next);
+    _commit(next);
+  }
+
+  void _commit(List<Offset> corners) {
+    final sorted = sortCornersIfConvex([...corners]);
+    setState(() => _liveCorners = sorted);
+    widget.onChanged([...sorted]);
   }
 
   Rect _handleTargetRect(Offset displayPos, Size containerSize) {

@@ -130,6 +130,9 @@ class CornerAdjustScreen extends StatefulWidget {
 class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
+  // Detected, saved or full-image corners: what a double-tap restores.
+  List<Offset>? _startCorners;
+  CropProblem? _cropProblem;
   bool _showFullImageNotice = false;
   // Kept in the tree while the notice fades out after the first adjustment.
   bool _fullImageNoticeMounted = false;
@@ -197,12 +200,16 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         candidateCorners = detection.value;
       }
       final hasCorners = _hasRenderableCorners(candidateCorners);
-      final corners = hasCorners ? candidateCorners! : _fullBoundsCorners(size);
+      final corners = hasCorners
+          ? sortCornersIfConvex(candidateCorners!)
+          : _fullBoundsCorners(size);
 
       if (!mounted) return;
       setState(() {
         _imageSize = size;
         _corners = corners;
+        _startCorners = corners;
+        _cropProblem = cropProblem(corners);
         // Only a failed detection needs explaining.
         _showFullImageNotice = !hasCorners && widget.detectPageEdges;
         _fullImageNoticeMounted = _showFullImageNotice;
@@ -265,20 +272,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || generation != _previewGeneration) return;
 
-    // Keep geometry failures separate from decoder/backend failures so the
-    // recovery guidance matches what the user can actually fix.
-    try {
-      calculateWarpSize(
-        corners,
-        maxPixels: maxPreviewWarpPixels,
-        maxEdge: maxPreviewWarpEdge,
-      );
-    } on ArgumentError {
+    // Geometry problems are explained in place on the canvas, where the
+    // user can fix them; only decoder/backend failures need a message.
+    final problem = cropProblem(corners);
+    if (problem != null) {
       if (!mounted || generation != _previewGeneration) return;
-      setState(() => _isGeneratingPreviews = false);
-      _showError(
-        'Could not preview this crop. Adjust the corners and try again.',
-      );
+      setState(() {
+        _isGeneratingPreviews = false;
+        _cropProblem = problem;
+      });
       return;
     }
 
@@ -351,7 +353,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   Future<void> _goToFilterStep() async {
-    if (!mounted || _isLeaving || _isProcessing) return;
+    if (!mounted || _isLeaving || _isProcessing || _cropProblem != null) {
+      return;
+    }
     if (_filterPreviews == null) {
       await _updatePreviews();
       if (!mounted || _isLeaving || _filterPreviews == null) return;
@@ -607,9 +611,17 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               imageSize: imageSize,
               corners: corners,
               onChanged: _setCrop,
+              onReset: _resetCrop,
             ),
           ),
-          if (_fullImageNoticeMounted) _fullImageNotice(context),
+          if (_cropProblem != null)
+            _canvasNotice(
+              context,
+              key: const Key('crop_problem'),
+              message: _cropProblemMessage(_cropProblem!),
+            )
+          else if (_fullImageNoticeMounted)
+            _fullImageNotice(context),
         ],
       ),
     );
@@ -638,7 +650,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             const SizedBox(width: 16),
             Expanded(
               child: FilledButton(
-                onPressed: _isGeneratingPreviews || _isLeaving || _isProcessing
+                onPressed:
+                    _isGeneratingPreviews ||
+                        _isLeaving ||
+                        _isProcessing ||
+                        _cropProblem != null
                     ? null
                     : _goToFilterStep,
                 child: _isGeneratingPreviews
@@ -693,7 +709,34 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   /// size when the notice fades after the first adjustment. Inset
   /// horizontally to stay clear of the top corner handles, and ignores
   /// pointers so a drag that starts beneath it still reaches the canvas.
-  Widget _fullImageNotice(BuildContext context) {
+  Widget _fullImageNotice(BuildContext context) => _canvasNotice(
+    context,
+    key: const Key('full_image_notice'),
+    message: 'No page edges detected. Full image selected.',
+    visible: _showFullImageNotice,
+    onHidden: () {
+      if (mounted && !_showFullImageNotice) {
+        setState(() => _fullImageNoticeMounted = false);
+      }
+    },
+  );
+
+  static String _cropProblemMessage(CropProblem problem) =>
+      '${switch (problem) {
+        CropProblem.cornersCross => 'Corners cross each other.',
+        CropProblem.cornerInside => 'A corner is inside the crop.',
+        CropProblem.areaTooSmall => 'Area too small.',
+      }} Double-tap the image to reset.';
+
+  /// A pill over the top of the canvas. It never takes layout space and
+  /// ignores pointers, so drags beneath it still reach the handles.
+  Widget _canvasNotice(
+    BuildContext context, {
+    required Key key,
+    required String message,
+    bool visible = true,
+    VoidCallback? onHidden,
+  }) {
     final scheme = Theme.of(context).colorScheme;
     return Positioned(
       top: 8,
@@ -701,16 +744,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       right: 56,
       child: IgnorePointer(
         child: AnimatedOpacity(
-          opacity: _showFullImageNotice ? 1 : 0,
+          opacity: visible ? 1 : 0,
           duration: const Duration(milliseconds: 200),
-          onEnd: () {
-            if (mounted && !_showFullImageNotice) {
-              setState(() => _fullImageNoticeMounted = false);
-            }
-          },
+          onEnd: onHidden,
           child: Center(
             child: Material(
-              key: const Key('full_image_notice'),
+              key: key,
               color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
               elevation: 1,
               borderRadius: BorderRadius.circular(16),
@@ -722,7 +761,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 child: Semantics(
                   liveRegion: true,
                   child: Text(
-                    'No page edges detected. Full image selected.',
+                    message,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
@@ -738,9 +777,17 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   void _setCrop(List<Offset> corners) {
     setState(() {
       _corners = corners;
+      _cropProblem = cropProblem(corners);
       _showFullImageNotice = false;
     });
     unawaited(_updatePreviews());
+  }
+
+  void _resetCrop() {
+    final start = _startCorners;
+    if (start == null || _isProcessing || _isLeaving) return;
+    // A fresh list so the overlay resyncs its live corners.
+    _setCrop([...start]);
   }
 
   Widget _resetAdjustmentsButton({required VoidCallback onSheetChanged}) =>

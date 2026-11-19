@@ -80,14 +80,25 @@ void main() {
 
     expect(find.text('Preview page'), findsOneWidget);
     expect(operations.previewsRequested.isCompleted, isFalse);
-    tester
-        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Preview page'))
-        .onPressed!();
+    // Explained in place, not with a message that covers the actions.
+    expect(
+      find.text('A corner is inside the crop. Double-tap the image to reset.'),
+      findsOneWidget,
+    );
+    expect(find.byType(SnackBar), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Preview page'),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('Preview page'), warnIfMissed: false);
     await tester.pump();
 
     expect(find.text('Edit page'), findsOneWidget);
     expect(find.text('Appearance'), findsNothing);
-    expect(find.textContaining('Could not preview this crop'), findsOneWidget);
   });
 
   testWidgets('malformed initial corners fall back without crashing', (
