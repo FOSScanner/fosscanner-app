@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import 'package:fosscanner/services/app_preferences.dart';
 import 'package:fosscanner/services/pdf_document_saver.dart';
 import 'package:fosscanner/services/pdf_export_files.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -42,6 +43,15 @@ class _Target implements PdfSaveTarget {
   String? header;
   String? path;
   var discarded = 0;
+  final renameRequests = <String>[];
+  // Whether the provider supports renaming.
+  bool canRename = true;
+
+  @override
+  Future<String?> rename(String fileName) async {
+    renameRequests.add(fileName);
+    return canRename ? fileName : null;
+  }
 
   @override
   Future<void> write(File pdf) {
@@ -55,7 +65,9 @@ class _Target implements PdfSaveTarget {
 }
 
 class _Saver implements PdfDocumentSaver {
-  final chosenName = 'My scan.pdf';
+  // Null keeps the suggested name, as when the user does not rename it.
+  String? chosenName = 'My scan.pdf';
+  bool canRename = true;
   Completer<bool> picked = Completer<bool>();
   String? suggestedName;
   // Whether an export existed when the picker opened.
@@ -71,7 +83,7 @@ class _Saver implements PdfDocumentSaver {
     suggestedName = fileName;
     exportExistedAtPick = exportsRemain?.call();
     if (!await picked.future) return null;
-    return target = _Target(chosenName);
+    return target = _Target(chosenName ?? fileName)..canRename = canRename;
   }
 }
 
@@ -102,6 +114,7 @@ void main() {
     PdfDocumentSaver saver = const PlatformPdfDocumentSaver(),
     double textScale = 1,
     int pages = 1,
+    bool searchable = false,
   }) async {
     final share = _Share();
     await tester.pumpWidget(
@@ -113,7 +126,12 @@ void main() {
           child: child!,
         ),
         home: ScannerHomePage(
-          searchablePdfEnabled: false,
+          searchablePdfEnabled: searchable,
+          preferencesStore: searchable
+              ? MemoryAppPreferencesStore(
+                  const AppPreferences(searchablePdf: true),
+                )
+              : null,
           sharePlus: SharePlus.custom(share),
           temporaryDirectory: () async => cache,
           documentSaver: saver,
@@ -233,6 +251,81 @@ void main() {
     expect(find.textContaining('/data'), findsNothing);
     expect(exportsRemain(), isFalse);
     expect(saver.target!.discarded, 1);
+  });
+
+  group('an image-only fallback after a failed searchable export', () {
+    // OCR has no native side in tests, so every searchable export fails.
+    Future<_Target> saveWithFallback(WidgetTester tester, _Saver saver) async {
+      await pumpHome(tester, saver: saver, searchable: true);
+      await tester.tap(saveButton());
+      await pumpUntil(tester, () => saver.suggestedName != null, settle: false);
+      expect(saver.suggestedName, endsWith(' (searchable).pdf'));
+      saver.picked.complete(true);
+      await pumpUntilFound(
+        tester,
+        find.text('Export image-only PDF'),
+        settle: false,
+      );
+      await tester.tap(find.text('Export image-only PDF'));
+      await pumpUntil(tester, () => saver.target?.path != null, settle: false);
+      saver.target!.outcome.complete();
+      await tester.pumpAndSettle();
+      return saver.target!;
+    }
+
+    testWidgets('drops " (searchable)" from the suggested name', (
+      tester,
+    ) async {
+      final saver = _Saver()..chosenName = null;
+      final target = await saveWithFallback(tester, saver);
+      final plain = saver.suggestedName!.replaceFirst(' (searchable)', '');
+      expect(target.renameRequests, [plain]);
+      expect(target.path, isNot(contains('searchable')));
+      expect(find.text('Saved “$plain”'), findsOneWidget);
+    });
+
+    testWidgets('keeps a name the user typed', (tester) async {
+      final saver = _Saver();
+      final target = await saveWithFallback(tester, saver);
+      expect(target.renameRequests, isEmpty);
+      expect(find.text('Saved “My scan.pdf”'), findsOneWidget);
+    });
+
+    testWidgets('keeps the name where the provider cannot rename', (
+      tester,
+    ) async {
+      final saver = _Saver()
+        ..chosenName = null
+        ..canRename = false;
+      final target = await saveWithFallback(tester, saver);
+      expect(target.renameRequests, hasLength(1));
+      expect(find.text('Saved “${saver.suggestedName}”'), findsOneWidget);
+    });
+  });
+
+  testWidgets('a searchable save that succeeds is not renamed', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    const channel = MethodChannel('com.fosscanner.app/ocr');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method != 'createSearchablePdf') return null;
+      final output = File('${(call.arguments as Map)['outputPath']}.pdf');
+      output.writeAsStringSync('%PDF-1.5\nfixture\n%%EOF');
+      return output.path;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final saver = _Saver()..chosenName = null;
+    await pumpHome(tester, saver: saver, searchable: true);
+    await tester.tap(saveButton());
+    await pumpUntil(tester, () => saver.suggestedName != null, settle: false);
+    saver.picked.complete(true);
+    await pumpUntil(tester, () => saver.target?.path != null, settle: false);
+    saver.target!.outcome.complete();
+    await pumpUntilFound(tester, find.text('Saved “${saver.suggestedName}”'));
+    debugDefaultTargetPlatformOverride = null;
+    expect(saver.target!.renameRequests, isEmpty);
   });
 
   testWidgets('the channel contract reaches MainActivity', (tester) async {

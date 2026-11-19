@@ -88,6 +88,20 @@ String pdfExportFileName(DateTime time, {required bool searchable}) {
   );
 }
 
+const _searchableSuffix = ' (searchable).pdf';
+
+/// [fileName] without the ` (searchable)` marker [pdfExportFileName] adds,
+/// for an export that fell back to an image-only PDF; null when [fileName]
+/// does not end with it (for example because the user renamed the file).
+String? withoutSearchableSuffix(String fileName) {
+  if (!fileName.toLowerCase().endsWith(_searchableSuffix)) return null;
+  final base = fileName.substring(
+    0,
+    fileName.length - _searchableSuffix.length,
+  );
+  return base.trim().isEmpty ? null : sanitizePdfFileName('$base.pdf');
+}
+
 const _maxFileNameBaseLength = 100;
 
 /// Makes [name] safe as a single file name on Android, iOS and common

@@ -81,6 +81,17 @@ void main() {
       );
     });
 
+    test('an image-only fallback drops only the searchable marker', () {
+      expect(
+        withoutSearchableSuffix('Scan 2026-11-19 14-05 (searchable).pdf'),
+        'Scan 2026-11-19 14-05.pdf',
+      );
+      expect(withoutSearchableSuffix('Taxes (Searchable).PDF'), 'Taxes.pdf');
+      expect(withoutSearchableSuffix('Scan 2026-11-19 14-05.pdf'), isNull);
+      expect(withoutSearchableSuffix('Taxes (searchable) v2.pdf'), isNull);
+      expect(withoutSearchableSuffix(' (searchable).pdf'), isNull);
+    });
+
     test('sanitizing removes separators, reserved and control characters', () {
       expect(
         sanitizePdfFileName('a/b\\c:d*e?f"g<h>i|j.pdf'),

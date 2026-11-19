@@ -2074,9 +2074,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           );
         }
       } else {
-        await saveTarget!.write(pdf.file);
+        var savedName = saveTarget!.fileName;
+        // The location was chosen for a searchable PDF. After an image-only
+        // fallback, drop the suggested " (searchable)" where the provider
+        // can rename; a name the user typed is kept as is.
+        if (useOcr && !pdf.searchable) {
+          final plainName = withoutSearchableSuffix(savedName);
+          if (plainName != null) {
+            savedName = await saveTarget.rename(plainName) ?? savedName;
+          }
+        }
+        await saveTarget.write(pdf.file);
         saved = true;
-        if (mounted) _showMessage('Saved “${saveTarget.fileName}”');
+        if (mounted) _showMessage('Saved “$savedName”');
       }
     } catch (error) {
       if (ocr_service.isCancellation(error) ||

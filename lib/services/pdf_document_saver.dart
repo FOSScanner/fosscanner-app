@@ -23,6 +23,13 @@ abstract interface class PdfSaveTarget {
   /// The file name the user chose, for confirmation messages.
   String get fileName;
 
+  /// Renames the chosen document to [fileName] before [write], best effort.
+  ///
+  /// Returns the name the document now has, or null when it keeps
+  /// [this.fileName] (the provider cannot rename documents, or the rename
+  /// failed). Never throws.
+  Future<String?> rename(String fileName);
+
   /// Copies [pdf] to the location. Throws on failure, leaving no partial
   /// document behind.
   Future<void> write(File pdf);
@@ -68,6 +75,18 @@ class _PlatformSaveTarget implements PdfSaveTarget {
 
   @override
   final String fileName;
+
+  @override
+  Future<String?> rename(String fileName) async {
+    try {
+      // Keep the contract in sync with MainActivity.handleRenameSaveTarget.
+      final renamed = await PlatformPdfDocumentSaver._channel
+          .invokeMethod<String>('renameSaveTarget', {'fileName': fileName});
+      return renamed != null && renamed.trim().isNotEmpty ? renamed : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   Future<void> write(File pdf) async {

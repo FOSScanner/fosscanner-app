@@ -211,6 +211,7 @@ class MainActivity : FlutterActivity() {
                 "cancelSearchablePdf" -> handleCancelSearchablePdf(result)
                 "copyRecognizedText" -> handleCopyRecognizedText(call, result)
                 "chooseSaveTarget" -> handleChooseSaveTarget(call, result)
+                "renameSaveTarget" -> handleRenameSaveTarget(call, result)
                 "writeSaveTarget" -> handleWriteSaveTarget(call, result)
                 "discardSaveTarget" -> {
                     discardSaveTarget()
@@ -556,6 +557,38 @@ class MainActivity : FlutterActivity() {
             pendingSaveTarget = null
             result.error("save_unavailable", "No document picker is available", null)
         }
+    }
+
+    // Renames the chosen, still empty document, e.g. when a searchable export
+    // fell back to an image-only PDF. Best effort: many providers cannot
+    // rename. Replies with the document's new name, or null when unchanged.
+    private fun handleRenameSaveTarget(call: MethodCall, result: MethodChannel.Result) {
+        val destination = saveTarget
+        val requested = call.argument<String>("fileName")
+        if (destination == null || requested.isNullOrBlank()) {
+            result.success(null)
+            return
+        }
+        val title = PdfExportContract.documentTitle(requested)
+        val resolver = applicationContext.contentResolver
+        Thread {
+            val renamed = try {
+                DocumentsContract.renameDocument(resolver, destination, title)
+            } catch (_: Exception) {
+                null
+            }
+            val name = renamed?.let { PdfExportContract.savedName(displayNameOf(it)) ?: title }
+            mainHandler.post {
+                // Only adopt the new location if the target was not used or
+                // discarded meanwhile.
+                if (renamed != null && saveTarget == destination) {
+                    saveTarget = renamed
+                    result.success(name)
+                } else {
+                    result.success(null)
+                }
+            }
+        }.start()
     }
 
     private fun handleWriteSaveTarget(call: MethodCall, result: MethodChannel.Result) {
