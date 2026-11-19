@@ -427,6 +427,15 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // The reader draws nothing until its camera is running, which
+          // takes a moment on opening and after returning from the image
+          // picker; a dark backdrop then stands in for the preview instead
+          // of the light page background.
+          if (cameraError == null)
+            const ColoredBox(
+              key: Key('barcode_camera_backdrop'),
+              color: Colors.black,
+            ),
           if (cameraError == null)
             Offstage(
               // Keep the camera state, but hide its controls and semantics

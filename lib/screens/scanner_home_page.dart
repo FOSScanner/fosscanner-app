@@ -208,6 +208,7 @@ class ScannerHomePage extends StatefulWidget {
     this.temporaryDirectory = getTemporaryDirectory,
     this.documentSaver = const PlatformPdfDocumentSaver(),
     this.appSettingsOpener = openAppSettings,
+    this.cameraPromptCheck = canPromptForCamera,
     this.interruptedSaveRemover,
     this.reviewJournal,
   });
@@ -237,6 +238,10 @@ class ScannerHomePage extends StatefulWidget {
 
   /// Opens the app's system settings, to turn camera access back on.
   final AppSettingsOpener appSettingsOpener;
+
+  /// Tells a first camera denial, which the system will ask about again,
+  /// from one made for good, which only settings can undo.
+  final CameraPromptCheck cameraPromptCheck;
 
   /// Removes the empty document of a save an earlier run never finished, and
   /// reports whether there was one. Null where saving is unsupported.
@@ -1069,16 +1074,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  /// Whether the camera was denied for good, so only the settings page can
+  /// turn it back on. Asked after each denial: the answer changes with it.
+  /// Where the platform cannot tell, a denial is treated as final.
+  Future<bool> _isCameraDeniedForGood() async {
+    try {
+      return await widget.cameraPromptCheck() != true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   bool _isDefinitiveCameraUnavailable(Object error) =>
       error is PlatformException &&
       const {'camera-unavailable', 'no_available_camera'}.contains(error.code);
 
-  Future<_CameraRecovery?> _showCameraFailure(Object error) {
+  /// [deniedForGood] is false after a first denial that the system will
+  /// still ask about again: Retry then shows the system prompt.
+  Future<_CameraRecovery?> _showCameraFailure(
+    Object error, {
+    bool deniedForGood = true,
+  }) {
     final code = error is PlatformException ? error.code : null;
     final unavailable = _isDefinitiveCameraUnavailable(error);
+    final denied = code == 'camera_access_denied';
     final needsSettings =
-        code == 'camera_access_denied' || code == 'camera_access_restricted';
+        (denied && deniedForGood) || code == 'camera_access_restricted';
     final message = switch (code) {
+      'camera_access_denied' when !deniedForGood =>
+        '$cameraAccessNeededMessage You can also import images.',
       'camera_access_denied' =>
         '$cameraAccessOffMessage You can also import images.',
       'camera_access_restricted' =>
@@ -1103,7 +1127,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             child: const Text('Import images'),
           ),
           // Once denied for good, only the settings page can turn it back on.
-          if (code == 'camera_access_denied' && canOpenAppSettings)
+          if (denied && deniedForGood && canOpenAppSettings)
             TextButton(
               onPressed: () => Navigator.pop(context, _CameraRecovery.settings),
               child: const Text('Open settings'),
@@ -1211,7 +1235,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (_isDefinitiveCameraUnavailable(error)) {
         setState(() => _cameraSupported = false);
       }
-      recovery = await _showCameraFailure(error);
+      final deniedForGood =
+          error is PlatformException &&
+          error.code == 'camera_access_denied' &&
+          await _isCameraDeniedForGood();
+      if (!mounted) return;
+      recovery = await _showCameraFailure(error, deniedForGood: deniedForGood);
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
       _resumeSharedImageIntake();
@@ -1568,10 +1597,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   static String _unfinishedImportMessage(int count, String noun) => count == 1
-      ? 'An interrupted import left 1 $noun unadded. Select it again to add '
-            'it.'
-      : 'An interrupted import left ${groupDigits(count)} ${noun}s unadded. '
-            'Select them again to add them.';
+      ? '1 $noun from an interrupted import wasn\'t added. Select it again '
+            'to add it.'
+      : '${groupDigits(count)} ${noun}s from an interrupted import weren\'t '
+            'added. Select them again to add them.';
 
   /// Reviews [files] one at a time, recording in [report] each file that is
   /// not added and why. Stops early when the user stops the import or the
@@ -2880,7 +2909,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// it must replace the hint in place instead of pushing the grid down.
   ///
   /// On tall screens it fits two lines of the hint at the user's text size,
-  /// so large text wraps the hint instead of cutting it off early.
+  /// or three on taller ones, so large text wraps the hint instead of
+  /// cutting it off early.
   /// Short landscape screens keep one line for the pages. The height depends
   /// only on the screen and the text size, never on the state.
   /// Image intake help shares the line, so it never moves the grid either.
@@ -2896,7 +2926,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             style: style,
             textScaler: textScaler,
             maxWidth: screen.width - 32,
-            maxLines: 2,
+            maxLines: screen.height < 600 ? 2 : 3,
           );
     final lineHeight =
         textScaler.scale(style?.fontSize ?? 12) * (style?.height ?? 1.33);
@@ -2984,21 +3014,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         80 + 16 + textScaler.scale(32) + 8 + textScaler.scale(40) + 24 + 48;
     return LayoutBuilder(
       builder: (context, constraints) {
-        // The space the page grid keeps free for the camera button is
-        // scroll padding here: the content centers above the button and can
-        // always be scrolled clear of it.
+        // Like the page grid, the content ends above the camera button on
+        // tall screens and keeps a column beside it on short ones, so
+        // nothing is ever under the button, scrolled or not. Content taller
+        // than that scrolls.
         final geometry = _pageGridGeometry(constraints.biggest);
         final besideCamera = geometry.padding.end > _pageGridSpacing
             ? geometry.padding.end
             : 0.0;
         final height = constraints.maxHeight - geometry.cameraInset;
-        return _buildEmptyStateContent(
-          context,
-          padding: EdgeInsetsDirectional.fromSTEB(
-            32,
-            math.max(32, (height - readyHeight) / 2),
-            math.max(32, besideCamera),
-            32 + geometry.cameraInset,
+        return Padding(
+          padding: EdgeInsets.only(bottom: geometry.cameraInset),
+          child: _buildEmptyStateContent(
+            context,
+            padding: EdgeInsetsDirectional.fromSTEB(
+              32,
+              math.max(32, (height - readyHeight) / 2),
+              math.max(32, besideCamera),
+              32,
+            ),
           ),
         );
       },
@@ -3215,7 +3249,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       position.minScrollExtent,
       position.maxScrollExtent,
     );
-    if ((target - position.pixels).abs() < 0.5) return;
+    // Even the last fraction of a pixel, so the grid reaches its very edge.
+    if (target == position.pixels) return;
     _gridScroll.jumpTo(target);
     _autoScrolledSinceDragMove = true;
   }
@@ -3261,13 +3296,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// that last reported the hover is no longer the one under the finger, and
   /// the dragged card itself may have been scrolled out and disposed. The
   /// grid then finds the card under the finger itself, before the drag ends.
+  ///
+  /// A disposed card never reports the end of its drag, so the drag is
+  /// forgotten here: otherwise the next scroll's lifted finger would drop
+  /// the page again and jump the grid back to it.
   void _onGridPointerUp() {
     _stopAutoScroll();
     final from = _draggedIndex;
     final position = _dragPosition;
-    if (from == null || position == null || !_autoScrolledSinceDragMove) {
-      return;
-    }
+    final autoScrolled = _autoScrolledSinceDragMove;
+    _draggedIndex = null;
+    _dragPosition = null;
+    _autoScrolledSinceDragMove = false;
+    if (from == null || position == null || !autoScrolled) return;
+    // Until the next drag starts, so a drop target that still accepts this
+    // drag does not move the page a second time.
     _isDropHandledByGrid = true;
     final target = _pageIndexAt(position);
     if (target != null && target != from) _reorderPage(from, target);
@@ -3291,6 +3334,41 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   void _onPageCardTap(int index) {
     if (!_isTapGuarded) unawaited(_openPage(index));
   }
+
+  /// A card's "Page N" label. Large text shrinks towards the default size
+  /// until the longest possible label fits on one line, but never below the
+  /// default size: a label that does not fit then wraps onto a second line,
+  /// which the 48 px footer holds at the default size. Every card shares
+  /// the scale, so the labels match for any page number or count.
+  Widget _pageLabel(int index) => LayoutBuilder(
+    builder: (context, constraints) {
+      final style = Theme.of(context).textTheme.labelLarge;
+      final textScaler = MediaQuery.textScalerOf(context);
+      final fontSize = style?.fontSize ?? 14;
+      final scale = math.max(1.0, textScaler.scale(fontSize) / fontSize);
+      var fitted = scale;
+      if (constraints.hasBoundedWidth) {
+        final painter = TextPainter(
+          text: TextSpan(text: 'Page $maxDocumentPages', style: style),
+          textDirection: TextDirection.ltr,
+          textScaler: TextScaler.linear(scale),
+          maxLines: 1,
+        )..layout();
+        final width = painter.width;
+        painter.dispose();
+        if (width > constraints.maxWidth) {
+          fitted = (scale * constraints.maxWidth / width).clamp(1.0, scale);
+        }
+      }
+      return Text(
+        'Page ${index + 1}',
+        maxLines: fitted > 1 ? 1 : 2,
+        overflow: TextOverflow.ellipsis,
+        textScaler: TextScaler.linear(fitted),
+        style: style,
+      );
+    },
+  );
 
   Widget _buildPageCard(BuildContext context, int index, Size cardSize) {
     final page = _pages[index];
@@ -3342,17 +3420,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   children: [
                     Expanded(
                       child: IgnorePointer(
-                        child: ExcludeSemantics(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              'Page ${index + 1}',
-                              maxLines: 1,
-                              style: Theme.of(context).textTheme.labelLarge,
-                            ),
-                          ),
-                        ),
+                        child: ExcludeSemantics(child: _pageLabel(index)),
                       ),
                     ),
                     // A popup menu opens on tap before any callback could

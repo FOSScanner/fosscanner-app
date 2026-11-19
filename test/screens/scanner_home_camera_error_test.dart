@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import 'package:fosscanner/services/app_settings.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 class _Picker extends ImagePickerPlatform {
@@ -51,7 +52,12 @@ void main() {
   });
 
   Future<void> openCamera(WidgetTester tester) async {
-    await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
+    await tester.pumpWidget(
+      MaterialApp(
+        // No platform answer: a denial counts as final.
+        home: ScannerHomePage(cameraPromptCheck: () async => null),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Scan a page'));
     await tester.pumpAndSettle();
@@ -137,6 +143,7 @@ void main() {
               settingsOpened++;
               return true;
             },
+            cameraPromptCheck: () async => false,
           ),
         ),
       );
@@ -148,6 +155,36 @@ void main() {
       expect(settingsOpened, 1);
       expect(find.byType(AlertDialog), findsNothing);
       expect(picker.cameraCalls, 1);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets(
+    'a first denial offers Retry, and settings only once denied for good',
+    (tester) async {
+      picker.error = PlatformException(code: 'camera_access_denied');
+      var checks = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            appSettingsOpener: () async => true,
+            // Android would still ask after the first denial only.
+            cameraPromptCheck: () async => ++checks == 1,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Scan a page'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(cameraAccessNeededMessage), findsOneWidget);
+      expect(find.text('Open settings'), findsNothing);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(picker.cameraCalls, 2);
+      expect(find.textContaining(cameraAccessOffMessage), findsOneWidget);
+      expect(find.text('Open settings'), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );

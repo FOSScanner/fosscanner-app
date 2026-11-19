@@ -288,8 +288,8 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
       expect(
         find.text(
-          'An interrupted import left 7 images unadded. Select them again to '
-          'add them.',
+          "7 images from an interrupted import weren't added. Select them "
+          'again to add them.',
         ),
         findsOneWidget,
       );

@@ -7,7 +7,14 @@ import 'package:flutter/services.dart' show MethodChannel;
 /// could not be opened.
 typedef AppSettingsOpener = Future<bool> Function();
 
-/// Shown wherever the camera is blocked because access was denied.
+/// Whether the system would still ask for camera access: true after a first
+/// denial, false once it was denied for good, null when unknown.
+typedef CameraPromptCheck = Future<bool?> Function();
+
+/// Shown after a denial the system will still ask about again.
+const cameraAccessNeededMessage = 'Camera access is needed to scan.';
+
+/// Shown wherever the camera is blocked because access was denied for good.
 const cameraAccessOffMessage =
     'Camera access was denied. Allow camera access for FOSScanner in your '
     'device settings before trying again.';
@@ -31,5 +38,17 @@ Future<bool> openAppSettings() async {
     return await _channel.invokeMethod<bool>('openAppSettings') ?? false;
   } catch (_) {
     return false;
+  }
+}
+
+/// Asks Android whether it would show the camera permission prompt again
+/// (Activity.shouldShowRequestPermissionRationale). Null elsewhere, or when
+/// the answer is not available.
+Future<bool?> canPromptForCamera() async {
+  if (!canOpenAppSettings) return null;
+  try {
+    return await _channel.invokeMethod<bool>('shouldShowCameraRationale');
+  } catch (_) {
+    return null;
   }
 }

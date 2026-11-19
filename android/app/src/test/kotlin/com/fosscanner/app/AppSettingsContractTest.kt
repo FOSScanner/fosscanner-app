@@ -8,6 +8,7 @@ class AppSettingsContractTest {
     @Test fun matchesTheDartChannel() {
         assertEquals("com.fosscanner.app/app_settings", AppSettingsContract.CHANNEL)
         assertEquals("openAppSettings", AppSettingsContract.OPEN_METHOD)
+        assertEquals("shouldShowCameraRationale", AppSettingsContract.CAMERA_RATIONALE_METHOD)
     }
 
     @Test fun pointsTheDetailsPageAtThisPackage() {

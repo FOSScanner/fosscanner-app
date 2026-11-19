@@ -89,4 +89,54 @@ void main() {
     expect(await openAppSettings(), isFalse);
     expect(calls, isEmpty);
   });
+
+  test('the camera prompt check reaches MainActivity', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    const channel = MethodChannel('com.fosscanner.app/app_settings');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    Object? reply = true;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (reply case final Exception error) throw error;
+      return reply;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    expect(await canPromptForCamera(), isTrue);
+    expect(calls.single.method, 'shouldShowCameraRationale');
+    reply = false;
+    expect(await canPromptForCamera(), isFalse);
+    reply = PlatformException(code: 'x');
+    expect(await canPromptForCamera(), isNull);
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    calls.clear();
+    expect(await canPromptForCamera(), isNull);
+    expect(calls, isEmpty);
+  });
+
+  // The reader draws nothing until its camera runs again after the
+  // picker returns; the screen must not flash its light background.
+  testWidgets('a dark backdrop stands in for a preview that is not ready', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BarcodeScanScreen(
+          scanViewBuilder: (context, onScan) => const SizedBox.shrink(),
+          imageScanner: () async => null,
+        ),
+      ),
+    );
+    final body = tester.getRect(find.byType(Stack).first);
+    final backdrop = find.byKey(const Key('barcode_camera_backdrop'));
+    expect(tester.getRect(backdrop), body);
+    expect(tester.widget<ColoredBox>(backdrop).color, Colors.black);
+    await scanImage(tester);
+    expect(tester.getRect(backdrop), body);
+  });
 }

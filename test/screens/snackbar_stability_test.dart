@@ -55,6 +55,7 @@ void main() {
         home: ScannerHomePage(
           searchablePdfEnabled: false,
           appSettingsOpener: () async => true,
+          cameraPromptCheck: () async => false,
           initialPages: [
             for (var i = 0; i < pages; i++)
               ScannedPage(

@@ -1,5 +1,6 @@
 package com.fosscanner.app
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -264,6 +265,9 @@ class MainActivity : FlutterActivity() {
         appSettingsChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 AppSettingsContract.OPEN_METHOD -> result.success(openAppSettings())
+                // True after a first denial; false once denied for good.
+                AppSettingsContract.CAMERA_RATIONALE_METHOD ->
+                    result.success(shouldShowRequestPermissionRationale(Manifest.permission.CAMERA))
                 else -> result.notImplemented()
             }
         }

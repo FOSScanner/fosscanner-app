@@ -150,19 +150,33 @@ void main() {
   );
 
   // #160
-  testLayoutMatrix('page labels stay on one line', (tester, layoutCase) async {
-    await pumpHome(tester, layoutCase, pageCount: 12);
-    // Material 3 labelLarge: 14 px on a 20 px line.
-    final lineHeight = layoutCase.textScale * 20;
-    for (final index in [0, 1, 9, 10, 11]) {
-      final label = find.text('Page ${index + 1}');
-      await tester.scrollUntilVisible(label, 100);
-      final paragraph = tester.renderObject<RenderParagraph>(label);
-      expect(paragraph.size.height, lessThan(lineHeight * 1.5));
-      expect(paragraph.didExceedMaxLines, isFalse);
-    }
-    expect(tester.takeException(), isNull);
-  }, cases: [..._largeDisplayCases, ...layoutMatrix]);
+  // #160: large text may shrink a label to fit, but never below the default
+  // size; a label that still does not fit wraps inside the footer.
+  testLayoutMatrix(
+    'page labels keep at least the default size',
+    (tester, layoutCase) async {
+      await pumpHome(tester, layoutCase, pageCount: 12);
+      // Material 3 labelLarge: 14 px on a 20 px line.
+      double? sharedScale;
+      for (final index in [0, 1, 9, 10, 11]) {
+        final label = find.text('Page ${index + 1}');
+        await tester.scrollUntilVisible(label, 100);
+        final paragraph = tester.renderObject<RenderParagraph>(label);
+        final scale = paragraph.textScaler.scale(14) / 14;
+        expect(scale, greaterThanOrEqualTo(1));
+        expect(scale, lessThanOrEqualTo(layoutCase.textScale));
+        sharedScale ??= scale;
+        expect(scale, sharedScale, reason: 'page ${index + 1}');
+        // One line at a larger size, or up to two at the default size: both
+        // fit the 48 px footer.
+        final lines = paragraph.maxLines!;
+        expect(lines, scale > 1 ? 1 : 2);
+        expect(paragraph.size.height, lessThanOrEqualTo(48));
+      }
+      expect(tester.takeException(), isNull);
+    },
+    cases: [..._largeDisplayCases, ...layoutMatrix],
+  );
 
   testLayoutMatrix('the dragged copy of a card has the card\'s size', (
     tester,

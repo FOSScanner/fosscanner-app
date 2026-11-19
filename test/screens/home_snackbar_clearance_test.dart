@@ -281,4 +281,46 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  // #169: the card of a page dragged far enough is disposed and never ends
+  // its drag; the next scroll must neither drop the page again nor jump the
+  // grid back to it, so the last row stays reachable.
+  for (final layoutCase in [
+    const LayoutCase(Size(390, 844), 1.0),
+    const LayoutCase(Size(412, 915), 2.0),
+  ]) {
+    testWidgets('the last row stays reachable after dragging the last page '
+        'to the top [$layoutCase]', (tester) async {
+      applyLayoutCase(tester, layoutCase);
+      await pumpHome(tester, layoutCase, pageCount: 20);
+      final grid = tester.getRect(find.byType(GridView));
+      final position = gridPosition(tester);
+      await scrollToEnd(tester);
+
+      final column = tester.getRect(card(19)).center.dx;
+      final gesture = await tester.startGesture(
+        tester.getRect(card(19)).center,
+      );
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      await gesture.moveTo(Offset(column, grid.top + 16));
+      for (var i = 0; i < 600 && position.pixels > 0; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(position.pixels, 0);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.saves.last.indexOf(pages[19]), 1);
+      final saves = store.saves.length;
+
+      await tester.fling(find.byType(GridView), const Offset(0, -3000), 3000);
+      await tester.pumpAndSettle();
+      await tester.fling(find.byType(GridView), const Offset(0, -3000), 3000);
+      await tester.pumpAndSettle();
+      expect(store.saves, hasLength(saves), reason: 'a scroll moved a page');
+      expect(position.pixels, position.maxScrollExtent);
+      final last = tester.getRect(card(19));
+      expect(last.bottom, lessThanOrEqualTo(grid.bottom + 0.5));
+      expect(tester.takeException(), isNull);
+    });
+  }
 }

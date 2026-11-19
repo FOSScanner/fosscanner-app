@@ -126,6 +126,38 @@ void main() {
     cases: [...largeDisplayCases, ...layoutMatrix],
   );
 
+  // #160: before any scrolling, too.
+  testLayoutMatrix(
+    'the empty-state gallery button is never under the camera button',
+    (tester, layoutCase) async {
+      await pumpHome(tester, layoutCase, pageCount: 0);
+      final button = find.widgetWithText(OutlinedButton, 'Import from gallery');
+      final scrollView = find.ancestor(
+        of: button,
+        matching: find.byType(SingleChildScrollView),
+      );
+      final cameraRect = tester.getRect(camera);
+      for (final offset in [0.0, 120.0, 2000.0]) {
+        if (offset > 0) {
+          await tester.drag(scrollView, Offset(0, -offset));
+          await tester.pumpAndSettle();
+        }
+        final visible = tester
+            .getRect(button)
+            .intersect(tester.getRect(scrollView));
+        expect(
+          visible.width > 0 &&
+              visible.height > 0 &&
+              visible.overlaps(cameraRect.deflate(0.5)),
+          isFalse,
+          reason: 'scrolled by $offset',
+        );
+      }
+      expect(tester.takeException(), isNull);
+    },
+    cases: [...largeDisplayCases, ...layoutMatrix],
+  );
+
   testLayoutMatrix(
     'the export label shows the page count',
     (tester, layoutCase) async {
@@ -176,10 +208,12 @@ void main() {
         find.text('Drafts are temporary. Export a PDF to keep a copy.'),
       );
       if (layoutCase.size.height >= 480) {
-        // Tall screens wrap the hint over two lines. The test font is about
-        // twice as wide as Roboto, so at 2.0× it can need more.
+        // Tall screens wrap the hint over two lines, taller ones over three.
+        // The test font is about twice as wide as Roboto, so at 2.0× it can
+        // need more.
         expect(
-          !hint.didExceedMaxLines || hint.maxLines == 2,
+          !hint.didExceedMaxLines ||
+              hint.maxLines == (layoutCase.size.height < 600 ? 2 : 3),
           isTrue,
           reason: 'cut off after ${hint.maxLines} lines',
         );
