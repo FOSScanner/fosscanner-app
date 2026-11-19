@@ -391,7 +391,10 @@ void main() {
       await tester.pumpAndSettle();
       debugDefaultTargetPlatformOverride = null;
 
-      expect(find.text('Could not open the camera.'), findsOneWidget);
+      expect(find.textContaining('No camera is available'), findsOneWidget);
+      expect(find.text('Import images'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
       expect(find.byTooltip('Capture Image'), findsNothing);
       expect(find.textContaining('Import from your gallery'), findsOneWidget);
     },

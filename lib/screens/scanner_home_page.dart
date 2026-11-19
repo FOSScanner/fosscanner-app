@@ -33,6 +33,8 @@ class _DocumentCapacityException implements Exception {
 
 enum _PhotoIntakeResult { added, skipped, capacityReached }
 
+enum _CameraRecovery { retry, gallery }
+
 /// Which exporter owns the running PDF generation, and therefore how a
 /// cancellation has to reach it: the native renderer needs a channel message,
 /// the Dart image-only exporter only polls the flag this screen already sets.
@@ -386,6 +388,47 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       error is PlatformException &&
       const {'camera-unavailable', 'no_available_camera'}.contains(error.code);
 
+  Future<_CameraRecovery?> _showCameraFailure(Object error) {
+    final code = error is PlatformException ? error.code : null;
+    final unavailable = _isDefinitiveCameraUnavailable(error);
+    final needsSettings =
+        code == 'camera_access_denied' || code == 'camera_access_restricted';
+    final message = switch (code) {
+      'camera_access_denied' =>
+        'Camera access was denied. Allow camera access for FOSScanner in '
+            'your device settings before trying again. You can also import images.',
+      'camera_access_restricted' =>
+        'Camera access is restricted on this device. Check device restrictions '
+            'with your device administrator. You can still import images.',
+      _ when unavailable =>
+        'No camera is available on this device. Import images instead.',
+      _ => 'Could not open the camera. Try again or import images instead.',
+    };
+    return showDialog<_CameraRecovery>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Camera unavailable'),
+        scrollable: true,
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, _CameraRecovery.gallery),
+            child: const Text('Import images'),
+          ),
+          if (!needsSettings && !unavailable)
+            TextButton(
+              onPressed: () => Navigator.pop(context, _CameraRecovery.retry),
+              child: const Text('Retry'),
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _captureImage() async {
     if (_isRestoringDraft || _isDocumentInteractionLocked) {
       return;
@@ -395,6 +438,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return;
     }
     final documentGeneration = _documentGeneration;
+    _CameraRecovery? recovery;
     setState(() => _isPickingImages = true);
     try {
       await _imageProcessingQueue.idle;
@@ -413,12 +457,22 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         documentGeneration: documentGeneration,
       );
     } catch (error) {
-      if (_isDefinitiveCameraUnavailable(error) && mounted) {
+      if (!mounted) return;
+      if (_isDefinitiveCameraUnavailable(error)) {
         setState(() => _cameraSupported = false);
       }
-      _showMessage('Could not open the camera.');
+      recovery = await _showCameraFailure(error);
     } finally {
       if (mounted) setState(() => _isPickingImages = false);
+    }
+    if (!mounted || documentGeneration != _documentGeneration) return;
+    switch (recovery) {
+      case _CameraRecovery.retry:
+        await _captureImage();
+      case _CameraRecovery.gallery:
+        await _importFromGallery();
+      case null:
+        break;
     }
   }
 
