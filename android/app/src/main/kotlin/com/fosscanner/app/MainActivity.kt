@@ -22,6 +22,7 @@ import android.view.View
 import android.view.WindowManager
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.provider.Settings
 import com.googlecode.leptonica.android.ReadFile
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.googlecode.tesseract.android.TessPdfRenderer
@@ -46,6 +47,7 @@ class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var privacyChannel: MethodChannel? = null
     private var gestureExclusionChannel: MethodChannel? = null
+    private var appSettingsChannel: MethodChannel? = null
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
@@ -175,6 +177,19 @@ class MainActivity : FlutterActivity() {
     // FLAG_SECURE blocks screenshots, screen recording and the Recents
     // thumbnail on every API level. The choice is process-wide so it survives
     // activity recreation (rotation, theme change) until Flutter changes it.
+    // The app's details page in system settings, where a camera permission
+    // denied for good can be turned back on.
+    private fun openAppSettings(): Boolean = try {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse(AppSettingsContract.detailsUri(packageName))),
+        )
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: IllegalArgumentException) {
+        false
+    }
+
     private fun applySecureScreen() {
         if (secureScreen) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -237,6 +252,14 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Keep this contract synchronized with lib/services/app_settings.dart.
+        appSettingsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AppSettingsContract.CHANNEL)
+        appSettingsChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                AppSettingsContract.OPEN_METHOD -> result.success(openAppSettings())
+                else -> result.notImplemented()
+            }
+        }
         if (sharedImageExecutor.isShutdown) sharedImageExecutor = Executors.newSingleThreadExecutor()
         sharedImageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARED_IMAGES_CHANNEL)
         sharedImageChannel?.setMethodCallHandler { call, result ->
@@ -268,6 +291,8 @@ class MainActivity : FlutterActivity() {
         privacyChannel = null
         gestureExclusionChannel?.setMethodCallHandler(null)
         gestureExclusionChannel = null
+        appSettingsChannel?.setMethodCallHandler(null)
+        appSettingsChannel = null
         sharedImageChannel?.setMethodCallHandler(null)
         sharedImageChannel = null
         sharedImageExecutor.shutdown()

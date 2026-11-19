@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart' show CameraException;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_zxing/flutter_zxing.dart';
+import 'package:image_picker/image_picker.dart' show ImagePicker, ImageSource;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/app_settings.dart';
+import '../services/cache_copies.dart';
 import '../widgets/transient_message.dart';
 
 class BarcodeScanResult {
@@ -21,6 +26,14 @@ typedef BarcodeScanViewBuilder =
 typedef BarcodeClipboardWriter = Future<void> Function(String text);
 typedef BarcodeUriLauncher = Future<bool> Function(Uri uri);
 
+/// Picks an image and decodes a code in it. Returns null when no image was
+/// picked, and an invalid result when the image holds no readable code.
+typedef BarcodeImageScanner = Future<BarcodeScanResult?> Function();
+
+// Icons wrapped so the reader's built-in buttons get tooltips and labels.
+Widget _labeledIcon(IconData icon, String label) =>
+    Tooltip(message: label, child: Icon(icon));
+
 Widget _defaultScanView(
   BuildContext context,
   ValueChanged<BarcodeScanResult> onScan, {
@@ -31,7 +44,14 @@ Widget _defaultScanView(
   onControllerCreated: (_, error) => onCameraCreated(error),
   onScan: (code) =>
       onScan(BarcodeScanResult(isValid: code.isValid, text: code.text)),
-  showGallery: true,
+  // The screen offers its own gallery action, which reports images without
+  // a code and removes the picker's copy of the image.
+  showGallery: false,
+  flashOnIcon: _labeledIcon(Icons.flash_on, 'Turn off flashlight'),
+  flashOffIcon: _labeledIcon(Icons.flash_off, 'Turn on flashlight'),
+  flashAlwaysIcon: _labeledIcon(Icons.flash_on, 'Turn off flashlight'),
+  flashAutoIcon: _labeledIcon(Icons.flash_auto, 'Turn on flashlight'),
+  toggleCameraIcon: _labeledIcon(Icons.switch_camera, 'Switch camera'),
   // cropPercent must stay 0 here: ReaderWidget's crop-indicator square only
   // lines up with the region it actually decodes when the widget is truly
   // full-screen. See khoren93/flutter_zxing#196.
@@ -49,6 +69,27 @@ Future<void> _writeClipboard(String text) =>
 Future<bool> _launchBarcodeUri(Uri uri) =>
     launchUrl(uri, mode: LaunchMode.externalApplication);
 
+Future<BarcodeScanResult?> _scanGalleryImage() async {
+  final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+  if (file == null) return null;
+  try {
+    // The same decoder options as the camera stream.
+    final code = await zx.readBarcodeImagePath(
+      file,
+      DecodeParams(
+        imageFormat: ImageFormat.rgb,
+        tryHarder: true,
+        tryInverted: true,
+        maxNumberOfSymbols: 1,
+      ),
+    );
+    return BarcodeScanResult(isValid: code.isValid, text: code.text);
+  } finally {
+    // Android's picker copies the image into the app cache.
+    unawaited(deleteImagePickerCopy(file.path));
+  }
+}
+
 /// A live QR/barcode scanning mode, separate from the document-scan flow.
 class BarcodeScanScreen extends StatefulWidget {
   const BarcodeScanScreen({
@@ -56,11 +97,15 @@ class BarcodeScanScreen extends StatefulWidget {
     this.scanViewBuilder,
     this.clipboardWriter = _writeClipboard,
     this.uriLauncher = _launchBarcodeUri,
+    this.imageScanner = _scanGalleryImage,
+    this.appSettingsOpener = openAppSettings,
   });
 
   final BarcodeScanViewBuilder? scanViewBuilder;
   final BarcodeClipboardWriter clipboardWriter;
   final BarcodeUriLauncher uriLauncher;
+  final BarcodeImageScanner imageScanner;
+  final AppSettingsOpener appSettingsOpener;
 
   @override
   State<BarcodeScanScreen> createState() => _BarcodeScanScreenState();
@@ -69,27 +114,84 @@ class BarcodeScanScreen extends StatefulWidget {
 class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   String? _latchedResult;
   String? _cameraError;
+  bool _cameraAccessDenied = false;
   int _cameraAttempt = 0;
+  bool _isScanningImage = false;
+  // Set while the user is in the app's settings page, to retry on return.
+  bool _retryOnResume = false;
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = AppLifecycleListener(onResume: _handleResume);
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  void _handleResume() {
+    if (!_retryOnResume || !mounted) return;
+    _retryOnResume = false;
+    if (_cameraError != null) _retryCamera();
+  }
 
   void _handleCameraCreated(Exception? error, int attempt) {
     if (!mounted || attempt != _cameraAttempt || error == null) return;
-    final message = switch (error) {
+    final denied = switch (error) {
       CameraException(code: 'CameraAccessDenied') ||
-      CameraException(
-        code: 'CameraAccessDeniedWithoutPrompt',
-      ) => 'Allow camera access in your device settings, then retry.',
-      CameraException(code: 'CameraAccessRestricted') =>
-        'Camera access is restricted on this device. Check your device settings.',
-      _ => 'Could not start the camera. Check camera access and retry.',
+      CameraException(code: 'CameraAccessDeniedWithoutPrompt') => true,
+      _ => false,
     };
-    setState(() => _cameraError = message);
+    final message = switch (error) {
+      _ when denied => cameraAccessOffMessage,
+      CameraException(code: 'CameraAccessRestricted') =>
+        cameraAccessRestrictedMessage,
+      _ => 'Could not start the camera. Try again.',
+    };
+    setState(() {
+      _cameraError = message;
+      _cameraAccessDenied = denied;
+    });
   }
 
   void _retryCamera() {
     setState(() {
       _cameraError = null;
+      _cameraAccessDenied = false;
       _cameraAttempt++;
     });
+  }
+
+  Future<void> _openSettings() async {
+    _retryOnResume = true;
+    final opened = await widget.appSettingsOpener();
+    if (!opened) {
+      _retryOnResume = false;
+      if (mounted) showTransientMessage(context, 'Could not open settings.');
+    }
+  }
+
+  Future<void> _scanImage() async {
+    if (_isScanningImage) return;
+    setState(() => _isScanningImage = true);
+    try {
+      final scan = await widget.imageScanner();
+      if (!mounted || scan == null) return;
+      final text = scan.text;
+      if (!scan.isValid || text == null || text.isEmpty) {
+        showTransientMessage(context, 'No code found in this image.');
+        return;
+      }
+      _handleScan(scan);
+    } catch (_) {
+      if (mounted) showTransientMessage(context, 'Could not read this image.');
+    } finally {
+      if (mounted) setState(() => _isScanningImage = false);
+    }
   }
 
   Widget _buildCameraError(String message) => SafeArea(
@@ -111,10 +213,25 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
               child: Text(message, textAlign: TextAlign.center),
             ),
             const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _retryCamera,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: _retryCamera,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                ),
+                // After a lasting denial, Retry cannot ask again; only the
+                // app's settings page can turn camera access back on.
+                if (_cameraAccessDenied && canOpenAppSettings)
+                  OutlinedButton.icon(
+                    onPressed: _openSettings,
+                    icon: const Icon(Icons.settings_outlined),
+                    label: const Text('Open settings'),
+                  ),
+              ],
             ),
           ],
         ),
@@ -276,6 +393,12 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       appBar: AppBar(
         title: Text(result == null ? 'Scan QR / Barcode' : 'Scanned result'),
         actions: [
+          if (result == null)
+            IconButton(
+              onPressed: _isScanningImage ? null : _scanImage,
+              icon: const Icon(Icons.photo_library_outlined),
+              tooltip: 'Scan an image',
+            ),
           if (result != null)
             IconButton(
               onPressed: _dismissResult,

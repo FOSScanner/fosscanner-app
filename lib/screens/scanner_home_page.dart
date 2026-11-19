@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/app_preferences.dart';
+import '../services/app_settings.dart';
 import '../services/cache_copies.dart';
 import '../services/document_memory.dart';
 import '../services/draft_store.dart';
@@ -86,7 +87,7 @@ enum _PhotoIntakeResult {
   retake,
 }
 
-enum _CameraRecovery { retry, gallery }
+enum _CameraRecovery { retry, gallery, settings }
 
 /// Which exporter owns the running PDF generation, and therefore how a
 /// cancellation has to reach it: the native renderer needs a channel message,
@@ -186,6 +187,7 @@ class ScannerHomePage extends StatefulWidget {
     this.preferencesStore,
     this.temporaryDirectory = getTemporaryDirectory,
     this.documentSaver = const PlatformPdfDocumentSaver(),
+    this.appSettingsOpener = openAppSettings,
   });
 
   final List<ScannedPage> initialPages;
@@ -210,6 +212,9 @@ class ScannerHomePage extends StatefulWidget {
 
   /// Saves exports to device storage where the platform supports it.
   final PdfDocumentSaver documentSaver;
+
+  /// Opens the app's system settings, to turn camera access back on.
+  final AppSettingsOpener appSettingsOpener;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -894,11 +899,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         code == 'camera_access_denied' || code == 'camera_access_restricted';
     final message = switch (code) {
       'camera_access_denied' =>
-        'Camera access was denied. Allow camera access for FOSScanner in '
-            'your device settings before trying again. You can also import images.',
+        '$cameraAccessOffMessage You can also import images.',
       'camera_access_restricted' =>
-        'Camera access is restricted on this device. Check device restrictions '
-            'with your device administrator. You can still import images.',
+        '$cameraAccessRestrictedMessage You can still import images.',
       _ when unavailable =>
         'No camera is available on this device. Import images instead.',
       _ => 'Could not open the camera. Try again or import images instead.',
@@ -918,6 +921,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             onPressed: () => Navigator.pop(context, _CameraRecovery.gallery),
             child: const Text('Import images'),
           ),
+          // Once denied for good, only the settings page can turn it back on.
+          if (code == 'camera_access_denied' && canOpenAppSettings)
+            TextButton(
+              onPressed: () => Navigator.pop(context, _CameraRecovery.settings),
+              child: const Text('Open settings'),
+            ),
           if (!needsSettings && !unavailable)
             TextButton(
               onPressed: () => Navigator.pop(context, _CameraRecovery.retry),
@@ -1008,6 +1017,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         await _captureImage();
       case _CameraRecovery.gallery:
         await _importFromGallery();
+      case _CameraRecovery.settings:
+        await widget.appSettingsOpener();
       case null:
         break;
     }
