@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/services/document_processor_native.dart';
 import 'package:fosscanner/services/draft_store_native.dart';
+import 'package:fosscanner/services/draft_store_base.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
 void main() {
@@ -75,28 +76,207 @@ void main() {
     );
   });
 
-  test('a corrupt or incomplete manifest loads as no draft', () async {
-    final current = Directory('${directory.path}/current');
-    await current.create();
-    await File('${current.path}/manifest.json').writeAsString(
-      jsonEncode({
-        'schemaVersion': 1,
-        'pages': [
-          {
-            'corners': <Object>[],
-            'filter': 'original',
-            'rotationQuarterTurns': 0,
-            'brightness': 0,
-            'contrast': 1,
-          },
-        ],
-      }),
-    );
+  test(
+    'a corrupt or incomplete manifest fails without overwriting data',
+    () async {
+      final current = Directory('${directory.path}/current');
+      await current.create();
+      await File('${current.path}/manifest.json').writeAsString(
+        jsonEncode({
+          'schemaVersion': 1,
+          'pages': [
+            {
+              'corners': <Object>[],
+              'filter': 'original',
+              'rotationQuarterTurns': 0,
+              'brightness': 0,
+              'contrast': 1,
+            },
+          ],
+        }),
+      );
 
-    final restored = await FileDraftStore(directory: directory).load();
+      final store = FileDraftStore(directory: directory);
+      final manifest = File('${current.path}/manifest.json');
+      final original = await manifest.readAsString();
+      await expectLater(store.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(
+        store.save([page(1, PageFilter.original)]),
+        throwsA(isA<DraftRestoreException>()),
+      );
+      // A fresh store must not bypass the failed-restoration protection either.
+      await expectLater(
+        FileDraftStore(directory: directory).save([]),
+        throwsA(isA<DraftRestoreException>()),
+      );
+      expect(await manifest.readAsString(), original);
+    },
+  );
 
-    expect(restored, isEmpty);
-  });
+  test(
+    'missing draft and a valid empty draft are not restoration errors',
+    () async {
+      final missingRoot = Directory('${directory.path}/missing');
+      expect(await FileDraftStore(directory: missingRoot).load(), isEmpty);
+      final store = FileDraftStore(directory: directory);
+      expect(await store.load(), isEmpty);
+      await store.save([]);
+      expect(await FileDraftStore(directory: directory).load(), isEmpty);
+    },
+  );
+
+  test(
+    'an incomplete generation is not mistaken for a missing draft',
+    () async {
+      await Directory('${directory.path}/current').create();
+      final store = FileDraftStore(directory: directory);
+      await expectLater(store.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(store.save([]), throwsA(isA<DraftRestoreException>()));
+      expect(await Directory('${directory.path}/current').exists(), isTrue);
+    },
+  );
+
+  test(
+    'a non-directory draft root reports failure rather than absence',
+    () async {
+      final root = File('${directory.path}/occupied');
+      await root.writeAsString('preserve');
+      final store = FileDraftStore(directory: Directory(root.path));
+      await expectLater(store.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(store.save([]), throwsA(isA<DraftRestoreException>()));
+      expect(await root.readAsString(), 'preserve');
+    },
+  );
+
+  test(
+    'current read failure still recovers and promotes a valid backup',
+    () async {
+      final original = page(2, PageFilter.original);
+      final store = FileDraftStore(directory: directory);
+      await store.save([original]);
+      await store.save([page(3, PageFilter.grayscale)]);
+      final reader = FileDraftStore(
+        directory: directory,
+        beforeLoad: (stage) {
+          if (stage == DraftLoadStage.beforeCurrentRead) {
+            throw const FileSystemException('private read error');
+          }
+        },
+      );
+      final recovered = await reader.load();
+      expectPage(recovered.single, original);
+      await reader.save(recovered);
+    },
+  );
+
+  test(
+    'read failures preserve generations, block saves, and allow retry',
+    () async {
+      final original = page(2, PageFilter.original);
+      final newest = page(3, PageFilter.grayscale);
+      final writer = FileDraftStore(directory: directory);
+      await writer.save([original]);
+      await writer.save([newest]);
+      var fail = true;
+      final reader = FileDraftStore(
+        directory: directory,
+        beforeLoad: (_) {
+          if (fail) throw const FileSystemException('private read error');
+        },
+      );
+      await expectLater(reader.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(reader.save([]), throwsA(isA<DraftRestoreException>()));
+      expect(await Directory('${directory.path}/current').exists(), isTrue);
+      expect(await Directory('${directory.path}/backup').exists(), isTrue);
+      fail = false;
+      expectPage((await reader.load()).single, newest);
+      await reader.save([original]);
+      expectPage((await reader.load()).single, original);
+    },
+  );
+
+  test(
+    'promotion failure keeps valid backup and blocks saves until retry',
+    () async {
+      final original = page(2, PageFilter.original);
+      final writer = FileDraftStore(directory: directory);
+      await writer.save([original]);
+      await writer.save([page(3, PageFilter.grayscale)]);
+      await File(
+        '${directory.path}/current/manifest.json',
+      ).writeAsString('corrupt');
+      final backupImage = File('${directory.path}/backup/page_0_original.bin');
+      final originalBytes = await backupImage.readAsBytes();
+      var fail = true;
+      final reader = FileDraftStore(
+        directory: directory,
+        beforeLoad: (stage) {
+          if (fail && stage == DraftLoadStage.beforeBackupPromotion) {
+            throw const FileSystemException('private promotion error');
+          }
+        },
+      );
+      await expectLater(reader.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(reader.save([]), throwsA(isA<DraftRestoreException>()));
+      expect(await backupImage.readAsBytes(), originalBytes);
+      fail = false;
+      expectPage((await reader.load()).single, original);
+      await reader.save([original]);
+    },
+  );
+
+  test(
+    'corrupt current and backup require explicit clear before saving',
+    () async {
+      final store = FileDraftStore(directory: directory);
+      await store.save([page(1, PageFilter.original)]);
+      await store.save([page(2, PageFilter.grayscale)]);
+      for (final generation in ['current', 'backup']) {
+        await File(
+          '${directory.path}/$generation/manifest.json',
+        ).writeAsString('corrupt');
+      }
+      await expectLater(store.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(store.save([]), throwsA(isA<DraftRestoreException>()));
+      await store.clear();
+      await store.save([page(3, PageFilter.original)]);
+      expect((await store.load()).single.brightness, 3.25);
+    },
+  );
+
+  test(
+    'failed clear does not authorize overwriting after failed restoration',
+    () async {
+      final root = File('${directory.path}/occupied');
+      await root.writeAsString('preserve');
+      final store = FileDraftStore(directory: Directory(root.path));
+      await expectLater(store.load(), throwsA(isA<DraftRestoreException>()));
+      await expectLater(store.clear(), throwsA(isA<DraftRestoreException>()));
+      await root.delete();
+      await Directory(root.path).create();
+      await expectLater(store.save([]), throwsA(isA<DraftRestoreException>()));
+      expect(await store.load(), isEmpty);
+      await store.save([]);
+    },
+  );
+
+  test(
+    'explicit clear removes malformed generation entries without following links',
+    () async {
+      final outside = File('${directory.path}/keep.bin');
+      await outside.writeAsString('preserve');
+      await File(
+        '${directory.path}/current',
+      ).writeAsString('invalid generation');
+      await Link('${directory.path}/backup').create(outside.absolute.path);
+      final store = FileDraftStore(directory: directory);
+      await expectLater(store.load(), throwsA(isA<DraftRestoreException>()));
+      await store.clear();
+      expect(await outside.readAsString(), 'preserve');
+      expect(await store.load(), isEmpty);
+      await store.save([page(1, PageFilter.original)]);
+    },
+  );
 
   test('round-trips native crops with a two-pixel edge', () async {
     final store = FileDraftStore(directory: directory);

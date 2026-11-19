@@ -14,6 +14,10 @@ quality.
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
 | `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |
 | `ui-filters-panel.png` | Filter choices opened explicitly from the Filters icon |
+| `ui-intake-page-limit.png` | Discoverable intake help at the page-count limit |
+| `ui-intake-limit-guidance.png` | Page-count limit and recovery guidance |
+| `ui-draft-restore-failure.png` | Restoration failure pauses intake and offers retry |
+| `ui-draft-discard-confirmation.png` | Explicit confirmation before discarding cached generations |
 
 ## Reproduce
 
@@ -32,7 +36,8 @@ or screenshots are downloaded by the renderer. Theme colors follow the app's
 deep-purple Material 3 configuration.
 
 The camera-picker capability is a test fixture. Draft persistence is disabled,
-so no real scans are loaded or saved. The editor uses fixture operations that
+with a synthetic restoration failure for the recovery-screen renders, so no real
+scans are loaded or saved. The editor uses fixture operations that
 return the sample unchanged: its thumbnails are not filter comparisons, and
 its fallback is injected rather than produced by native edge detection. No
 camera session, OCR operation, share sheet, browser launch, APK build, or device

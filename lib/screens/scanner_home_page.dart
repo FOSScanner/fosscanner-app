@@ -89,6 +89,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   _PdfExporter? _pdfExporter;
   bool _isPickingImages = false;
   bool _isRestoringDraft = false;
+  bool _draftRestoreFailed = false;
   bool _isClearingDraft = false;
   bool _isOpeningImageRoute = false;
   late bool _cameraSupported;
@@ -121,16 +122,113 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           retainedPageImageBytes(restored) > maxRetainedDocumentBytes) {
         throw const _DocumentCapacityException();
       }
-      if (restored.isNotEmpty) setState(() => _pages.addAll(restored));
+      setState(() {
+        _pages.addAll(restored);
+        _draftRestoreFailed = false;
+      });
     } catch (_) {
-      if (mounted) _showMessage('Could not restore the saved draft.');
+      if (mounted) setState(() => _draftRestoreFailed = true);
     } finally {
       if (mounted) setState(() => _isRestoringDraft = false);
     }
   }
 
+  Future<void> _retryDraftRestore() async {
+    if (_isRestoringDraft || _isClearingDraft || !_draftRestoreFailed) return;
+    setState(() => _isRestoringDraft = true);
+    await _restoreDraft();
+    if (mounted &&
+        !_draftRestoreFailed &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_recoverLostImages());
+    }
+  }
+
+  Future<void> _discardFailedDraft() async {
+    if (_isRestoringDraft || _isClearingDraft || !_draftRestoreFailed) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Discard saved draft?'),
+        scrollable: true,
+        content: const Text(
+          'This permanently deletes the cached draft and its backup, including '
+          'any pages that might still be recoverable. Exported PDFs are not removed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Discard draft'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true ||
+        !mounted ||
+        _isRestoringDraft ||
+        _isClearingDraft ||
+        !_draftRestoreFailed) {
+      return;
+    }
+    await _clearCurrentDraft();
+    if (mounted &&
+        !_draftRestoreFailed &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_recoverLostImages());
+    }
+  }
+
+  Widget _buildDraftRestoreFailure() => Scaffold(
+    appBar: AppBar(title: const Text('FOSScanner')),
+    body: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                'Could not restore the saved draft',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Your cached draft may still be recoverable. Adding images is '
+              'paused to avoid replacing it. Check storage access and retry, '
+              'or explicitly discard the draft to start again. '
+              'Drafts are temporary app-cache data, not saved PDFs.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            if (_isRestoringDraft || _isClearingDraft)
+              const CircularProgressIndicator(semanticsLabel: 'Opening draft'),
+            FilledButton(
+              onPressed: _isRestoringDraft || _isClearingDraft
+                  ? null
+                  : _retryDraftRestore,
+              child: const Text('Retry restoration'),
+            ),
+            TextButton(
+              onPressed: _isRestoringDraft || _isClearingDraft
+                  ? null
+                  : _discardFailedDraft,
+              child: const Text('Discard saved draft'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   void _queueDraftSave() {
-    if (_isClearingDraft) return;
+    if (_isClearingDraft || _isRestoringDraft || _draftRestoreFailed) return;
     _pendingDraftSnapshot = List<ScannedPage>.of(_pages);
     _draftRevision++;
     if (_isDraftSaveScheduled) return;
@@ -186,6 +284,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   int get _retainedImageBytes => _retainedImageBytesFor(_pages);
 
   bool get _isDocumentInteractionLocked =>
+      _draftRestoreFailed ||
       _isClearingDraft ||
       _isGeneratingPdf ||
       _isPickingImages ||
@@ -195,6 +294,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _pages.isNotEmpty && !_isRestoringDraft && !_isDocumentInteractionLocked;
 
   bool get _canStartImagePick =>
+      !_draftRestoreFailed &&
       !_isRestoringDraft &&
       !_isClearingDraft &&
       !_isGeneratingPdf &&
@@ -384,7 +484,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // Restore the existing pages before admitting a recovered image so its
       // processing budget and next saved snapshot include the whole document.
       await _initialDraftRestore;
-      if (!mounted) return;
+      if (!mounted || _draftRestoreFailed) return;
       final response = await _picker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
       if (response.exception != null) {
@@ -938,6 +1038,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     setState(() {
       if (cleared) {
         _pages.clear();
+        _draftRestoreFailed = false;
         _draftSaveFailed = false;
         _deferredMessage = null;
       }
@@ -1263,6 +1364,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_draftRestoreFailed) return _buildDraftRestoreFailure();
     return Scaffold(
       appBar: AppBar(
         title: const Text('FOSScanner'),
