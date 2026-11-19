@@ -1340,10 +1340,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// Shown, disabled, even for a single page so every card footer has the
+  /// same layout and adding the second page does not resize the thumbnails.
   Widget _pageReorderMenu(int index, ScannedPage page) => PopupMenuButton<int>(
     tooltip: 'Reorder page ${index + 1}',
     icon: const Icon(Icons.swap_vert),
-    enabled: !_isDocumentInteractionLocked,
+    enabled: !_isDocumentInteractionLocked && _pages.length > 1,
     onSelected: (direction) {
       // A menu callback must not move a different page if the document changed
       // while it was open. _reorderPage also rechecks the operation lock.
@@ -2113,6 +2115,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           children: [
             Expanded(
               child: Padding(
+                key: ValueKey('page_thumbnail_$index'),
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
                 child: Image(
                   image: ResizeImage(
@@ -2125,30 +2128,32 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 ),
               ),
             ),
+            // Every footer has the same controls and a one-line label, so
+            // thumbnails keep one size for any page count or page number.
             Padding(
               padding: const EdgeInsets.only(left: 12, right: 4),
-              child: Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              child: Row(
                 children: [
-                  ExcludeSemantics(
-                    child: Text(
-                      'Page ${index + 1}',
-                      style: Theme.of(context).textTheme.labelLarge,
+                  Expanded(
+                    child: ExcludeSemantics(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          'Page ${index + 1}',
+                          maxLines: 1,
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                      ),
                     ),
                   ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_pages.length > 1) _pageReorderMenu(index, page),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        tooltip: 'Delete page ${index + 1}',
-                        onPressed: _isDocumentInteractionLocked
-                            ? null
-                            : () => _removePage(index),
-                      ),
-                    ],
+                  _pageReorderMenu(index, page),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: 'Delete page ${index + 1}',
+                    onPressed: _isDocumentInteractionLocked
+                        ? null
+                        : () => _removePage(index),
                   ),
                 ],
               ),
@@ -2192,18 +2197,21 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             ),
             childWhenDragging: Opacity(opacity: 0.3, child: card),
-            child: isDropTarget
-                ? Container(
-                    decoration: BoxDecoration(
+            // The highlight is painted over the card instead of padding it,
+            // so the hovered card keeps its size.
+            child: DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: isDropTarget
+                  ? BoxDecoration(
                       border: Border.all(
                         color: Theme.of(context).colorScheme.primary,
                         width: 3,
                       ),
                       borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: card,
-                  )
-                : card,
+                    )
+                  : const BoxDecoration(),
+              child: card,
+            ),
           );
         },
       ),

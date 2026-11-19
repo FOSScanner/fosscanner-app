@@ -180,9 +180,10 @@ void main() {
     expect(store.saves.last, orderedEquals(pages));
   });
 
-  testWidgets('single-page drafts need no reorder menu', (tester) async {
+  testWidgets('a single page keeps a disabled reorder menu', (tester) async {
     await pumpHome(tester, initial: [pages.first]);
-    expect(find.byTooltip('Reorder page 1'), findsNothing);
+    // The slot stays so every card footer has the same layout.
+    expect(menu(tester, 1).enabled, isFalse);
     expect(find.byTooltip('Delete page 1'), findsOneWidget);
   });
 

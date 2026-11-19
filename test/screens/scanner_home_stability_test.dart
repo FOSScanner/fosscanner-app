@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,6 +48,14 @@ class _CameraPicker extends ImagePickerPlatform {
     MultiImagePickerOptions options = const MultiImagePickerOptions(),
   }) => gallery?.future ?? Future.value(const []);
 }
+
+final _thumbnail = find.byKey(const ValueKey('page_thumbnail_0'));
+
+/// Matrix entries at the default and the maximum supported text scale.
+final _defaultAndLargeText = [
+  for (final layoutCase in layoutMatrix)
+    if (layoutCase.textScale != 1.3) layoutCase,
+];
 
 void main() {
   late ImagePickerPlatform originalPicker;
@@ -267,4 +276,72 @@ void main() {
     expect(readyTitle.width, restoringTitle.width);
     expect(tester.takeException(), isNull);
   });
+
+  // #153
+  testLayoutMatrix(
+    'the first thumbnail keeps its size from 1 to 2 pages',
+    (tester, layoutCase) async {
+      await pumpHome(tester, layoutCase, pageCount: 2);
+      await tester.pumpAndSettle();
+      pressIconButton(tester, 'Delete page 2');
+      await tester.pumpAndSettle();
+      expect(find.byType(Card), findsOneWidget);
+      await expectStableRects(tester, {'thumbnail': _thumbnail}, () async {
+        await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
+        await tester.pumpAndSettle();
+        expect(find.byType(Card), findsNWidgets(2));
+      });
+      expect(tester.takeException(), isNull);
+    },
+    cases: _defaultAndLargeText,
+  );
+
+  testLayoutMatrix('pages 9 and 10 have thumbnails of the same size', (
+    tester,
+    layoutCase,
+  ) async {
+    await pumpHome(tester, layoutCase, pageCount: 10);
+    await tester.pumpAndSettle();
+    final first = tester.getSize(_thumbnail);
+    final ninth = find.byKey(const ValueKey('page_thumbnail_8'));
+    final tenth = find.byKey(const ValueKey('page_thumbnail_9'));
+    for (final thumbnail in [ninth, tenth]) {
+      await tester.scrollUntilVisible(thumbnail, 100);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(thumbnail), first);
+    }
+    expect(tester.takeException(), isNull);
+  }, cases: _defaultAndLargeText);
+
+  testLayoutMatrix('a drop target keeps its thumbnail size', (
+    tester,
+    layoutCase,
+  ) async {
+    await pumpHome(tester, layoutCase, pageCount: 2);
+    await tester.pumpAndSettle();
+    // Near the top of the thumbnails, which every viewport shows.
+    const inset = Offset(0, 16);
+    final gesture = await tester.startGesture(
+      tester.getRect(find.byKey(const ValueKey('page_thumbnail_1'))).topCenter +
+          inset,
+    );
+    await expectStableRects(tester, {'thumbnail': _thumbnail}, () async {
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      await gesture.moveTo(tester.getRect(_thumbnail).topCenter + inset);
+      await tester.pump();
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is DecoratedBox &&
+              widget.position == DecorationPosition.foreground &&
+              (widget.decoration as BoxDecoration).border != null,
+        ),
+        findsOneWidget,
+        reason: 'the first card must be highlighted as the drop target',
+      );
+    });
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  }, cases: _defaultAndLargeText);
 }
