@@ -24,8 +24,10 @@ import '../services/ocr_service.dart' as ocr_service;
 import '../services/pdf_document_saver.dart';
 import '../services/pdf_export_files.dart';
 import '../services/pdf_export_options.dart';
+import '../services/pdf_page_importer.dart';
 import '../services/platform_capabilities.dart';
 import '../services/shared_image_inbox.dart';
+import '../widgets/pdf_import_progress_dialog.dart';
 import '../widgets/transient_message.dart';
 import 'barcode_scan_screen.dart';
 import 'corner_adjust_screen.dart';
@@ -150,6 +152,7 @@ class ScannerHomePage extends StatefulWidget {
     this.cornerAdjustOperations = const DefaultCornerAdjustOperations(),
     this.sourceImageSizeReader = readEncodedImageSize,
     this.sharedImageInbox,
+    this.pdfPageImporter,
     this.preferencesStore,
     this.temporaryDirectory = getTemporaryDirectory,
     this.documentSaver = const PlatformPdfDocumentSaver(),
@@ -165,6 +168,9 @@ class ScannerHomePage extends StatefulWidget {
   /// Images shared into the app by other apps (Android only); null disables
   /// share intake.
   final SharedImageInbox? sharedImageInbox;
+
+  /// Imports pages from a PDF (Android only); null hides the action.
+  final PdfPageImporter? pdfPageImporter;
 
   /// Where export choices persist; defaults to memory only.
   final AppPreferencesStore? preferencesStore;
@@ -1009,6 +1015,170 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  static const _importPdfMenuValue = 'import_pdf';
+
+  /// The overflow-menu entry for PDF import; empty where it is unsupported.
+  List<PopupMenuEntry<String>> _pdfImportMenuItems() => [
+    if (widget.pdfPageImporter != null)
+      PopupMenuItem(
+        value: _importPdfMenuValue,
+        enabled: !_isPickingImages && !_isClearingDraft && _canStartImagePick,
+        child: const Text('Import from PDF'),
+      ),
+  ];
+
+  /// Handles [value] if it is the PDF import entry.
+  bool _handlePdfImportMenuSelection(String value) {
+    if (value != _importPdfMenuValue) return false;
+    unawaited(_importPdf());
+    return true;
+  }
+
+  /// Picks a PDF, renders its pages natively, then reviews them one by one
+  /// like a multi-image import. Pages start as full-image crops.
+  Future<void> _importPdf() async {
+    final importer = widget.pdfPageImporter;
+    if (importer == null || _isRestoringDraft || _isDocumentInteractionLocked) {
+      return;
+    }
+    if (!_canStartImagePick) {
+      _showDocumentLimit();
+      return;
+    }
+    final documentGeneration = _documentGeneration;
+    setState(() => _isPickingImages = true);
+    var paths = const <String>[];
+    var nextPath = 0;
+    bool isCurrent() =>
+        mounted &&
+        !_isClearingDraft &&
+        documentGeneration == _documentGeneration;
+    try {
+      await _imageProcessingQueue.idle;
+      if (!isCurrent()) return;
+      if (!await importer.pickDocument() || !isCurrent()) return;
+      // Limits are taken after the picker returns: they bound what is
+      // rendered, so nothing is rendered that the document cannot hold.
+      final request = PdfImportRequest.forDocument(
+        quality: _preferences.pdfQuality,
+        currentPages: _pages.length,
+        retainedBytes: _retainedImageBytes,
+      );
+      if (request == null) {
+        _showDocumentLimit();
+        return;
+      }
+      final batch = await _renderPdfWithProgress(importer, request);
+      paths = batch.paths;
+      if (!isCurrent()) return;
+      var limitReported = false;
+      var stopped = false;
+      while (nextPath < paths.length) {
+        final index = nextPath++;
+        // The renders are app-owned cache files, deleted once read.
+        final result = await _addCapturedPhoto(
+          XFile(paths[index]),
+          source: PageReviewSource.pdf,
+          isBatchImport: paths.length > 1,
+          batchPosition: index + 1,
+          batchCount: paths.length,
+          deleteAfterRead: true,
+          documentGeneration: documentGeneration,
+        );
+        if (!mounted) return;
+        if (result == _PhotoIntakeResult.stopped) {
+          stopped = true;
+          _showMessage(
+            'Import stopped. Pages already added were kept; the remaining '
+            'pages were not added.',
+          );
+          break;
+        }
+        if (result == _PhotoIntakeResult.capacityReached) {
+          limitReported = true;
+          break;
+        }
+      }
+      // Reported after the review so the message never covers its buttons.
+      if (batch.truncated && !limitReported && !stopped) {
+        _showMessage(
+          batch.pageCount > request.maxPages
+              ? 'Some PDF pages were not added: a document can have up to '
+                    '$maxDocumentPages pages.'
+              : 'Some PDF pages were not added: the document memory limit '
+                    'was reached.',
+        );
+      } else if (batch.rejected > 0 && !limitReported && !stopped) {
+        _showMessage('Some pages of this PDF could not be added.');
+      }
+    } on PdfImportException catch (error) {
+      if (mounted) {
+        _showMessage(switch (error.failure) {
+          PdfImportFailure.unreadable => "This PDF can't be opened.",
+          PdfImportFailure.cancelled => 'PDF import cancelled.',
+          PdfImportFailure.failed => 'Could not import the PDF.',
+        });
+      }
+    } on MissingPluginException {
+      // No native PDF importer (tests, unsupported embedders).
+    } catch (_) {
+      if (mounted) _showMessage('Could not import the PDF.');
+    } finally {
+      for (final path in paths.skip(nextPath)) {
+        await _deleteFileQuietly(path);
+      }
+      if (mounted) setState(() => _isPickingImages = false);
+      _resumeSharedImageIntake();
+    }
+  }
+
+  /// Renders under a cancellable modal dialog, inside the image processing
+  /// queue so the native bitmaps never overlap an editor's work.
+  Future<PdfImportBatch> _renderPdfWithProgress(
+    PdfPageImporter importer,
+    PdfImportRequest request,
+  ) async {
+    final progress = ValueNotifier<PdfImportProgress?>(null);
+    var cancelRequested = false;
+    var finished = false;
+    final navigator = Navigator.of(context);
+    final route = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PdfImportProgressDialog(
+        progress: progress,
+        onCancel: () {
+          cancelRequested = true;
+          if (finished) return;
+          unawaited(importer.cancel().catchError((Object _) {}));
+        },
+      ),
+    );
+    unawaited(navigator.push(route));
+    try {
+      return await _imageProcessingQueue.run(() async {
+        if (cancelRequested) {
+          throw const PdfImportException(PdfImportFailure.cancelled);
+        }
+        return importer.renderPages(
+          request,
+          onProgress: (completed, total) {
+            if (!finished) {
+              progress.value = PdfImportProgress(completed, total);
+            }
+          },
+        );
+      });
+    } finally {
+      finished = true;
+      if (route.isCurrent) {
+        navigator.pop();
+      } else if (route.isActive) {
+        navigator.removeRoute(route);
+      }
+    }
+  }
+
   CornerAdjustScreen _buildEditor(
     Uint8List originalBytes, {
     ScannedPage? page,
@@ -1031,6 +1201,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       onRetake: onRetake,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
+      // PDF pages are already flat: start from the full page.
+      detectPageEdges: source != PageReviewSource.pdf,
       initialFilter: page?.filter ?? _lastNewPageFilter,
       initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
       initialBrightness: page?.brightness ?? 0,
@@ -2256,6 +2428,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           PopupMenuButton<String>(
             tooltip: 'More options',
             onSelected: (action) {
+              if (_handlePdfImportMenuSelection(action)) return;
               if (action == 'clear') {
                 _clearPages();
               } else {
@@ -2263,6 +2436,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               }
             },
             itemBuilder: (_) => [
+              ..._pdfImportMenuItems(),
               PopupMenuItem(
                 value: 'clear',
                 enabled: _canClearPages,

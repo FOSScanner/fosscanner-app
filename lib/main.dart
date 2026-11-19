@@ -8,6 +8,7 @@ import 'screens/scanner_home_page.dart';
 import 'services/app_preferences.dart';
 import 'services/draft_store.dart';
 import 'services/pdf_export_files.dart';
+import 'services/pdf_page_importer.dart';
 import 'services/shared_image_inbox.dart';
 import 'widgets/draft_session_gate.dart';
 
@@ -47,13 +48,16 @@ class FOSScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = draftStore ?? const NoOpDraftStore();
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     final scanner = ScannerHomePage(
       draftStore: store,
       // iOS would need a Share Extension target; only Android accepts shares.
-      sharedImageInbox:
-          !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+      sharedImageInbox: isAndroid
           ? MethodChannelSharedImageInbox.instance
           : null,
+      // iOS would need a PDFKit renderer; only Android imports PDFs.
+      pdfPageImporter: isAndroid ? MethodChannelPdfPageImporter.instance : null,
       preferencesStore: preferencesStore,
     );
     return MaterialApp(

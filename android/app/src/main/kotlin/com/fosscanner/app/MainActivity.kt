@@ -3,7 +3,9 @@ package com.fosscanner.app
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
@@ -58,8 +60,22 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    // PDF import renders on its own worker so it never waits behind OCR, and
+    // keeps only the temporary read grant of the picked document.
+    private var pdfImportExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var pdfImportChannel: MethodChannel? = null
+    private var pendingPdfPick: MethodChannel.Result? = null
+    private var pickedPdf: Uri? = null
+    private val pdfImportRunning = AtomicBoolean(false)
+    private val pdfImportCancelled = AtomicBoolean(false)
+    private val pdfImportDirectory: File
+        get() = File(cacheDir, PdfPageImport.DIRECTORY_NAME)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         orphanCacheCleanup.schedule(applicationContext.cacheDir, executor::execute)
+        // Renders a killed process left behind; no Dart isolate holds them yet.
+        val pdfDirectory = pdfImportDirectory
+        pdfImportExecutor.execute { PdfPageImport.clearDirectory(pdfDirectory) }
         // No Dart isolate of this activity can hold a copied path yet. The
         // single worker runs this cleanup before any later copy.
         val inbox = sharedImages
@@ -198,6 +214,19 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        if (pdfImportExecutor.isShutdown) pdfImportExecutor = Executors.newSingleThreadExecutor()
+        pdfImportChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_IMPORT_CHANNEL)
+        pdfImportChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "pickPdf" -> handlePickPdf(result)
+                "renderPdf" -> handleRenderPdf(call, result)
+                "cancelPdfImport" -> {
+                    if (pdfImportRunning.get()) pdfImportCancelled.set(true)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -209,6 +238,12 @@ class MainActivity : FlutterActivity() {
         sharedImageChannel?.setMethodCallHandler(null)
         sharedImageChannel = null
         sharedImageExecutor.shutdown()
+        pdfImportChannel?.setMethodCallHandler(null)
+        pdfImportChannel = null
+        pendingPdfPick = null
+        pickedPdf = null
+        // A running render sees the detached flag and deletes its files.
+        pdfImportExecutor.shutdown()
         // Its Dart caller is gone with the engine; nothing is left to answer.
         pendingSave = null
         // Let the active native call finish and release its resources. Interrupting
@@ -343,7 +378,144 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // Opens the system document picker for one PDF. Replies true once a PDF
+    // was picked (kept for renderPdf) and false when the picker was cancelled.
+    private fun handlePickPdf(result: MethodChannel.Result) {
+        if (pendingPdfPick != null || pdfImportRunning.get()) {
+            result.error("pdf_busy", "A PDF import is already running", null)
+            return
+        }
+        pickedPdf = null
+        // No persistable grant is requested: the read grant of the result is
+        // enough to copy the document once.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/pdf")
+        pendingPdfPick = result
+        try {
+            startActivityForResult(intent, PICK_PDF_REQUEST)
+        } catch (e: ActivityNotFoundException) {
+            pendingPdfPick = null
+            result.error("pdf_unavailable", "No document picker is available", null)
+        }
+    }
+
+    private fun handleRenderPdf(call: MethodCall, result: MethodChannel.Result) {
+        val request = PdfImportRequest.parse(
+            call.argument<Any>("dpi"),
+            call.argument<Any>("maxPages"),
+            call.argument<Any>("maxPagePixels"),
+            call.argument<Any>("maxTotalBytes"),
+            call.argument<Any>("jpegQuality"),
+        )
+        if (request == null) {
+            result.error("invalid_args", "Valid PDF import limits are required", null)
+            return
+        }
+        val uri = pickedPdf
+        pickedPdf = null
+        if (uri == null) {
+            result.error("invalid_args", "No PDF was picked", null)
+            return
+        }
+        if (!pdfImportRunning.compareAndSet(false, true)) {
+            result.error("pdf_busy", "A PDF import is already running", null)
+            return
+        }
+        pdfImportCancelled.set(false)
+        val directory = pdfImportDirectory
+        val resolver = applicationContext.contentResolver
+        val jobDetached = detached
+        try {
+            pdfImportExecutor.execute {
+                val source = File(directory, "source.pdf")
+                try {
+                    // Earlier renders were read (and deleted) by Dart before
+                    // it could start this import.
+                    PdfPageImport.clearDirectory(directory)
+                    if (!directory.isDirectory && !directory.mkdirs()) throw IOException("No cache directory")
+                    // PdfRenderer needs a seekable file; providers may only stream.
+                    val input = resolver.openInputStream(uri) ?: throw PdfUnreadableException()
+                    val copied = input.use { SharedImageInbox.copyBounded(it, source, PdfPageImport.MAX_PDF_BYTES) }
+                    if (!copied) throw PdfUnreadableException()
+                    val value = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        val renderer = try {
+                            PdfRenderer(descriptor)
+                        } catch (e: SecurityException) {
+                            // Password-protected.
+                            throw PdfUnreadableException()
+                        } catch (e: IOException) {
+                            throw PdfUnreadableException()
+                        }
+                        renderer.use { pdf ->
+                            PdfPageImport.renderPages(
+                                directory = directory,
+                                pageCount = pdf.pageCount,
+                                request = request,
+                                pageSize = { index -> pdf.openPage(index).use { it.width to it.height } },
+                                render = { index, size, target -> renderPdfPage(pdf, index, size, target, request.jpegQuality) },
+                                isCancelled = { pdfImportCancelled.get() || jobDetached.get() },
+                                onProgress = { completed, total ->
+                                    mainHandler.post {
+                                        pdfImportChannel?.invokeMethod(
+                                            "pdfImportProgress",
+                                            mapOf("completed" to completed, "total" to total),
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    mainHandler.post { result.success(value.toChannelMap()) }
+                } catch (e: PdfImportCancelledException) {
+                    mainHandler.post { result.error("pdf_cancelled", "PDF import cancelled", null) }
+                } catch (e: PdfUnreadableException) {
+                    mainHandler.post { result.error("pdf_unreadable", "The PDF cannot be opened", null) }
+                } catch (e: OutOfMemoryError) {
+                    mainHandler.post { result.error("pdf_memory", "Not enough memory to render the PDF", null) }
+                } catch (e: Exception) {
+                    // Do not expose provider exception messages, paths or URIs.
+                    mainHandler.post { result.error("pdf_failed", "Could not import the PDF", null) }
+                } finally {
+                    source.delete()
+                    pdfImportRunning.set(false)
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            pdfImportRunning.set(false)
+            result.error("pdf_unavailable", "PDF import worker is unavailable", null)
+        }
+    }
+
+    private fun renderPdfPage(pdf: PdfRenderer, index: Int, size: PixelSize, target: File, jpegQuality: Int) {
+        val bitmap = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+        try {
+            // PdfRenderer leaves unpainted areas transparent, which JPEG turns black.
+            bitmap.eraseColor(Color.WHITE)
+            pdf.openPage(index).use { page ->
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            }
+            target.outputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, output))
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == PICK_PDF_REQUEST) {
+            val pending = pendingPdfPick ?: return
+            pendingPdfPick = null
+            val uri = data?.data
+            if (resultCode != Activity.RESULT_OK || uri == null) {
+                pending.success(false)
+            } else {
+                pickedPdf = uri
+                pending.success(true)
+            }
+            return
+        }
         if (requestCode != SAVE_DOCUMENT_REQUEST) {
             super.onActivityResult(requestCode, resultCode, data)
             return
@@ -457,12 +629,14 @@ class MainActivity : FlutterActivity() {
         private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
         @Volatile private var secureScreen = false
         private const val SAVE_DOCUMENT_REQUEST = 0x5AFE
+        private const val PICK_PDF_REQUEST = 0x5DF0
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
 
         // Mirror lib/services/image_metadata.dart's maxDocumentPages.
         private const val MAX_PAGES = 100
         private const val SHARED_IMAGES_CHANNEL = "com.fosscanner.app/shared_images"
+        private const val PDF_IMPORT_CHANNEL = "com.fosscanner.app/pdf_import"
         private const val KEY_SHARE_PENDING = "fosscanner.sharePending"
     }
 }

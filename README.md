@@ -29,7 +29,10 @@ No account, no cloud processing, no tracking.
    the toolbar, and on the empty home screen).
    On Android you can also **share** one or more images to FOSScanner from
    Gallery, Files or a messenger; they are reviewed one by one and appended to
-   the current draft.
+   the current draft. **Import from PDF** (in the ⋮ menu, Android) renders the
+   pages of a PDF on your device at the density of the current quality preset
+   (300 DPI for High, 200 for Balanced, 150 for Small) and reviews them the same
+   way, starting from the full page instead of edge detection.
 2. **Check the crop.** Drag the corners to the page edges. If detection fails,
    the full image is selected rather than trimmed, and a brief notice over the
    image says so.
@@ -91,6 +94,7 @@ They are not camera captures or demonstrations of OCR/filter quality.
 |---|---|---|
 | Camera capture and gallery import | Yes | Yes |
 | Receive images shared from other apps | Yes | Not yet — needs a Share Extension |
+| Import pages from a PDF | Yes — rendered as images | Not yet — needs a PDFKit renderer |
 | Edge detection, manual crop, perspective correction | Yes | Yes |
 | Original, Enhance, Grayscale, Black & white filters | Yes | Yes |
 | Rotation, brightness, contrast, and later re-editing | Yes | Yes |
@@ -163,6 +167,15 @@ comes with the share; FOSScanner keeps no lasting access to them. Each image
 app's private cache only when it can be reviewed, and the copy is deleted once
 read. If a saved draft could not be restored, shared images wait until you
 retry or discard it, so they never overwrite it.
+
+**Import from PDF** opens the system document picker and keeps no lasting
+access to the chosen file. The PDF is copied into the app's private cache only
+while its pages are rendered, then deleted; each rendered page is deleted once
+read. Rendering stops at the document's page and memory limits, shows a
+cancellable progress dialog, and never reaches the network. Pages become
+images: text, links and vector graphics are not kept, but a searchable export
+recognizes the text again. Password-protected or damaged PDFs are not
+supported (*This PDF can't be opened.*).
 
 ### Drafts are temporary, not a backup
 

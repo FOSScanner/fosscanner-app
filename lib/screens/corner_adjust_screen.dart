@@ -34,7 +34,15 @@ const _filterLabels = {
 
 /// The original picker source may be unknown after Android activity recovery.
 /// [shared] images were sent from another app and copied into app storage.
-enum PageReviewSource { camera, gallery, recovered, shared }
+enum PageReviewSource {
+  camera,
+  gallery,
+  recovered,
+  shared,
+
+  /// A page rendered from an imported PDF.
+  pdf,
+}
 
 enum _Step { corners, filter }
 
@@ -63,6 +71,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.onRetake,
     this.initialCorners,
     this.startWithAdjustments = false,
+    this.detectPageEdges = true,
     this.initialFilter = PageFilter.original,
     this.initialRotationQuarterTurns = 0,
     this.initialBrightness = 0.0,
@@ -103,6 +112,10 @@ class CornerAdjustScreen extends StatefulWidget {
 
   /// Open saved appearance directly; crop remains available.
   final bool startWithAdjustments;
+
+  /// When false, a new page starts as a full-image crop without running
+  /// edge detection, for sources that are already flat pages (PDF imports).
+  final bool detectPageEdges;
   final PageFilter initialFilter;
   final int initialRotationQuarterTurns;
   final double initialBrightness;
@@ -173,7 +186,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       final size = await widget.operations.decodeSize(widget.originalBytes);
 
       List<Offset>? candidateCorners = widget.initialCorners;
-      if (candidateCorners == null) {
+      if (candidateCorners == null && widget.detectPageEdges) {
         await WidgetsBinding.instance.endOfFrame;
         if (!mounted || generation != _initializationGeneration) return;
         final detection = await _enqueueWork<List<Offset>?>(
@@ -190,8 +203,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       setState(() {
         _imageSize = size;
         _corners = corners;
-        _showFullImageNotice = !hasCorners;
-        _fullImageNoticeMounted = !hasCorners;
+        // Only a failed detection needs explaining.
+        _showFullImageNotice = !hasCorners && widget.detectPageEdges;
+        _fullImageNoticeMounted = _showFullImageNotice;
       });
       if (widget.startWithAdjustments && hasCorners) _enterFilterStep();
       unawaited(_updatePreviews());
@@ -446,7 +460,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       widget.isBatchImport &&
       (widget.source == PageReviewSource.gallery ||
           widget.source == PageReviewSource.recovered ||
-          widget.source == PageReviewSource.shared);
+          widget.source == PageReviewSource.shared ||
+          widget.source == PageReviewSource.pdf);
 
   bool get _hasBatchProgress =>
       _canSkipImage &&
