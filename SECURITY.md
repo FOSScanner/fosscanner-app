@@ -21,7 +21,11 @@ on-device, and it makes no network requests of its own (see the README's
 "Privacy" section) — the most relevant classes of report are below. Automatic
 native drafts use the app-private, OS-managed application cache: they survive
 normal process death and restarts, but can be purged under storage pressure and
-are excluded from Android OS backup.
+are excluded from Android OS backup. Plugin copies in the same cache (the
+share sheet's copy of an exported PDF and the image picker's copies) are
+removed as described in the README; cleanup only matches the app's own file
+names and plugin layouts, never follows links, and never touches files outside
+the app cache.
 
 - Anything that would let a malicious document/image trigger memory
   corruption or a crash via the native OpenCV pipeline

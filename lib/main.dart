@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'screens/scanner_home_page.dart';
 import 'services/app_preferences.dart';
+import 'services/cache_copies.dart';
 import 'services/draft_store.dart';
 import 'services/pdf_export_files.dart';
 import 'services/pdf_page_importer.dart';
@@ -18,6 +19,8 @@ void main() {
   // exporting yet, so this cannot race a live export.
   WidgetsFlutterBinding.ensureInitialized();
   unawaited(sweepStalePdfExports());
+  // share_plus keeps its copy of the last shared PDF until the next share.
+  unawaited(deleteSharedExportCopies());
   runApp(
     FOSScannerApp(
       draftStore: createDraftStore(),

@@ -166,8 +166,11 @@ used on iOS. See [development](#development) below.
 
 **Scanning, image processing, OCR, and PDF generation run on your device.**
 FOSScanner has no login, telemetry, analytics, or scan-upload service. Imported
-gallery originals are not modified or deleted. App-owned camera temporary files
-are cleaned up after the attempt to read them, including failed reads.
+gallery originals are not modified or deleted. The copies the image picker
+makes in the app's private cache (camera captures, gallery copies and resized
+`scaled_*` images) are deleted once read, including failed reads; copies left
+by skipped images or an interrupted app are removed when the import ends or at
+the next launch.
 
 On Android 13 and later, the app's thumbnail in the Recents screen is blank so
 page content is not shown when you switch apps; screenshots still work. Android
@@ -226,8 +229,12 @@ delivered the PDF. On Android, **Save PDF to device** writes the PDF to the
 location you pick in the system file picker; it needs no storage permission,
 and canceling the picker changes nothing. FOSScanner writes the PDF to its private cache only for the
 hand-off and deletes it when the share sheet returns; a copy left by an
-interrupted export is removed at the next launch. The share system may keep
-its own copy in an app/OS cache, whose lifetime is platform-managed. Receiving apps control their own copies and may upload them.
+interrupted export is removed at the next launch. On Android the share plugin
+keeps its own copy in the app's private cache (`share_plus/`): it is deleted
+right away when you dismiss the share sheet, and otherwise, because the
+receiving app may still be reading it, at the next share, when you clear all
+pages, or at the next launch. Receiving apps control their own copies and may
+upload them.
 
 FOSScanner does not make its own network requests. Opening a scanned HTTP/HTTPS
 link or the source-code link hands it to an external app, which may use the

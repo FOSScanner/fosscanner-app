@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/scanned_page.dart';
 import '../services/app_preferences.dart';
+import '../services/cache_copies.dart';
 import '../services/document_memory.dart';
 import '../services/draft_store.dart';
 import '../services/image_metadata.dart';
@@ -817,11 +818,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // Block a second picker request until startup recovery has completed; two
     // simultaneous results could otherwise push overlapping adjustment routes.
     _isPickingImages = true;
+    // Set while the lost result is left for after the draft decision; its
+    // picker copies must survive until then.
+    var deferred = false;
     try {
       // Restore the existing pages before admitting a recovered image so its
       // processing budget and next saved snapshot include the whole document.
       await _initialDraftRestore;
-      if (!mounted || _draftRestoreFailed) return;
+      if (!mounted) return;
+      if (_draftRestoreFailed) {
+        deferred = true;
+        return;
+      }
       final response = await _picker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
       if (response.exception != null) {
@@ -851,6 +859,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     } catch (_) {
       _showMessage('Could not recover the interrupted image selection.');
     } finally {
+      // Lost results have been read; remove copies earlier runs left behind.
+      if (!deferred) {
+        unawaited(
+          sweepImagePickerCopies(temporaryDirectory: widget.temporaryDirectory),
+        );
+      }
       if (mounted) setState(() => _isPickingImages = false);
       _resumeSharedImageIntake();
     }
@@ -1026,10 +1040,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         documentGeneration: documentGeneration,
         report: report,
       );
+      // Only image_picker's own cache copies (Android) are removed; the
+      // user's originals are never touched.
+      for (final photo in photos) {
+        unawaited(
+          deleteImagePickerCopy(
+            photo.path,
+            temporaryDirectory: widget.temporaryDirectory,
+          ),
+        );
+      }
       _showIntakeReport(report);
     } catch (_) {
       _showMessage('Could not open the photo gallery.');
     } finally {
+      // Copies of images that were skipped or not reached. Nothing is being
+      // picked now, and a new pick takes far longer than this sweep.
+      unawaited(
+        sweepImagePickerCopies(temporaryDirectory: widget.temporaryDirectory),
+      );
       if (mounted) setState(() => _isPickingImages = false);
       _resumeSharedImageIntake();
     }
@@ -1793,6 +1822,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _undoPage = null;
       _undoGeneration++;
       ScaffoldMessenger.of(context).clearSnackBars();
+      unawaited(
+        deleteSharedExportCopies(temporaryDirectory: widget.temporaryDirectory),
+      );
+      if (!_isPickingImages) {
+        unawaited(
+          sweepImagePickerCopies(temporaryDirectory: widget.temporaryDirectory),
+        );
+      }
     }
     setState(() {
       if (cleared) {
@@ -1989,7 +2026,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _isSharingPdf = true;
       });
       if (action == _ExportAction.share) {
-        await _sharePdfFile(
+        final shared = await _sharePdfFile(
           pdf.file,
           fileName: pdf.name,
           message: pdf.searchable
@@ -1997,6 +2034,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               : 'Document scanned with FOSScanner',
           shareOrigin: shareOrigin,
         );
+        // A dismissed sheet handed the copy to nobody. After a successful
+        // share the receiving app may still be reading it, so it stays until
+        // the next share, Clear all or launch.
+        if (shared.status == ShareResultStatus.dismissed) {
+          unawaited(
+            deleteSharedExportCopies(
+              fileName: pdf.name,
+              temporaryDirectory: widget.temporaryDirectory,
+            ),
+          );
+        }
       } else {
         // Cancelling the picker is a no-op: the draft stays as it is.
         final saved = await widget.documentSaver.save(
