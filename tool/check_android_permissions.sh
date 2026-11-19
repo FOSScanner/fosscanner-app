@@ -15,8 +15,8 @@ apk=${2:-}
 
 # CAMERA scans pages and codes. The androidx.core receiver permission is
 # signature-protected and declared by the app for itself, so no other app
-# can hold it.
-allowed='^(android\.permission\.CAMERA|com\.fosscanner\.app\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION)$'
+# can hold it; debug builds declare it under their .debug application ID.
+allowed='^(android\.permission\.CAMERA|com\.fosscanner\.app(\.debug)?\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION)$'
 debug_allowed='^android\.permission\.INTERNET$'
 
 status=0

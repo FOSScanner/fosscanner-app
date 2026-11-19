@@ -302,11 +302,21 @@ void main() {
     final release = RegExp(allowed);
     final debug = RegExp(debugAllowed);
     expect(release.hasMatch('android.permission.CAMERA'), isTrue);
+    for (final applicationId in [
+      'com.fosscanner.app',
+      'com.fosscanner.app.debug',
+    ]) {
+      expect(
+        release.hasMatch(
+          '$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+        ),
+        isTrue,
+        reason: applicationId,
+      );
+    }
     expect(
-      release.hasMatch(
-        'com.fosscanner.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
-      ),
-      isTrue,
+      release.hasMatch('com.example.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'),
+      isFalse,
     );
     for (final permission in [
       'android.permission.RECORD_AUDIO',
@@ -555,6 +565,46 @@ void main() {
       _activeSource(dockerfile),
       matches(RegExp(r'^COPY \. \.$', multiLine: true)),
     );
+  });
+
+  test('Android debug builds install beside the release app', () {
+    final gradle = _activeSource(
+      File('android/app/build.gradle.kts').readAsStringSync(),
+    );
+    expect(_assignmentValues(gradle, 'applicationId'), {
+      '"com.fosscanner.app"',
+    });
+    expect(_assignmentValues(gradle, 'namespace'), {'"com.fosscanner.app"'});
+    expect(
+      gradle,
+      matches(
+        RegExp(
+          r'defaultConfig \{[^}]*resValue\("string", "app_name", "FOSScanner"\)',
+        ),
+      ),
+    );
+    final debug = RegExp(
+      r'^\s+debug \{([^}]*)\}',
+      multiLine: true,
+    ).firstMatch(gradle);
+    expect(debug, isNotNull, reason: 'debug build type');
+    final debugBlock = debug?.group(1) ?? '';
+    expect(_assignmentValues(debugBlock, 'applicationIdSuffix'), {'".debug"'});
+    expect(_assignmentValues(debugBlock, 'versionNameSuffix'), {'"-debug"'});
+    expect(
+      debugBlock,
+      contains('resValue("string", "app_name", "FOSScanner Debug")'),
+    );
+    final release = RegExp(
+      r'^\s+release \{([\s\S]*?)^\s{8}\}',
+      multiLine: true,
+    ).firstMatch(gradle);
+    expect(release?.group(1), isNot(contains('applicationIdSuffix')));
+
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    expect(manifest, contains('android:label="@string/app_name"'));
   });
 
   test('Android release signing cannot fall back to a debug key', () {
