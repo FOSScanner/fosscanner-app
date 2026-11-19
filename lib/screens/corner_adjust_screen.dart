@@ -206,6 +206,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   // closes the panel first, like a sheet.
   _Panel? _sidePanel;
   LocalHistoryEntry? _panelHistoryEntry;
+  // One scroll position per panel, never restored: each panel opens at its
+  // top, whatever the other was scrolled to.
+  final _panelScrollControllers = {
+    for (final panel in _Panel.values)
+      panel: ScrollController(keepScrollOffset: false),
+  };
   bool _isSideBySide = false;
   late PageFilter _selectedFilter =
       widget.restoredReview?.filter ?? widget.initialFilter;
@@ -262,7 +268,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           _imageSize = size;
           _corners = List.of(restored.corners);
           _startCorners = List.of(restored.startCorners);
-          _cropProblem = cropProblem(_corners!);
+          _cropProblem = cropProblem(_corners!, imageSize: size);
         });
         unawaited(_updatePreviews());
         return;
@@ -297,7 +303,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _imageSize = size;
         _corners = corners;
         _startCorners = corners;
-        _cropProblem = cropProblem(corners);
+        _cropProblem = cropProblem(corners, imageSize: size);
         // Only a failed detection needs explaining.
         _showFullImageNotice = !hasCorners && widget.detectPageEdges;
         _fullImageNoticeMounted = _showFullImageNotice;
@@ -322,6 +328,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     _previewGeneration++;
     _finalPreviewGeneration++;
     _exportGeneration++;
+    for (final controller in _panelScrollControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -346,7 +355,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   Future<void> _updatePreviews() async {
     final currentCorners = _corners;
-    if (currentCorners == null || !mounted) return;
+    final imageSize = _imageSize;
+    if (currentCorners == null || imageSize == null || !mounted) return;
     final corners = List<Offset>.of(currentCorners);
     final generation = ++_previewGeneration;
     _finalPreviewGeneration++;
@@ -363,7 +373,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
     // Geometry problems are explained in place on the canvas, where the
     // user can fix them; only decoder/backend failures need a message.
-    final problem = cropProblem(corners);
+    final problem = cropProblem(corners, imageSize: imageSize);
     if (problem != null) {
       if (!mounted || generation != _previewGeneration) return;
       setState(() {
@@ -556,7 +566,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   /// One rule for Back and Cancel on the crop step. (Back from the
   /// appearance step only returns here, keeping every setting.) Explicit
-  /// Skip, Retake and Stop importing never ask.
+  /// Skip and Retake never ask; Stop importing asks exactly as Back does.
   _LeaveConfirmation? get _leaveConfirmation {
     // An unreadable image has nothing to lose, and leaving it moves on.
     if (_error != null) return null;
@@ -570,13 +580,22 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   Future<void> _confirmLeave() async {
     final confirmation = _leaveConfirmation;
+    if (confirmation == null || !await _askToLeave(confirmation)) return;
+    if (!mounted) return;
+    // Navigator.pop bypasses canPop; onPopInvokedWithResult still runs and
+    // stops a batch import.
+    Navigator.of(context).pop();
+  }
+
+  /// Shows the dialog for [confirmation] and returns whether the user chose
+  /// to leave while the review can still be left.
+  Future<bool> _askToLeave(_LeaveConfirmation confirmation) async {
     if (!mounted ||
-        confirmation == null ||
         _isConfirmingDiscard ||
         _isLeaving ||
         _isProcessing ||
         _step != _Step.corners) {
-      return;
+      return false;
     }
     _isConfirmingDiscard = true;
     final item = _batchItem.toLowerCase();
@@ -595,7 +614,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       ),
       _LeaveConfirmation.stopImport => (
         'Stop importing?',
-        '${_hasUnsavedChanges ? 'Your changes are discarded. ' : ''}'
+        '${_hasUnsavedChanges ? 'Your changes will be discarded. ' : ''}'
             'This $item and the remaining ones will not be added. '
             'Pages already added are kept.',
         'Keep reviewing',
@@ -624,16 +643,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     } finally {
       _isConfirmingDiscard = false;
     }
-    if (confirmed != true ||
-        !mounted ||
-        _isLeaving ||
-        _isProcessing ||
-        ModalRoute.of(context)?.isCurrent != true) {
-      return;
-    }
-    // Navigator.pop bypasses canPop; onPopInvokedWithResult still runs and
-    // stops a batch import.
-    Navigator.of(context).pop();
+    return confirmed == true &&
+        mounted &&
+        !_isLeaving &&
+        !_isProcessing &&
+        ModalRoute.of(context)?.isCurrent == true;
   }
 
   bool get _isNewCameraCapture =>
@@ -664,13 +678,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   bool get _canStopImport =>
       _offersStopImport && widget.batchPosition! < widget.batchCount!;
 
-  void _stopImport() {
+  /// Asks with the same dialog as Back, even for an unreadable image: the
+  /// remaining images are lost either way.
+  Future<void> _stopImport() async {
     if (!_canStopImport ||
+        !await _askToLeave(_LeaveConfirmation.stopImport) ||
         !mounted ||
-        _isLeaving ||
-        _isProcessing ||
-        _step != _Step.corners ||
-        ModalRoute.of(context)?.isCurrent != true) {
+        !_canStopImport ||
+        _step != _Step.corners) {
       return;
     }
     widget.onStopImport!();
@@ -750,6 +765,13 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
+          // Scrolling the side panel is not scrolling the page: the app bar
+          // keeps its tint.
+          notificationPredicate: (notification) =>
+              defaultScrollNotificationPredicate(notification) &&
+              notification.context
+                      ?.findAncestorWidgetOfExactType<_SidePanelScrollArea>() ==
+                  null,
           title: _showsBatchProgressTitle
               // Scale down rather than ellipsize so the position stays
               // readable beside Stop importing at large text sizes.
@@ -766,7 +788,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 tooltip: 'Stop importing',
                 onPressed: !_canStopImport || _isLeaving || _isProcessing
                     ? null
-                    : _stopImport,
+                    : () => unawaited(_stopImport()),
               ),
             if (_step == _Step.filter) ...[
               IconButton(
@@ -1003,6 +1025,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         CropProblem.cornersCross => 'Corners cross each other.',
         CropProblem.cornerInside => 'A corner is inside the crop.',
         CropProblem.areaTooSmall => 'Crop is too small.',
+        CropProblem.cornersInLine => 'Move the corners apart.',
       }} Double-tap the image to reset.';
 
   /// A pill over the top of the canvas. It never takes layout space and
@@ -1054,7 +1077,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   void _setCrop(List<Offset> corners) {
     setState(() {
       _corners = corners;
-      _cropProblem = cropProblem(corners);
+      _cropProblem = cropProblem(corners, imageSize: _imageSize!);
       _showFullImageNotice = false;
     });
     unawaited(_updatePreviews());
@@ -1096,13 +1119,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }) => Image(
     key: key,
     gaplessPlayback: true,
-    image: ResizeImage(
-      MemoryImage(bytes),
-      width: maxDimension,
-      height: maxDimension,
-      policy: ResizeImagePolicy.fit,
-    ),
+    image: _boundedImage(bytes, maxDimension: maxDimension),
     fit: fit,
+  );
+
+  static ImageProvider _boundedImage(
+    Uint8List bytes, {
+    required int maxDimension,
+  }) => ResizeImage(
+    MemoryImage(bytes),
+    width: maxDimension,
+    height: maxDimension,
+    policy: ResizeImagePolicy.fit,
   );
 
   Widget _buildFilterStep(BuildContext context) {
@@ -1174,13 +1202,21 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     child: Stack(
       fit: StackFit.expand,
       children: [
-        if (previewBytes != null)
+        if (previewBytes != null) ...[
           _boundedPreviewImage(
             previewBytes,
             key: const Key('adjusted_page_image'),
             fit: BoxFit.contain,
             maxDimension: _fullPreviewDecodeSize,
           ),
+          _ImageBorder(
+            key: const Key('adjusted_page_border'),
+            image: _boundedImage(
+              previewBytes,
+              maxDimension: _fullPreviewDecodeSize,
+            ),
+          ),
+        ],
         Positioned.fill(child: _previewStatusOverlay(previewBytes != null)),
       ],
     ),
@@ -1491,23 +1527,33 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final panel = _sidePanel;
     if (panel == null) return null;
     void refresh() {}
+    final controller = _panelScrollControllers[panel]!;
     return Material(
       key: const Key('appearance_side_panel'),
       color: Theme.of(context).colorScheme.surfaceContainerLow,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: switch (panel) {
-          _Panel.filters => _filtersContent(
-            context,
-            onClose: _closeSidePanel,
-            refresh: refresh,
+      child: _SidePanelScrollArea(
+        // A scrollbar shows that more controls lie below.
+        child: Scrollbar(
+          controller: controller,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            key: ValueKey('side_panel_scroll_${panel.name}'),
+            controller: controller,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: switch (panel) {
+              _Panel.filters => _filtersContent(
+                context,
+                onClose: _closeSidePanel,
+                refresh: refresh,
+              ),
+              _Panel.adjust => _adjustContent(
+                context,
+                onClose: _closeSidePanel,
+                refresh: refresh,
+              ),
+            },
           ),
-          _Panel.adjust => _adjustContent(
-            context,
-            onClose: _closeSidePanel,
-            refresh: refresh,
-          ),
-        },
+        ),
       ),
     );
   }
@@ -1647,6 +1693,111 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       ),
     );
   }
+}
+
+/// The crop canvas's hairline around a contained [image], so a white page
+/// stays distinct from a light background. Keeps the previous outline until
+/// a new image has decoded, as the gapless image does.
+class _ImageBorder extends StatefulWidget {
+  const _ImageBorder({super.key, required this.image});
+
+  final ImageProvider image;
+
+  @override
+  State<_ImageBorder> createState() => _ImageBorderState();
+}
+
+class _ImageBorderState extends State<_ImageBorder> {
+  ImageStream? _stream;
+  late final _listener = ImageStreamListener(_onImage);
+  Size? _imageSize;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(_ImageBorder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image) _resolve();
+  }
+
+  void _resolve() {
+    final stream = widget.image.resolve(createLocalImageConfiguration(context));
+    final previous = _stream;
+    if (previous != null && previous.key == stream.key) return;
+    previous?.removeListener(_listener);
+    _stream = stream..addListener(_listener);
+  }
+
+  void _onImage(ImageInfo info, bool synchronousCall) {
+    final size = Size(
+      info.image.width.toDouble(),
+      info.image.height.toDouble(),
+    );
+    info.dispose();
+    if (!mounted || size == _imageSize) return;
+    setState(() => _imageSize = size);
+  }
+
+  @override
+  void dispose() {
+    _stream?.removeListener(_listener);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageSize = _imageSize;
+    if (imageSize == null || imageSize.isEmpty) return const SizedBox.expand();
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _ImageBorderPainter(
+        imageSize,
+        Theme.of(context).colorScheme.outlineVariant,
+      ),
+    );
+  }
+}
+
+class _ImageBorderPainter extends CustomPainter {
+  _ImageBorderPainter(this.imageSize, this.color);
+
+  final Size imageSize;
+  final Color color;
+
+  /// Where a [BoxFit.contain], centred image is drawn in [size].
+  static Rect imageRect(Size imageSize, Size size) => Alignment.center.inscribe(
+    applyBoxFit(BoxFit.contain, imageSize, size).destination,
+    Offset.zero & size,
+  );
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      imageRect(imageSize, size).deflate(0.5),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ImageBorderPainter oldDelegate) =>
+      oldDelegate.imageSize != imageSize || oldDelegate.color != color;
+}
+
+/// Marks the landscape side panel's scroll view, which the app bar ignores.
+class _SidePanelScrollArea extends StatelessWidget {
+  const _SidePanelScrollArea({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 class _InitErrorView extends StatelessWidget {

@@ -312,6 +312,8 @@ void main() {
     expect(find.text('Page 3 of 4'), findsOneWidget);
     await tester.tap(find.byTooltip('Stop importing'));
     await settle(tester);
+    await tester.tap(find.text('Stop'));
+    await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
     expect(find.text('Export 1 page as PDF'), findsOneWidget);

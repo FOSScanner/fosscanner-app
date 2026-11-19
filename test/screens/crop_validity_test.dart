@@ -205,7 +205,9 @@ void main() {
     );
   }
 
-  testWidgets('collinear corners say the area is too small', (tester) async {
+  testWidgets('collinear corners ask to move them apart (#158)', (
+    tester,
+  ) async {
     await pumpEditor(
       tester,
       initialCorners: const [
@@ -217,11 +219,29 @@ void main() {
     );
 
     expect(
-      find.text('Crop is too small. Double-tap the image to reset.'),
+      find.text('Move the corners apart. Double-tap the image to reset.'),
       findsOneWidget,
     );
     expect(previewButton(tester).onPressed, isNull);
     expect(find.byType(SnackBar), findsNothing);
+  });
+
+  testWidgets('a clump of valid corners is too small (#158)', (tester) async {
+    await pumpEditor(
+      tester,
+      initialCorners: const [
+        Offset(40, 40),
+        Offset(45, 40),
+        Offset(45, 45),
+        Offset(40, 45),
+      ],
+    );
+
+    expect(
+      find.text('Crop is too small. Double-tap the image to reset.'),
+      findsOneWidget,
+    );
+    expect(previewButton(tester).onPressed, isNull);
   });
 
   testWidgets('screen readers can reset the corners', (tester) async {

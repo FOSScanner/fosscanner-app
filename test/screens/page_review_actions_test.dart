@@ -406,6 +406,10 @@ void main() {
       stop();
       stop();
       await tester.pumpAndSettle();
+      // Asks once, like Back, however often it is tapped.
+      expect(find.text('Stop importing?'), findsOneWidget);
+      await tester.tap(find.text('Stop'));
+      await tester.pumpAndSettle();
 
       expect(find.byType(CornerAdjustScreen), findsNothing);
       expect(find.byType(Card), findsOneWidget);
@@ -456,6 +460,34 @@ void main() {
   );
 
   testWidgets(
+    'stopping before any page was added does not claim pages were kept (#91)',
+    (tester) async {
+      final files = [for (var i = 0; i < 3; i++) photo('none-$i')];
+      picker.galleryPhotos = files.map((file) => XFile(file.path)).toList();
+      await pumpHome(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester);
+      final first = tester.widget<CornerAdjustScreen>(
+        find.byType(CornerAdjustScreen),
+      );
+      await tester.tap(find.text('Skip image'));
+      await waitForEditor(tester, previousBytes: first.originalBytes);
+      expect(find.text('Image 2 of 3'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Stop importing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Stop'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+      expect(find.byType(Card), findsNothing);
+      expect(find.text('Import stopped.'), findsOneWidget);
+      expect(find.textContaining('kept'), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
     'the last batch image keeps Stop in place but disabled',
     (tester) async {
       picker.galleryPhotos = [
@@ -493,6 +525,8 @@ void main() {
       await waitForEditor(tester);
       expect(find.text('Image 1 of 3'), findsOneWidget);
       await tester.tap(find.byTooltip('Stop importing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Stop'));
       // Cleanup is real file IO, which needs real event-loop turns.
       for (var i = 0; i < 50 && files.any((file) => file.existsSync()); i++) {
         await tester.runAsync(

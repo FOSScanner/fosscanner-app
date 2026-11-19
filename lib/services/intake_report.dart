@@ -83,6 +83,9 @@ class IntakeReport {
 
   final _notes = <String>[];
 
+  /// Items added as pages so far.
+  int added = 0;
+
   int get rejected => _rejections.values.fold(0, (sum, count) => sum + count);
 
   Map<IntakeRejection, int> get rejections => Map.unmodifiable(_rejections);

@@ -302,12 +302,68 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(find.text('Stop importing?'), findsOneWidget);
-      expect(find.text('Your changes are discarded. $body'), findsOneWidget);
+      expect(
+        find.text('Your changes will be discarded. $body'),
+        findsOneWidget,
+      );
       expect(dialog(), findsNothing);
 
       await tester.tap(find.text('Stop'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
+      expect(stops, 1);
+      expect(find.byType(CornerAdjustScreen), findsNothing);
+    });
+
+    testWidgets('Stop importing asks the same question as Back (#91)', (
+      tester,
+    ) async {
+      var stops = 0;
+      await openEditor(tester, batch: true, onStopImport: () => stops++);
+      await dragTopLeft(tester);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      final backDialog = find.byType(AlertDialog);
+      expect(backDialog, findsOneWidget);
+      final backTexts = [
+        for (final text in tester.widgetList<Text>(
+          find.descendant(of: backDialog, matching: find.byType(Text)),
+        ))
+          text.data,
+      ];
+      await tester.tap(find.text('Keep reviewing'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Stop importing'));
+      await tester.pumpAndSettle();
+      expect(stops, 0, reason: 'the icon must not stop without asking');
+      final stopTexts = [
+        for (final text in tester.widgetList<Text>(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(Text),
+          ),
+        ))
+          text.data,
+      ];
+      expect(stopTexts, backTexts);
+      expect(stopTexts, [
+        'Stop importing?',
+        'Your changes will be discarded. $body',
+        'Keep reviewing',
+        'Stop',
+      ]);
+
+      await tester.tap(find.text('Keep reviewing'));
+      await tester.pumpAndSettle();
+      expect(stops, 0);
+      expect(find.byType(CornerAdjustScreen), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Stop importing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Stop'));
+      await tester.pumpAndSettle();
       expect(stops, 1);
       expect(find.byType(CornerAdjustScreen), findsNothing);
     });

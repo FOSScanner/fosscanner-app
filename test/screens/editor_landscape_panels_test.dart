@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -189,6 +190,109 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('filter_original')), findsNothing);
     expect(find.text('Appearance'), findsOneWidget);
+  });
+
+  testWidgets(
+    'each panel scrolls on its own and the app bar ignores it (#167)',
+    (tester) async {
+      const layoutCase = LayoutCase(Size(640, 300), 2.0);
+      applyLayoutCase(tester, layoutCase);
+      await openAppearance(tester, layoutCase);
+
+      Material appBarMaterial() => tester.widget<Material>(
+        find
+            .descendant(
+              of: find.byType(AppBar),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      final restingAppBar = appBarMaterial();
+      ScrollPosition panelPosition(String name) => tester
+          .state<ScrollableState>(
+            find.descendant(
+              of: find.byKey(ValueKey('side_panel_scroll_$name')),
+              matching: find.byType(Scrollable),
+            ),
+          )
+          .position;
+
+      await tester.tap(find.byTooltip('Adjust'));
+      await tester.pumpAndSettle();
+      final adjust = panelPosition('adjust');
+      expect(adjust.pixels, 0);
+      // Large text does not fit: a scrollbar shows there is more below.
+      expect(adjust.maxScrollExtent, greaterThan(0));
+      final scrollbar = tester.widget<Scrollbar>(
+        find.descendant(of: panel, matching: find.byType(Scrollbar)),
+      );
+      expect(scrollbar.thumbVisibility, isTrue);
+
+      adjust.jumpTo(adjust.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(find.text('Reset adjustments').hitTestable(), findsOneWidget);
+      expect(appBarMaterial().color, restingAppBar.color);
+      expect(appBarMaterial().elevation, restingAppBar.elevation);
+
+      // Filters opens at its top, not at Adjust's scroll position.
+      await tester.tap(find.byTooltip('Filters'));
+      await tester.pumpAndSettle();
+      expect(panelPosition('filters').pixels, 0);
+      expect(appBarMaterial().color, restingAppBar.color);
+
+      // Back to Adjust, and reopening it, both start at the top again.
+      await tester.tap(find.byTooltip('Adjust'));
+      await tester.pumpAndSettle();
+      expect(panelPosition('adjust').pixels, 0);
+      panelPosition('adjust').jumpTo(panelPosition('adjust').maxScrollExtent);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Adjust'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Adjust'));
+      await tester.pumpAndSettle();
+      expect(panelPosition('adjust').pixels, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('the appearance preview has the crop canvas hairline (#166)', (
+    tester,
+  ) async {
+    applyLayoutCase(tester, const LayoutCase(Size(390, 844), 1.0));
+    await openAppearance(tester, const LayoutCase(Size(390, 844), 1.0));
+    final image = find.descendant(
+      of: find.byKey(const Key('adjusted_page_image')),
+      matching: find.byType(RawImage),
+    );
+    // Real image decoding needs real event-loop turns.
+    for (var i = 0; i < 50; i++) {
+      if (tester.renderObject<RenderImage>(image).image != null) break;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump();
+    }
+    await tester.pump();
+    final renderImage = tester.renderObject<RenderImage>(image);
+    final decoded = renderImage.image!;
+    final imageSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
+    final slot = renderImage.size;
+    final drawn = Alignment.center.inscribe(
+      applyBoxFit(BoxFit.contain, imageSize, slot).destination,
+      Offset.zero & slot,
+    );
+    final border = find.byKey(const Key('adjusted_page_border'));
+    expect(tester.getRect(border), tester.getRect(image));
+    final context = tester.element(border);
+    expect(
+      border,
+      paints..rect(
+        rect: drawn.deflate(0.5),
+        color: Theme.of(context).colorScheme.outlineVariant,
+        style: PaintingStyle.stroke,
+        strokeWidth: 1,
+      ),
+    );
   });
 
   testWidgets('portrait still uses bottom sheets', (tester) async {

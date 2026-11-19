@@ -1795,7 +1795,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     // even when the user then stops the import.
     if (unreadable && result == null) reject(IntakeRejection.unreadable);
     if (stopRequested) {
-      return end('stopped', 'Import stopped. Pages already added were kept.');
+      return end(
+        'stopped',
+        report.added > 0
+            ? 'Import stopped. Pages already added were kept.'
+            : 'Import stopped.',
+      );
     }
     if (retakeReview != null && result == null) {
       onRetake?.call(bytes, retakeReview!);
@@ -1815,6 +1820,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _logIntake(source, item, 'not added after review');
       return _PhotoIntakeResult.ended;
     }
+    report.added++;
     _lastNewPageFilter = result.filter;
     return scanNextRequested
         ? _PhotoIntakeResult.addedScanNext

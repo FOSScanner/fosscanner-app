@@ -286,10 +286,12 @@ void main() {
       await waitForEditor(tester, 'Image 2 of 3');
       await tester.tap(find.byTooltip('Stop importing'));
       await settle(tester);
+      await tester.tap(find.text('Stop'));
+      await settle(tester);
 
+      // Nothing was added, so nothing is said to be kept.
       expectOnlyMessage(
-        "1 of 3 images couldn't be added: 1 not an image. Import stopped. "
-        'Pages already added were kept.',
+        "1 of 3 images couldn't be added: 1 not an image. Import stopped.",
       );
     },
     variant: _iOS,
@@ -539,11 +541,12 @@ void main() {
     await waitForUnreadable(tester, 'Image 1 of 2');
     await tester.tap(find.byTooltip('Stop importing'));
     await settle(tester);
+    await tester.tap(find.text('Stop'));
+    await settle(tester);
 
     expect(find.byType(CornerAdjustScreen), findsNothing);
     expectOnlyMessage(
-      "1 of 2 images couldn't be added: 1 unreadable file. Import stopped. "
-      'Pages already added were kept.',
+      "1 of 2 images couldn't be added: 1 unreadable file. Import stopped.",
     );
   }, variant: _iOS);
 }
