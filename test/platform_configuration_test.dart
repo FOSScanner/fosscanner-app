@@ -222,6 +222,109 @@ void main() {
     );
   });
 
+  test('Android removes plugin permissions the app never uses', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final debugManifest = File(
+      'android/app/src/debug/AndroidManifest.xml',
+    ).readAsStringSync();
+    final uncommented = manifest.replaceAll(RegExp(r'<!--[\s\S]*?-->'), '');
+
+    expect(
+      uncommented,
+      contains('xmlns:tools="http://schemas.android.com/tools"'),
+    );
+    // CameraX declares the microphone and legacy storage for video, and its
+    // media3 dependency the network state; the barcode scanner uses neither.
+    for (final permission in [
+      'RECORD_AUDIO',
+      'ACCESS_NETWORK_STATE',
+      'READ_EXTERNAL_STORAGE',
+      'WRITE_EXTERNAL_STORAGE',
+    ]) {
+      expect(
+        uncommented,
+        matches(
+          RegExp(
+            '<uses-permission\\s+android:name="android\\.permission\\.'
+            '$permission"\\s+tools:node="remove"\\s*/>',
+          ),
+        ),
+        reason: permission,
+      );
+    }
+    final requested = RegExp(
+      r'<uses-permission\s+android:name="([^"]+)"\s*/>',
+    ).allMatches(uncommented).map((match) => match.group(1)).toList();
+    expect(requested, ['android.permission.CAMERA']);
+    // Only debug builds talk to the Flutter tool; the app itself is offline.
+    expect(uncommented, isNot(contains('android.permission.INTERNET')));
+    expect(debugManifest, contains('android.permission.INTERNET'));
+  });
+
+  test('CI rejects new permissions in the merged manifest and APK', () {
+    final script = File('tool/check_android_permissions.sh').readAsStringSync();
+    final ci = File('.github/workflows/ci.yml').readAsStringSync();
+    final android = _workflowJobs(ci).values.singleWhere(
+      (job) => _workflowRunCommands(
+        job.source,
+      ).any((run) => run.contains('flutter build apk --debug')),
+    );
+    final steps = _workflowSteps(android.source);
+    final buildIndex = steps.indexWhere(
+      (step) => step.run?.contains('flutter build apk --debug') ?? false,
+    );
+    final checkIndex = steps.indexWhere(
+      (step) => step.run?.contains('check_android_permissions.sh') ?? false,
+    );
+    expect(checkIndex, greaterThan(buildIndex));
+    final check = steps[checkIndex].run!;
+    expect(check, contains('./gradlew :app:processReleaseMainManifest'));
+    expect(
+      check,
+      contains(
+        'build/app/intermediates/merged_manifest/release/'
+        'processReleaseMainManifest/AndroidManifest.xml',
+      ),
+    );
+    expect(check, contains('build/app/outputs/flutter-apk/app-debug.apk'));
+
+    // An allowlist, so a plugin cannot add something nobody thought to ban.
+    final allowed = RegExp(
+      r"^allowed='(.+)'$",
+      multiLine: true,
+    ).firstMatch(script)!.group(1)!;
+    final debugAllowed = RegExp(
+      r"^debug_allowed='(.+)'$",
+      multiLine: true,
+    ).firstMatch(script)!.group(1)!;
+    final release = RegExp(allowed);
+    final debug = RegExp(debugAllowed);
+    expect(release.hasMatch('android.permission.CAMERA'), isTrue);
+    expect(
+      release.hasMatch(
+        'com.fosscanner.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+      ),
+      isTrue,
+    );
+    for (final permission in [
+      'android.permission.RECORD_AUDIO',
+      'android.permission.INTERNET',
+      'android.permission.ACCESS_NETWORK_STATE',
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.READ_MEDIA_IMAGES',
+      'android.permission.CAMERA2',
+    ]) {
+      expect(release.hasMatch(permission), isFalse, reason: permission);
+    }
+    expect(debug.hasMatch('android.permission.INTERNET'), isTrue);
+    expect(debug.hasMatch('android.permission.RECORD_AUDIO'), isFalse);
+    expect(script, contains('aapt2" dump permissions'));
+    expect(script, contains('set -euo pipefail'));
+  });
+
   test('native drafts use the OS-managed application cache', () {
     final source = File(
       'lib/services/draft_store_native.dart',
