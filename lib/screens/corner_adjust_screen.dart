@@ -541,6 +541,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 onPressed: _isProcessing ? null : _showFilters,
               ),
               IconButton(
+                icon: const Icon(Icons.tune),
+                tooltip: 'Adjust',
+                onPressed: _isProcessing ? null : _showAdjustments,
+              ),
+              IconButton(
                 icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
                 tooltip: 'Rotate',
                 onPressed: _isProcessing ? null : _rotate,
@@ -565,7 +570,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _step == _Step.corners && _hasBatchProgress;
 
   String get _appBarTitle {
-    if (_step == _Step.filter) return 'Adjust appearance';
+    if (_step == _Step.filter) return 'Appearance';
     if (_showsBatchProgressTitle) {
       return 'Image ${widget.batchPosition} of ${widget.batchCount}';
     }
@@ -723,20 +728,22 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     unawaited(_updatePreviews());
   }
 
-  Widget _resetAdjustmentsButton() => TextButton(
-    onPressed: _isProcessing
-        ? null
-        : () {
-            setState(() {
-              _brightness = 0;
-              _contrast = 1;
-              _finalPreviewGeneration++;
-              _previewStatus = _PreviewStatus.pending;
-            });
-            unawaited(_updateFinalPreview());
-          },
-    child: const Text('Reset adjustments'),
-  );
+  Widget _resetAdjustmentsButton({required VoidCallback onSheetChanged}) =>
+      TextButton(
+        onPressed: _isProcessing
+            ? null
+            : () {
+                setState(() {
+                  _brightness = 0;
+                  _contrast = 1;
+                  _finalPreviewGeneration++;
+                  _previewStatus = _PreviewStatus.pending;
+                });
+                onSheetChanged();
+                unawaited(_updateFinalPreview());
+              },
+        child: const Text('Reset adjustments'),
+      );
 
   Widget _boundedPreviewImage(
     Uint8List bytes, {
@@ -756,28 +763,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final previewBytes = _finalPreviewBytes;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useScrollableLayout =
-            constraints.maxHeight < 480 ||
-            MediaQuery.textScalerOf(context).scale(16) > 20;
-        if (!useScrollableLayout) {
+        // Filters and brightness/contrast open on demand, so only the
+        // confirm buttons share the screen with the preview. Large text
+        // scales those buttons, which the fixed layout absorbs; only very
+        // short viewports need to scroll.
+        if (constraints.maxHeight >= 480) {
           return Column(
             children: [
               Expanded(child: _filterPreview(previewBytes)),
-              _adjustmentSlider(
-                label: 'Brightness',
-                value: _brightness,
-                min: -100,
-                max: 100,
-                onChanged: (value) => _brightness = value,
-              ),
-              _adjustmentSlider(
-                label: 'Contrast',
-                value: _contrast,
-                min: 0.5,
-                max: 2.0,
-                onChanged: (value) => _contrast = value,
-              ),
-              _resetAdjustmentsButton(),
               _filterActions(),
             ],
           );
@@ -795,21 +788,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 height: previewHeight,
                 child: _filterPreview(previewBytes),
               ),
-              _adjustmentSlider(
-                label: 'Brightness',
-                value: _brightness,
-                min: -100,
-                max: 100,
-                onChanged: (value) => _brightness = value,
-              ),
-              _adjustmentSlider(
-                label: 'Contrast',
-                value: _contrast,
-                min: 0.5,
-                max: 2.0,
-                onChanged: (value) => _contrast = value,
-              ),
-              _resetAdjustmentsButton(),
               _filterActions(),
             ],
           ),
@@ -919,6 +897,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     required double min,
     required double max,
     required ValueChanged<double> onChanged,
+    required VoidCallback onSheetChanged,
   }) {
     final displayValue = label == 'Brightness'
         ? '${value > 0 ? '+' : ''}${value.round()}'
@@ -948,6 +927,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                           _finalPreviewGeneration++;
                           _previewStatus = _PreviewStatus.pending;
                         });
+                        onSheetChanged();
                       },
                 onChangeEnd: _isProcessing
                     ? null
@@ -1015,6 +995,88 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Brightness, contrast and Reset open on demand, like Filters, so the
+  /// preview keeps the screen. Values live in this state, so they persist
+  /// across openings; the preview updates when a slider is released. The
+  /// sheet is its own route, so Back closes it before leaving the step.
+  Future<void> _showAdjustments() async {
+    if (_isProcessing || _isLeaving || _step != _Step.filter) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) {
+          void refreshSheet() => updateSheet(() {});
+          return ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  0,
+                  16,
+                  0,
+                  16 + MediaQuery.viewPaddingOf(context).bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Adjust',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close adjustments',
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(sheetContext).pop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _adjustmentSlider(
+                      label: 'Brightness',
+                      value: _brightness,
+                      min: -100,
+                      max: 100,
+                      onChanged: (value) => _brightness = value,
+                      onSheetChanged: refreshSheet,
+                    ),
+                    _adjustmentSlider(
+                      label: 'Contrast',
+                      value: _contrast,
+                      min: 0.5,
+                      max: 2.0,
+                      onChanged: (value) => _contrast = value,
+                      onSheetChanged: refreshSheet,
+                    ),
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: _resetAdjustmentsButton(
+                          onSheetChanged: refreshSheet,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

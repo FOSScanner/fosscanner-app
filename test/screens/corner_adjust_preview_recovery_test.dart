@@ -183,6 +183,10 @@ void main() {
         await tester.tap(find.byTooltip('Close filters'));
         await tester.pump();
       case 'brightness' || 'contrast':
+        if (find.byType(Slider).evaluate().isEmpty) {
+          await tester.tap(find.byTooltip('Adjust'));
+          await tester.pumpAndSettle();
+        }
         final slider = tester.widget<Slider>(
           adjustment == 'brightness'
               ? find.byType(Slider).first
@@ -190,7 +194,12 @@ void main() {
         );
         final value = adjustment == 'brightness' ? 35.0 : 1.5;
         slider.onChanged!(value);
-        if (release) slider.onChangeEnd!(value);
+        if (release) {
+          slider.onChangeEnd!(value);
+          // A released slider leaves the sheet free to close; the preview
+          // updates behind it either way.
+          await tester.tap(find.byTooltip('Close adjustments'));
+        }
     }
     await pumpWork(tester);
   }

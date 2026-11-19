@@ -32,9 +32,11 @@ No account, no cloud processing, no tracking.
 2. **Check the crop.** Drag the corners to the page edges. If detection fails,
    the full image is selected rather than trimmed, and a brief notice over the
    image says so.
-3. **Preview and adjust.** Choose **Preview page**, then tap the **Filters** icon
-   to open filter choices, rotate, or adjust brightness and contrast. **Reset adjustments** restores
-   neutral brightness/contrast without changing your crop, filter, or rotation.
+3. **Preview and adjust.** Choose **Preview page**; the page preview fills the
+   screen. Tap the **Filters** icon for filter choices, the **Adjust** icon for
+   brightness and contrast (the preview updates when you release a slider), or
+   rotate. **Reset adjustments** in the Adjust sheet restores neutral
+   brightness/contrast without changing your crop, filter, or rotation.
 4. **Build your document.** Choose **Add page**, then scan more pages. After a
    camera capture, **Add & scan next** adds the page and reopens the camera
    right away; **Add page** (or canceling the camera) ends the series with every
@@ -67,7 +69,7 @@ capture or single-image review adds no page.
   <tr>
     <td align="center"><img src="docs/screenshots/ui-home-pages.png" width="260" alt="Document overview with three page previews, temporary-draft guidance, and compact PDF export controls"><br>Review your document</td>
     <td align="center"><img src="docs/screenshots/crop-full-image-fallback.png" width="260" alt="Minimal crop editor with draggable corners and full-image fallback guidance"><br>Check the crop</td>
-    <td align="center"><img src="docs/screenshots/ui-adjust-appearance.png" width="260" alt="Appearance editor showing a larger page preview, numeric adjustments, a Filters icon, and Add page"><br>Adjust the appearance</td>
+    <td align="center"><img src="docs/screenshots/ui-adjust-appearance.png" width="260" alt="Appearance editor showing a full-height page preview, Filters and Adjust icons, and Add page"><br>Adjust the appearance</td>
   </tr>
 </table>
 

@@ -319,7 +319,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Edit page'));
       await tester.pumpAndSettle();
-      expect(find.text('Adjust appearance'), findsOneWidget);
+      expect(find.text('Appearance'), findsOneWidget);
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(find.text('Edit page'), findsOneWidget);

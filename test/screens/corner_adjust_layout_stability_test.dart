@@ -108,7 +108,7 @@ void main() {
     await tester.ensureVisible(find.text('Preview page'));
     await tester.tap(find.text('Preview page'));
     await tester.pumpAndSettle();
-    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     return operations;
   }
 
@@ -117,23 +117,32 @@ void main() {
     matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
   );
 
-  Map<String, Finder> appearanceAnchors({bool includeAdjustments = true}) => {
+  final previewAndConfirm = {
     'preview': find.byKey(const Key('adjusted_page_preview')),
-    if (includeAdjustments) ...{
-      'brightness': find.byType(Slider).first,
-      'contrast': find.byType(Slider).last,
-      'reset': find.widgetWithText(TextButton, 'Reset adjustments'),
-    },
     'confirm': find.widgetWithText(FilledButton, 'Save changes'),
   };
 
-  /// Walks ready -> pending -> updating -> failed -> updating -> ready,
-  /// asserting that no anchor moves at any step.
+  final adjustSheetControls = {
+    'brightness': find.byType(Slider).first,
+    'contrast': find.byType(Slider).last,
+    'reset': find.widgetWithText(TextButton, 'Reset adjustments'),
+  };
+
+  Future<void> openAdjustments(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Adjust'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Slider), findsNWidgets(2));
+  }
+
+  /// With the Adjust sheet open, walks ready -> pending -> updating ->
+  /// failed -> updating -> ready, asserting that no anchor moves at any
+  /// step. The preview and confirm button stay measurable under the sheet.
   Future<void> cyclePreviewStatus(
     WidgetTester tester,
     _Operations operations,
     Map<String, Finder> anchors,
   ) async {
+    if (find.byType(Slider).evaluate().isEmpty) await openAdjustments(tester);
     Slider slider() => tester.widget<Slider>(find.byType(Slider).first);
     await expectStableRects(tester, anchors, () async {
       slider().onChanged!(35);
@@ -166,7 +175,10 @@ void main() {
       'preview, adjustments and confirm stay fixed across preview states',
       (tester, layoutCase) async {
         final operations = await openAppearance(tester, layoutCase);
-        await cyclePreviewStatus(tester, operations, appearanceAnchors());
+        await cyclePreviewStatus(tester, operations, {
+          ...previewAndConfirm,
+          ...adjustSheetControls,
+        });
       },
       cases: _phoneCases,
     );
@@ -185,6 +197,40 @@ void main() {
       },
       cases: const [LayoutCase(Size(640, 300), 2.0)],
     );
+  });
+
+  group('Adjust sheet (#146)', () {
+    testLayoutMatrix('opening and closing Adjust never moves the preview', (
+      tester,
+      layoutCase,
+    ) async {
+      final operations = await openAppearance(tester, layoutCase);
+      await expectStableRects(tester, previewAndConfirm, () async {
+        await openAdjustments(tester);
+      }, reason: 'open');
+      final slider = tester.widget<Slider>(find.byType(Slider).last);
+      slider.onChanged!(1.5);
+      slider.onChangeEnd!(1.5);
+      await tester.pump();
+      await tester.pump();
+      operations.finalPreviews.last.complete(bytes);
+      await tester.pumpAndSettle();
+      await expectStableRects(tester, previewAndConfirm, () async {
+        await tester.tap(find.byTooltip('Close adjustments'));
+        await tester.pumpAndSettle();
+      }, reason: 'close');
+      await expectStableRects(tester, previewAndConfirm, () async {
+        await openAdjustments(tester);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+      }, reason: 'reopen and Back');
+      expect(find.byType(Slider), findsNothing);
+      expect(find.text('Appearance'), findsOneWidget);
+      expect(find.text('Contrast: 1.50×'), findsNothing);
+      await openAdjustments(tester);
+      expect(find.text('Contrast: 1.50×'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   group('crop canvas (#150)', () {

@@ -260,7 +260,8 @@ void main() {
     }
     await tester.pumpAndSettle();
     expect(find.text('Add page'), findsOneWidget);
-    expect(find.text('Brightness: 0'), findsOneWidget);
+    expect(find.byTooltip('Adjust'), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
     await save('ui-adjust-appearance');
     expect(find.text('Adjust crop'), findsNothing);
     expect(find.byKey(const ValueKey('filter_original')), findsNothing);
