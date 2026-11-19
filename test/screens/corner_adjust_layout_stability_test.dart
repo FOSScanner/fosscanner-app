@@ -197,6 +197,45 @@ void main() {
     );
   });
 
+  group('rotation (#148)', () {
+    testLayoutMatrix(
+      'keeps the previous image and shows progress while rotating',
+      (tester, layoutCase) async {
+        final operations = await openAppearance(tester, layoutCase);
+        final image = find.byKey(const Key('adjusted_page_image'));
+        final before = tester.element(image);
+        ImageProvider provider() => tester.widget<Image>(image).image;
+        final previous = provider();
+        expect(tester.widget<Image>(image).gaplessPlayback, isTrue);
+
+        await expectStableRects(tester, previewAndConfirm, () async {
+          await tester.tap(find.byTooltip('Rotate clockwise'));
+          await pumpWork(tester);
+        }, reason: 'rotate');
+        expect(find.text('Updating preview…'), findsOneWidget);
+        expect(image, findsOneWidget);
+        expect(provider(), previous);
+
+        final rotated = Uint8List.fromList([...bytes]);
+        await expectStableRects(tester, previewAndConfirm, () async {
+          operations.finalPreviews.last.complete(rotated);
+          await tester.pump();
+        }, reason: 'rotated result arrives');
+        // Same element: the new bytes replace the old ones without a gap.
+        expect(identical(tester.element(image), before), isTrue);
+        expect(tester.widget<Image>(image).gaplessPlayback, isTrue);
+        expect(provider(), isNot(previous));
+        expect(find.text('Updating preview…'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      cases: const [
+        LayoutCase(Size(390, 844), 1.0),
+        LayoutCase(Size(844, 390), 1.0),
+        LayoutCase(Size(640, 300), 2.0),
+      ],
+    );
+  });
+
   group('Adjust sheet (#146)', () {
     testLayoutMatrix('opening and closing Adjust never moves the preview', (
       tester,

@@ -936,11 +936,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         child: const Text('Reset adjustments'),
       );
 
+  /// Gapless: new bytes (a rotation, a filter, an adjustment) replace the
+  /// previous image only once decoded, so the preview never blanks between
+  /// the two. The image is fitted inside its slot, so a rotation that flips
+  /// the aspect ratio never resizes the slot.
   Widget _boundedPreviewImage(
     Uint8List bytes, {
+    Key? key,
     required BoxFit fit,
     required int maxDimension,
   }) => Image(
+    key: key,
+    gaplessPlayback: true,
     image: ResizeImage(
       MemoryImage(bytes),
       width: maxDimension,
@@ -1013,6 +1020,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         if (previewBytes != null)
           _boundedPreviewImage(
             previewBytes,
+            key: const Key('adjusted_page_image'),
             fit: BoxFit.contain,
             maxDimension: _fullPreviewDecodeSize,
           ),
