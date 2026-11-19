@@ -1126,10 +1126,7 @@ void main() {
         tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isFalse,
       );
-      expect(
-        find.text('Image-only PDF without text recognition.'),
-        findsOneWidget,
-      );
+      expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Export PDF (1 page)'));

@@ -128,7 +128,10 @@ void main() {
     await openOptions(tester);
     expect(find.text('Searchable text'), findsOneWidget);
     expect(find.textContaining('Latin-script'), findsOneWidget);
-    expect(find.textContaining('entirely on your device'), findsOneWidget);
+    expect(
+      find.text('Supports Latin-script text. Runs on your device.'),
+      findsOneWidget,
+    );
     expect(
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
       isFalse,
@@ -136,10 +139,7 @@ void main() {
 
     await tester.tap(find.text('Searchable text'));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Recognize text so you can search and select it in the PDF.'),
-      findsOneWidget,
-    );
+    expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsNothing);

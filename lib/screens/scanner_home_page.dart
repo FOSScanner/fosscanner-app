@@ -1885,14 +1885,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 ),
                 if (_ocrSupported) ...[
                   const SizedBox(height: 8),
+                  // One subtitle for both states: the switch and the summary's
+                  // semantics value carry on/off, and a changing line count
+                  // would move the switch under the finger.
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Searchable text'),
-                    subtitle: Text(
-                      _preferences.searchablePdf
-                          ? 'Recognize text so you can search and select it in the PDF.'
-                          : 'Image-only PDF without text recognition.',
-                    ),
+                    subtitle: const Text('Search and copy text in the PDF.'),
                     value: _preferences.searchablePdf,
                     onChanged: (value) {
                       if (!canChange(sheetContext)) return;
@@ -1904,8 +1903,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Text recognition supports Latin-script text and runs '
-                    'entirely on your device. Your scans stay private.',
+                    'Supports Latin-script text. Runs on your device.',
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -1937,15 +1935,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   },
                 ),
                 const SizedBox(height: 8),
-                Text(switch (_preferences.pdfQuality) {
-                  PdfQuality.high => 'Full resolution. Largest files.',
-                  PdfQuality.balanced =>
-                    'Up to 200 DPI with moderate compression. Much smaller '
-                        'files that print well.',
-                  PdfQuality.small =>
-                    'Up to 150 DPI with strong compression, for email and '
-                        'upload limits. Fine print may lose detail.',
-                }),
+                // Sized to the longest description so choosing a quality
+                // never resizes the bottom-anchored sheet.
+                IndexedStack(
+                  index: PdfQuality.values.indexOf(_preferences.pdfQuality),
+                  children: [
+                    for (final quality in PdfQuality.values)
+                      Text(switch (quality) {
+                        PdfQuality.high => 'Full resolution. Largest files.',
+                        PdfQuality.balanced =>
+                          'Up to 200 DPI with moderate compression. Much '
+                              'smaller files that print well.',
+                        PdfQuality.small =>
+                          'Up to 150 DPI with strong compression, for email '
+                              'and upload limits. Fine print may lose detail.',
+                      }),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 Align(
                   alignment: AlignmentDirectional.centerEnd,
@@ -1980,7 +1986,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           runSpacing: 8,
           children: [
             for (final value in values)
+              // No checkmark: it would widen the selected chip and could
+              // re-wrap the row, moving chips and the sheet edge.
               ChoiceChip(
+                showCheckmark: false,
                 label: Text(label(value)),
                 selected: value == selected,
                 onSelected: (_) => onSelected(value),
@@ -2009,7 +2018,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   String get _exportOptionsSummary => [
     if (_ocrSupported)
-      _exportsSearchable ? 'Searchable text enabled' : 'Image-only PDF',
+      _exportsSearchable ? 'Searchable text on' : 'Searchable text off',
     '${_preferences.pdfPageSize.label} page size',
     '${_preferences.pdfQuality.label} quality',
   ].join(', ');
