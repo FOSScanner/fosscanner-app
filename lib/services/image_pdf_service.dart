@@ -118,6 +118,10 @@ Future<void> _writeImageOnlyPdf(
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
 }
 
+/// [value] in points to two decimals, as the searchable (Tesseract) writer
+/// prints page boxes, so both exports give a page the same box.
+double _points(double value) => (value * 100).roundToDouble() / 100;
+
 /// A page image ready to embed; a null plan sizes the page from its pixels
 /// at [dpi], which is the historical layout for photos.
 typedef _Page = ({Uint8List bytes, PdfPagePlan? plan, int dpi});
@@ -131,10 +135,10 @@ Future<void> _assembleDocument(({List<_Page> pages, String path}) job) async {
       pw.Page(
         pageFormat: plan == null
             ? PdfPageFormat(
-                image.width! / page.dpi * PdfPageFormat.inch,
-                image.height! / page.dpi * PdfPageFormat.inch,
+                _points(image.width! / page.dpi * PdfPageFormat.inch),
+                _points(image.height! / page.dpi * PdfPageFormat.inch),
               )
-            : PdfPageFormat(plan.pageWidth, plan.pageHeight),
+            : PdfPageFormat(_points(plan.pageWidth), _points(plan.pageHeight)),
         margin: pw.EdgeInsets.zero,
         build: (_) => plan == null
             ? pw.Image(image, fit: pw.BoxFit.fill)

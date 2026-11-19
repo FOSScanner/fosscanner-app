@@ -19,6 +19,11 @@ bool _cancellationRequested = false;
 bool _nativeRendering = false;
 void Function(int completed, int total)? _progressCallback;
 
+/// How many pages are prepared at once for a searchable PDF: one per spare
+/// core, at most three, so a decoded page per worker stays affordable.
+int get defaultPreparationWorkers =>
+    (Platform.numberOfProcessors - 1).clamp(1, 3);
+
 bool get isSupported => defaultTargetPlatform == TargetPlatform.android;
 
 Future<void> _ensureTessdata() async {
@@ -70,6 +75,9 @@ void _checkCancellation() {
 // its density is sent along because Tesseract sizes pages as pixels / DPI.
 // Original/High sends the pages untouched at their source density
 // ([sourceDpis], null for photos), or the historical 150 DPI without one.
+// Pages are prepared on up to [preparationWorkers] workers at once (by
+// default a few, depending on the processor count), and [onPreparing]
+// reports each prepared page before [onProgress] reports recognized ones.
 Future<void> createSearchablePdf(
   List<Uint8List> pageImages, {
   required String outputPath,
@@ -77,6 +85,8 @@ Future<void> createSearchablePdf(
   PdfPageSize pageSize = PdfPageSize.original,
   PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
+  void Function(int completed, int total)? onPreparing,
+  int? preparationWorkers,
 }) async {
   final images = _validatedPages(pageImages);
   if (sourceDpis != null && sourceDpis.length != images.length) {
@@ -96,29 +106,62 @@ Future<void> createSearchablePdf(
       _checkCancellation();
       final keepsOriginal =
           pageSize == PdfPageSize.original && quality == PdfQuality.high;
-      final imageFiles = <File>[];
-      final pageDpis = <int>[];
-      for (var i = 0; i < images.length; i++) {
-        var bytes = images[i];
-        final sourceDpi = sourceDpis?[i];
-        var dpi = originalDensity(sourceDpi);
-        if (!keepsOriginal) {
-          final prepared = await compute(preparePdfPage, (
-            bytes: bytes,
-            pageSize: pageSize,
-            quality: quality,
-            padToPage: true,
-            sourceDpi: sourceDpi,
-          ));
+      final directory = jobDirectory;
+      final imageFiles = List<File?>.filled(images.length, null);
+      final pageDpis = List<int>.filled(images.length, 0);
+      // Resampling decodes whole pages in Dart and dominates the export
+      // when pages are prepared one at a time, so a few run side by side.
+      // Each holds one decoded page, which bounds the memory it needs.
+      var next = 0;
+      var prepared = 0;
+      Object? failure;
+      StackTrace? failureStack;
+      Future<void> prepareNext() async {
+        while (next < images.length && failure == null) {
           _checkCancellation();
-          bytes = prepared.bytes;
-          dpi = prepared.plan.nativeDpi;
+          final i = next++;
+          var bytes = images[i];
+          final sourceDpi = sourceDpis?[i];
+          var dpi = originalDensity(sourceDpi);
+          if (!keepsOriginal) {
+            final page = await compute(preparePdfPage, (
+              bytes: bytes,
+              pageSize: pageSize,
+              quality: quality,
+              padToPage: true,
+              sourceDpi: sourceDpi,
+            ));
+            _checkCancellation();
+            bytes = page.bytes;
+            dpi = page.plan.nativeDpi;
+          }
+          final file = File('${directory.path}/page_$i.jpg');
+          await file.writeAsBytes(bytes);
+          _checkCancellation();
+          imageFiles[i] = file;
+          pageDpis[i] = dpi;
+          prepared++;
+          if (!keepsOriginal) onPreparing?.call(prepared, images.length);
         }
-        final file = File('${jobDirectory.path}/page_$i.jpg');
-        await file.writeAsBytes(bytes);
-        _checkCancellation();
-        imageFiles.add(file);
-        pageDpis.add(dpi);
+      }
+
+      final workers = keepsOriginal
+          ? 1
+          : (preparationWorkers ?? defaultPreparationWorkers).clamp(
+              1,
+              images.length,
+            );
+      // Every worker settles before the job directory can be removed; the
+      // first failure stops the others and is rethrown.
+      await Future.wait([
+        for (var w = 0; w < workers; w++)
+          prepareNext().catchError((Object error, StackTrace stack) {
+            failure ??= error;
+            failureStack ??= stack;
+          }),
+      ]);
+      if (failure case final error?) {
+        Error.throwWithStackTrace(error, failureStack!);
       }
       final outputPathNoExtension = '${jobDirectory.path}/document';
       final pdfFile = File('$outputPathNoExtension.pdf');
@@ -126,7 +169,7 @@ Future<void> createSearchablePdf(
       _nativeRendering = true;
       try {
         pdfPath = await _channel.invokeMethod<String>('createSearchablePdf', {
-          'imagePaths': [for (final file in imageFiles) file.path],
+          'imagePaths': [for (final file in imageFiles) file!.path],
           'outputPath': outputPathNoExtension,
           'pageDpis': pageDpis,
         });

@@ -300,8 +300,19 @@ void main() {
           final rendererHeight =
               (plan.canvasHeight ?? plan.pixelHeight) * 72 / dpi;
           final reason = '${size.label}/${quality.label} $w x $h';
-          expect(boxes[i][2], closeTo(rendererWidth, 0.001), reason: reason);
-          expect(boxes[i][3], closeTo(rendererHeight, 0.001), reason: reason);
+          // Tesseract prints boxes to two decimals; so does the image-only
+          // writer, so the boxes are identical, not merely close.
+          double points(double v) => (v * 100).roundToDouble() / 100;
+          expect(
+            boxes[i][2],
+            closeTo(points(rendererWidth), 1e-9),
+            reason: reason,
+          );
+          expect(
+            boxes[i][3],
+            closeTo(points(rendererHeight), 1e-9),
+            reason: reason,
+          );
         }
       }
     }

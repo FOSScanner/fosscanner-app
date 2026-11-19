@@ -315,6 +315,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   // Null while nothing cancellable runs (choosing a save location, offering
   // the image-only fallback, opening the share sheet).
   _JobProgress? _pdfProgress;
+  // Pages prepared for a searchable PDF (resampled to the page size and
+  // quality) before text recognition starts; null outside that step.
+  _JobProgress? _pdfPreparation;
   _PdfExporter? _pdfExporter;
   bool _isPickingImages = false;
   bool _isRestoringDraft = false;
@@ -2276,15 +2279,32 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  Future<void> _createSearchablePdf(List<ScannedPage> pages, File output) {
-    return ocr_service.createSearchablePdf(
-      [for (final page in pages) page.processedBytes],
-      outputPath: output.path,
-      sourceDpis: [for (final page in pages) page.sourceDpi],
-      pageSize: _preferences.pdfPageSize,
-      quality: _preferences.pdfQuality,
-      onProgress: _updatePdfProgress,
-    );
+  Future<void> _createSearchablePdf(
+    List<ScannedPage> pages,
+    File output,
+  ) async {
+    try {
+      await ocr_service.createSearchablePdf(
+        [for (final page in pages) page.processedBytes],
+        outputPath: output.path,
+        sourceDpis: [for (final page in pages) page.sourceDpi],
+        pageSize: _preferences.pdfPageSize,
+        quality: _preferences.pdfQuality,
+        onProgress: _updatePdfProgress,
+        onPreparing: (completed, total) {
+          if (!mounted) return;
+          setState(() {
+            _pdfPreparation = completed < total
+                ? (completed: completed, total: total)
+                : null;
+          });
+        },
+      );
+    } finally {
+      if (mounted && _pdfPreparation != null) {
+        setState(() => _pdfPreparation = null);
+      }
+    }
   }
 
   Future<bool> _confirmImageOnlyFallback() async {
@@ -2786,6 +2806,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
     final progress = _pdfProgress;
     if (progress == null) return 'Preparing PDF…';
+    // Page size and quality presets resample every page before text
+    // recognition can start, which can take a while on long documents.
+    final preparation = _pdfPreparation;
+    if (preparation != null) {
+      return 'Preparing pages · ${preparation.completed + 1} of '
+          '${preparation.total}';
+    }
     // Every page is done; only assembling the document is left.
     if (progress.total > 0 && progress.completed >= progress.total) {
       return 'Finishing PDF…';
@@ -2803,7 +2830,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// first report and while finishing it spins, so it never sits empty or
   /// full and looks stuck.
   double? get _exportProgressValue {
-    final progress = _pdfProgress;
+    final progress = _pdfPreparation ?? _pdfProgress;
     if (_isCancellingPdf ||
         progress == null ||
         progress.completed <= 0 ||

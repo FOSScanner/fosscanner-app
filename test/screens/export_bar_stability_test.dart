@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/app_preferences.dart';
+import 'package:fosscanner/services/pdf_export_options.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:share_plus_platform_interface/share_plus_platform_interface.dart';
@@ -92,15 +93,14 @@ void main() {
     LayoutCase layoutCase, {
     required int pages,
     _Share? share,
+    AppPreferences preferences = const AppPreferences(searchablePdf: true),
   }) async {
     await tester.pumpWidget(
       MaterialApp(
         builder: withTextScale(layoutCase.textScale),
         home: ScannerHomePage(
           searchablePdfEnabled: true,
-          preferencesStore: MemoryAppPreferencesStore(
-            const AppPreferences(searchablePdf: true),
-          ),
+          preferencesStore: MemoryAppPreferencesStore(preferences),
           sharePlus: share == null ? null : SharePlus.custom(share),
           initialPages: [
             for (var i = 0; i < pages; i++)
@@ -169,6 +169,64 @@ void main() {
         expectRects(tester, idle, baseline, '$pages pages');
       }
     },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testLayoutMatrix(
+    'searchable export reports page preparation in place before OCR',
+    (tester, layoutCase) async {
+      final ocr = _FakeOcr();
+      messenger.setMockMethodCallHandler(_ocrChannel, ocr.handle);
+      final share = _Share();
+      await pumpHome(
+        tester,
+        layoutCase,
+        pages: 12,
+        share: share,
+        preferences: const AppPreferences(
+          searchablePdf: true,
+          pdfPageSize: PdfPageSize.a4,
+          pdfQuality: PdfQuality.small,
+        ),
+      );
+      final idle = captureRects(tester, frame);
+      ocr.gate = await newGate(tester);
+      await tester.tap(find.byIcon(Icons.share_outlined));
+      await tester.pump();
+      final seen = <String>[];
+      await pumpUntil(tester, () {
+        final status = find.textContaining('Preparing pages');
+        if (status.evaluate().isNotEmpty) {
+          seen.add(tester.widget<Text>(status).data!);
+          expectRects(tester, frame, idle, 'preparing pages');
+          expect(
+            tester
+                .widget<TextButton>(find.widgetWithText(TextButton, 'Cancel'))
+                .onPressed,
+            isNotNull,
+          );
+        }
+        return ocr.jobs == 1;
+      }, settle: false);
+      expect(seen, isNotEmpty);
+      for (final status in seen) {
+        expect(
+          status,
+          matches(RegExp(r'^Preparing pages · ([1-9]|1[0-2]) of 12$')),
+        );
+      }
+      // Recognition starts only once every page is prepared.
+      expect(find.text('Recognizing text…'), findsOneWidget);
+      expectRects(tester, frame, idle, 'recognizing');
+      ocr.gate!.complete();
+      await pumpUntil(tester, () => share.calls == 1);
+      expect(tester.takeException(), isNull);
+    },
+    cases: const [
+      LayoutCase(Size(390, 844), 1.0),
+      LayoutCase(Size(412, 915), 2.0),
+      LayoutCase(Size(320, 568), 2.0),
+    ],
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
 

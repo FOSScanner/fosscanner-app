@@ -346,6 +346,82 @@ void main() {
     },
   );
 
+  test(
+    'prepares pages side by side, in order, reporting each before OCR',
+    () async {
+      // Landscape and portrait pages give landscape and portrait A4 canvases,
+      // so the order of the prepared files can be checked.
+      final shapes = [true, false, true, true, false];
+      final jpegs = [
+        for (final landscape in shapes)
+          im.encodeJpg(
+            im.Image(
+              width: landscape ? 300 : 200,
+              height: landscape ? 200 : 300,
+            ),
+          ),
+      ];
+      final events = <String>[];
+      late List<bool> rendered;
+      render = (call) async {
+        events.add('render');
+        final args = call.arguments as Map;
+        rendered = [
+          for (final path in (args['imagePaths'] as List).cast<String>())
+            () {
+              final decoded = im.decodeJpg(File(path).readAsBytesSync())!;
+              return decoded.width > decoded.height;
+            }(),
+        ];
+        final output = File('${args['outputPath']}.pdf');
+        await output.writeAsBytes(pdf);
+        return output.path;
+      };
+      await ocr.createSearchablePdf(
+        jpegs,
+        outputPath: outputPath(),
+        pageSize: PdfPageSize.a4,
+        quality: PdfQuality.small,
+        preparationWorkers: 3,
+        onPreparing: (completed, total) => events.add('$completed/$total'),
+      );
+      await readOutput();
+      expect(events, ['1/5', '2/5', '3/5', '4/5', '5/5', 'render']);
+      expect(rendered, shapes);
+    },
+  );
+
+  test('Original/High pages need no preparation and report none', () async {
+    final reports = <(int, int)>[];
+    await ocr.createSearchablePdf(
+      [page, page],
+      outputPath: outputPath(),
+      onPreparing: (completed, total) => reports.add((completed, total)),
+    );
+    await readOutput();
+    expect(reports, isEmpty);
+  });
+
+  test('cancelling while pages are prepared stops and cleans up', () async {
+    final jpeg = im.encodeJpg(im.Image(width: 300, height: 200));
+    final export = ocr.createSearchablePdf(
+      List.filled(6, jpeg),
+      outputPath: outputPath(),
+      pageSize: PdfPageSize.a4,
+      quality: PdfQuality.small,
+      preparationWorkers: 2,
+      onPreparing: (completed, total) {
+        if (completed == 1) unawaited(ocr.cancelOcrJob());
+      },
+    );
+    await expectLater(
+      export,
+      throwsA(predicate((Object e) => ocr.isCancellation(e))),
+    );
+    expect(calls.where((c) => c.method == 'createSearchablePdf'), isEmpty);
+    expect(temporary.listSync(), isEmpty);
+  });
+
   group('copyRecognizedText', () {
     test('sends ordered pages, reports progress and cleans up', () async {
       final second = Uint8List.fromList([4, 5, 6]);
