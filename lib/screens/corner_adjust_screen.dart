@@ -669,13 +669,17 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  /// What one batch item is called: PDF imports are reviewed page by page.
+  String get _batchItem =>
+      widget.source == PageReviewSource.pdf ? 'Page' : 'Image';
+
   /// Batch position stays in the title on both steps, so the context and
   /// the title's place never change while reviewing an image.
   bool get _showsBatchProgressTitle => _hasBatchProgress;
 
   String get _appBarTitle {
     if (_showsBatchProgressTitle) {
-      return 'Image ${widget.batchPosition} of ${widget.batchCount}';
+      return '$_batchItem ${widget.batchPosition} of ${widget.batchCount}';
     }
     if (_step == _Step.filter) return 'Appearance';
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
@@ -729,11 +733,13 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             : _cancelReview,
         child: _actionLabel(
           _canSkipImage
-              ? 'Skip image'
+              ? 'Skip ${_batchItem.toLowerCase()}'
               : _canRetake
               ? 'Retake'
               : 'Cancel',
-          singleLine: landscape,
+          // One line in every layout, so both buttons keep one height even
+          // when large text would wrap only the longer label.
+          singleLine: true,
         ),
       );
       final primary = FilledButton(
@@ -750,7 +756,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : _actionLabel('Preview page', singleLine: landscape),
+            : _actionLabel('Preview page', singleLine: true),
       );
       return SafeArea(
         top: false,
@@ -1122,7 +1128,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$label: $displayValue'),
+          // The slider announces its own label and value.
+          ExcludeSemantics(child: Text('$label: $displayValue')),
           MergeSemantics(
             child: Semantics(
               label: label,
@@ -1371,24 +1378,28 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final selected = _selectedFilter == filter;
     final previewBytes = _filterPreviews?[filter];
     final primary = Theme.of(context).colorScheme.primary;
+    final VoidCallback? select = _isProcessing
+        ? null
+        : () {
+            if (!mounted || _isProcessing) return;
+            setState(() => _selectedFilter = filter);
+            onSelected();
+            unawaited(_updateFinalPreview());
+          };
+    // One node per tile: the visible label is not read a second time.
     return Semantics(
       key: ValueKey('filter_${filter.name}'),
       button: true,
       enabled: !_isProcessing,
       selected: selected,
       label: '${_filterLabels[filter]} filter',
+      onTap: select,
+      excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.only(right: 12),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: _isProcessing
-              ? null
-              : () {
-                  if (!mounted || _isProcessing) return;
-                  setState(() => _selectedFilter = filter);
-                  onSelected();
-                  unawaited(_updateFinalPreview());
-                },
+          onTap: select,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1429,9 +1440,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               const SizedBox(height: 4),
               Text(
                 _filterLabels[filter]!,
+                // Selection changes the colour only: a bolder label would
+                // widen the tile and shift the tiles after it.
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: selected ? primary : null,
-                  fontWeight: selected ? FontWeight.bold : null,
                 ),
               ),
             ],

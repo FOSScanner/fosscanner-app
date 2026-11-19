@@ -272,6 +272,7 @@ class _CornerOverlayState extends State<CornerOverlay> {
                     painter: _QuadPainter(
                       displayCorners,
                       Theme.of(context).colorScheme.primary,
+                      Theme.of(context).colorScheme.outlineVariant,
                       Rect.fromLTWH(
                         offsetX,
                         offsetY,
@@ -388,16 +389,10 @@ class _CornerOverlayState extends State<CornerOverlay> {
 
   Widget _combinedCornerSemantics(List<Rect> targets) {
     final rect = targets.reduce((a, b) => a.expandToInclude(b));
-    final values = [
-      for (var i = 0; i < _liveCorners.length; i++)
-        '${_cornerLabels[i]} ${_liveCorners[i].dx.round()}, '
-            '${_liveCorners[i].dy.round()} pixels',
-    ];
     return Positioned.fromRect(
       rect: rect,
       child: Semantics(
         label: 'Document corners',
-        value: values.join('; '),
         hint: 'Use actions to move corners',
         customSemanticsActions: _semanticActions(const [
           0,
@@ -445,11 +440,9 @@ class _CornerOverlayState extends State<CornerOverlay> {
       ],
     );
     final child = exposeSemantics
+        // The name alone: pixel coordinates mean nothing when heard.
         ? Semantics(
             label: _cornerLabels[index],
-            value:
-                '${_liveCorners[index].dx.round()}, '
-                '${_liveCorners[index].dy.round()} pixels',
             hint: 'Use actions to move this corner',
             customSemanticsActions: _semanticActions([
               index,
@@ -475,13 +468,17 @@ class _CornerOverlayState extends State<CornerOverlay> {
 /// Dims the image outside the crop and outlines it. The kept area is left
 /// untinted so the document stays readable, in light and dark themes alike.
 class _QuadPainter extends CustomPainter {
-  _QuadPainter(this.corners, this.primary, this.imageRect);
+  _QuadPainter(this.corners, this.primary, this.imageBorder, this.imageRect);
 
   /// Dark in both themes: the scrim sits on the photo, not on the surface.
   static const scrimColor = Color(0x8C000000);
 
   final List<Offset> corners;
   final Color primary;
+
+  /// A hairline around the photo, so a white page stays distinct from a
+  /// light background.
+  final Color imageBorder;
   final Rect imageRect;
 
   @override
@@ -492,6 +489,13 @@ class _QuadPainter extends CustomPainter {
       ..addRect(imageRect)
       ..addPolygon(corners, true);
     canvas.drawPath(outside, Paint()..color = scrimColor);
+    canvas.drawRect(
+      imageRect.deflate(0.5),
+      Paint()
+        ..color = imageBorder
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
     canvas.drawPath(
       path,
       Paint()
@@ -504,6 +508,7 @@ class _QuadPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _QuadPainter oldDelegate) =>
       oldDelegate.primary != primary ||
+      oldDelegate.imageBorder != imageBorder ||
       oldDelegate.imageRect != imageRect ||
       !listEquals(oldDelegate.corners, corners);
 }

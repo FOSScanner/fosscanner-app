@@ -256,6 +256,7 @@ CropProblem? cropProblem(List<Offset> corners) {
         _segmentsCross(corners[1], corners[2], corners[3], corners[0])) {
       return CropProblem.cornersCross;
     }
+    if (_isCollapsed(corners)) return CropProblem.areaTooSmall;
     double? winding;
     for (var i = 0; i < 4; i++) {
       final a = corners[i];
@@ -271,4 +272,31 @@ CropProblem? cropProblem(List<Offset> corners) {
     // re-sorts the latter, so what remains is a sliver.
     return CropProblem.areaTooSmall;
   }
+}
+
+/// Whether an invalid quad has (nearly) collapsed: three corners bunched
+/// together, two pairs of corners on top of each other, or almost no area.
+/// Such a crop is technically concave, but "too small" is what the user sees
+/// and what dragging a corner out fixes.
+bool _isCollapsed(List<Offset> corners) {
+  var longest = 0.0;
+  for (var i = 0; i < 4; i++) {
+    for (var j = i + 1; j < 4; j++) {
+      longest = math.max(longest, (corners[i] - corners[j]).distance);
+    }
+  }
+  if (longest == 0) return true;
+  var closePairs = 0;
+  for (var i = 0; i < 4; i++) {
+    for (var j = i + 1; j < 4; j++) {
+      if ((corners[i] - corners[j]).distance < 0.15 * longest) closePairs++;
+    }
+  }
+  var doubleArea = 0.0;
+  for (var i = 0; i < 4; i++) {
+    final a = corners[i];
+    final b = corners[(i + 1) % 4];
+    doubleArea += a.dx * b.dy - b.dx * a.dy;
+  }
+  return closePairs >= 2 || doubleArea.abs() / 2 < 0.02 * longest * longest;
 }

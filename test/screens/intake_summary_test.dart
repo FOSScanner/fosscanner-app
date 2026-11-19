@@ -308,7 +308,7 @@ void main() {
     await tester.tap(find.byTooltip('More options'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Import from PDF'));
-    await waitForEditor(tester, 'Image 2 of 2');
+    await waitForEditor(tester, 'Page 2 of 2');
     await accept(tester);
     await settle(tester);
 

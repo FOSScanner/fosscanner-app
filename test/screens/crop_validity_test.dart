@@ -144,7 +144,6 @@ void main() {
       tester.getSemantics(find.byKey(const ValueKey('corner-handle-0'))),
       matchesSemantics(
         label: 'Top-left corner',
-        value: '90, 10 pixels',
         hint: 'Use actions to move this corner',
         customActions: const [
           CustomSemanticsAction(label: 'Move left'),

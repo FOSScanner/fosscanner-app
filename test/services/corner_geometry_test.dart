@@ -314,6 +314,8 @@ void main() {
         [Offset(50, 50), Offset(50, 50), Offset(50, 50), Offset(50, 50)],
         [Offset(10, 10), Offset(50, 10), Offset(90, 10), Offset(10, 90)],
         [Offset(10, 10), Offset(90, 10), Offset(90, 10.4), Offset(10, 10.4)],
+        // Three corners bunched at one end of a sliver (#168).
+        [Offset(650, 670), Offset(655, 740), Offset(630, 705), Offset(0, 740)],
       ]) {
         expect(
           cropProblem(corners),

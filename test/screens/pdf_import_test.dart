@@ -250,8 +250,8 @@ void main() {
 
     expect(editor.source, PageReviewSource.pdf);
     expect(editor.detectPageEdges, isFalse);
-    expect(find.text('Image 1 of 3'), findsOneWidget);
-    expect(find.text('Skip image'), findsOneWidget);
+    expect(find.text('Page 1 of 3'), findsOneWidget);
+    expect(find.text('Skip page'), findsOneWidget);
     expect(find.byTooltip('Stop importing'), findsOneWidget);
     // A PDF page is not a failed detection.
     expect(
@@ -263,7 +263,7 @@ void main() {
     for (var page = 1; page <= 3; page++) {
       if (page > 1) {
         editor = await waitForEditor(tester, previous: editor);
-        expect(find.text('Image $page of 3'), findsOneWidget);
+        expect(find.text('Page $page of 3'), findsOneWidget);
       }
       await accept(tester);
     }
@@ -290,7 +290,7 @@ void main() {
     expect(importer.requests.single.jpegQuality, 85);
   }, variant: _iOS);
 
-  testWidgets('Skip image skips one page and Stop keeps accepted pages', (
+  testWidgets('Skip page skips one page and Stop keeps accepted pages', (
     tester,
   ) async {
     final files = renderedPages(4);
@@ -301,13 +301,13 @@ void main() {
 
     await startImport(tester);
     final first = await waitForEditor(tester);
-    await tester.tap(find.text('Skip image'));
+    await tester.tap(find.text('Skip page'));
     await tester.pumpAndSettle();
     final second = await waitForEditor(tester, previous: first);
-    expect(find.text('Image 2 of 4'), findsOneWidget);
+    expect(find.text('Page 2 of 4'), findsOneWidget);
     await accept(tester);
     await waitForEditor(tester, previous: second);
-    expect(find.text('Image 3 of 4'), findsOneWidget);
+    expect(find.text('Page 3 of 4'), findsOneWidget);
     await tester.tap(find.byTooltip('Stop importing'));
     await settle(tester);
 
@@ -332,7 +332,7 @@ void main() {
     await startImport(tester);
     await waitForEditor(tester);
     expect(importer.requests.single.maxPages, 1);
-    expect(find.text('Image 1 of 2'), findsOneWidget);
+    expect(find.text('Page 1 of 2'), findsOneWidget);
     await accept(tester);
     await settle(tester);
 

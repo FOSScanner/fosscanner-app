@@ -54,6 +54,12 @@ void main() {
               Offset(10, 124),
             ],
           )
+          // A hairline around the photo keeps a white page visible.
+          ..rect(
+            rect: const Rect.fromLTWH(24.5, 24.5, 199, 199),
+            color: ThemeData(brightness: brightness).colorScheme.outlineVariant,
+            style: PaintingStyle.stroke,
+          )
           ..path(style: PaintingStyle.stroke),
       );
       expect(painter, paintsExactlyCountTimes(#drawPath, 2));
