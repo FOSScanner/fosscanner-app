@@ -55,6 +55,9 @@ class CornerAdjustScreen extends StatefulWidget {
     required this.originalBytes,
     this.source,
     this.isBatchImport = false,
+    this.batchPosition,
+    this.batchCount,
+    this.onStopImport,
     this.initialCorners,
     this.startWithAdjustments = false,
     this.initialFilter = PageFilter.original,
@@ -72,6 +75,15 @@ class CornerAdjustScreen extends StatefulWidget {
 
   /// Refers to the original selection, including its final image.
   final bool isBatchImport;
+
+  /// One-based position of this image within a batch import, and the batch
+  /// size. Both are null outside batch review.
+  final int? batchPosition;
+  final int? batchCount;
+
+  /// Called before this route closes when the user stops a batch import.
+  /// The current and remaining images are not added; accepted pages stay.
+  final VoidCallback? onStopImport;
   final List<Offset>? initialCorners;
 
   /// Open saved appearance directly; crop remains available.
@@ -402,6 +414,33 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       (widget.source == PageReviewSource.gallery ||
           widget.source == PageReviewSource.recovered);
 
+  bool get _hasBatchProgress =>
+      _canSkipImage &&
+      widget.batchPosition != null &&
+      widget.batchCount != null;
+
+  /// Stop importing is laid out on every batch image so the app bar does not
+  /// change between images; it is only enabled while images remain.
+  bool get _offersStopImport =>
+      _hasBatchProgress && widget.onStopImport != null;
+
+  bool get _canStopImport =>
+      _offersStopImport && widget.batchPosition! < widget.batchCount!;
+
+  void _stopImport() {
+    if (!_canStopImport ||
+        !mounted ||
+        _isLeaving ||
+        _isProcessing ||
+        _step != _Step.corners ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    widget.onStopImport!();
+    setState(() => _isLeaving = true);
+    Navigator.of(context).pop();
+  }
+
   void _cancelReview() {
     if (!mounted ||
         _isLeaving ||
@@ -425,12 +464,37 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return PopScope(
       canPop: !_isProcessing,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) _isLeaving = true;
+        if (!didPop) return;
+        // Back during batch review leaves the import instead of silently
+        // skipping to the next image; Skip image remains the explicit skip.
+        if (!_isLeaving &&
+            result == null &&
+            _step == _Step.corners &&
+            _canStopImport) {
+          widget.onStopImport!();
+        }
+        _isLeaving = true;
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_appBarTitle),
+          title: _showsBatchProgressTitle
+              // Scale down rather than ellipsize so the position stays
+              // readable beside Stop importing at large text sizes.
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(_appBarTitle, key: const Key('batch_progress')),
+                )
+              : Text(_appBarTitle),
           actions: [
+            if (_step == _Step.corners && _offersStopImport)
+              IconButton(
+                icon: const Icon(Icons.stop_circle_outlined),
+                tooltip: 'Stop importing',
+                onPressed: !_canStopImport || _isLeaving || _isProcessing
+                    ? null
+                    : _stopImport,
+              ),
             if (_step == _Step.filter) ...[
               IconButton(
                 icon: const Icon(Icons.filter_alt_outlined),
@@ -458,8 +522,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  bool get _showsBatchProgressTitle =>
+      _step == _Step.corners && _hasBatchProgress;
+
   String get _appBarTitle {
     if (_step == _Step.filter) return 'Adjust appearance';
+    if (_showsBatchProgressTitle) {
+      return 'Image ${widget.batchPosition} of ${widget.batchCount}';
+    }
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
