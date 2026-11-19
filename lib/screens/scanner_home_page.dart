@@ -2530,12 +2530,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           mainAxisExtent: geometry.cardSize.height,
         ),
         itemCount: _pages.length,
-        itemBuilder: _buildPageCard,
+        itemBuilder: (context, index) =>
+            _buildPageCard(context, index, geometry.cardSize),
       );
     },
   );
 
-  Widget _buildPageCard(BuildContext context, int index) {
+  Widget _buildPageCard(BuildContext context, int index, Size cardSize) {
     final page = _pages[index];
     final card = Card(
       clipBehavior: Clip.antiAlias,
@@ -2618,9 +2619,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           return LongPressDraggable<int>(
             data: index,
             maxSimultaneousDrags: _isDocumentInteractionLocked ? 0 : 1,
-            feedback: SizedBox(
-              width: 140,
-              height: 200,
+            // The dragged copy has the card's own size, so its label and
+            // controls are laid out exactly as on the card.
+            feedback: SizedBox.fromSize(
+              key: const Key('page_drag_feedback'),
+              size: cardSize,
               child: Material(
                 color: Colors.transparent,
                 child: Opacity(opacity: 0.85, child: card),

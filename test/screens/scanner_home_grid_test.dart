@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -25,6 +27,13 @@ class _Picker extends ImagePickerPlatform {
 const _landscapeCases = [
   LayoutCase(Size(844, 390), 1.0),
   LayoutCase(Size(844, 390), 1.3),
+];
+
+/// Large text and high display density (a 560 dpi phone at 2.0×).
+const _largeDisplayCases = [
+  LayoutCase(Size(320, 568), 2.0),
+  LayoutCase(Size(390, 844), 2.0),
+  LayoutCase(Size(412, 915), 2.0),
 ];
 
 Finder _card(int index) => find.ancestor(
@@ -142,5 +151,68 @@ void main() {
       for (final scale in layoutTextScales)
         LayoutCase(const Size(640, 300), scale),
     ],
+  );
+
+  // #160
+  testLayoutMatrix('page labels stay on one line', (tester, layoutCase) async {
+    await pumpHome(tester, layoutCase, pageCount: 12);
+    // Material 3 labelLarge: 14 px on a 20 px line.
+    final lineHeight = layoutCase.textScale * 20;
+    for (final index in [0, 1, 9, 10, 11]) {
+      final label = find.text('Page ${index + 1}');
+      await tester.scrollUntilVisible(label, 100);
+      final paragraph = tester.renderObject<RenderParagraph>(label);
+      expect(paragraph.size.height, lessThan(lineHeight * 1.5));
+      expect(paragraph.didExceedMaxLines, isFalse);
+    }
+    expect(tester.takeException(), isNull);
+  }, cases: [..._largeDisplayCases, ...layoutMatrix]);
+
+  testLayoutMatrix('the dragged copy of a card has the card\'s size', (
+    tester,
+    layoutCase,
+  ) async {
+    await pumpHome(tester, layoutCase, pageCount: 2);
+    final card = tester.getSize(_card(0));
+    final gesture = await tester.startGesture(
+      tester.getRect(_card(0)).topCenter + const Offset(0, 16),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+    await gesture.moveBy(const Offset(0, 20));
+    await tester.pump();
+    final feedback = find.byKey(const Key('page_drag_feedback'));
+    expect(tester.getSize(feedback), card);
+    // The copy shows the same one-line label as the card.
+    expect(
+      find.descendant(of: feedback, matching: find.text('Page 1')),
+      findsOneWidget,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  }, cases: _largeDisplayCases);
+
+  testLayoutMatrix(
+    'the camera button never covers card controls at rest',
+    (tester, layoutCase) async {
+      for (final pageCount in [2, 7]) {
+        await pumpHome(tester, layoutCase, pageCount: pageCount);
+        // At rest at the end of the grid, where the last row's controls are.
+        await tester.drag(find.byType(GridView), const Offset(0, -10000));
+        await tester.pumpAndSettle();
+        final cameraButton = tester.getRect(find.byType(FloatingActionButton));
+        for (var i = 0; i < pageCount; i++) {
+          final delete = find.byTooltip('Delete page ${i + 1}');
+          if (delete.evaluate().isEmpty) continue;
+          expect(
+            tester.getRect(delete).overlaps(cameraButton),
+            isFalse,
+            reason: 'Delete page ${i + 1} of $pageCount',
+          );
+        }
+      }
+      expect(tester.takeException(), isNull);
+    },
+    cases: [..._largeDisplayCases, ...layoutMatrix],
   );
 }
