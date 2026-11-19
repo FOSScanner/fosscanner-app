@@ -207,6 +207,7 @@ class ScannerHomePage extends StatefulWidget {
     this.temporaryDirectory = getTemporaryDirectory,
     this.documentSaver = const PlatformPdfDocumentSaver(),
     this.appSettingsOpener = openAppSettings,
+    this.interruptedSaveRemover,
   });
 
   final List<ScannedPage> initialPages;
@@ -234,6 +235,10 @@ class ScannerHomePage extends StatefulWidget {
 
   /// Opens the app's system settings, to turn camera access back on.
   final AppSettingsOpener appSettingsOpener;
+
+  /// Removes the empty document of a save an earlier run never finished, and
+  /// reports whether there was one. Null where saving is unsupported.
+  final Future<bool> Function()? interruptedSaveRemover;
 
   @override
   State<ScannerHomePage> createState() => _ScannerHomePageState();
@@ -325,6 +330,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (defaultTargetPlatform == TargetPlatform.android) {
       unawaited(_recoverLostImages());
     }
+    if (widget.interruptedSaveRemover case final remove?) {
+      unawaited(_removeInterruptedSave(remove));
+    }
     final inbox = widget.sharedImageInbox;
     if (inbox != null) {
       inbox.setListener(_onSharedImagesAvailable);
@@ -333,6 +341,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       _isSharedImageIntakePending = true;
       unawaited(_initialDraftRestore.then((_) => _resumeSharedImageIntake()));
     }
+  }
+
+  Future<void> _removeInterruptedSave(Future<bool> Function() remove) async {
+    final removed = await remove().catchError((Object _) => false);
+    if (removed && mounted) _showMessage('An interrupted save was removed.');
   }
 
   @override

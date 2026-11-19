@@ -8,6 +8,7 @@ import 'screens/scanner_home_page.dart';
 import 'services/app_preferences.dart';
 import 'services/cache_copies.dart';
 import 'services/draft_store.dart';
+import 'services/pdf_document_saver.dart';
 import 'services/pdf_export_files.dart';
 import 'services/pdf_page_importer.dart';
 import 'services/shared_image_inbox.dart';
@@ -62,6 +63,9 @@ class FOSScannerApp extends StatelessWidget {
       // iOS would need a PDFKit renderer; only Android imports PDFs.
       pdfPageImporter: isAndroid ? MethodChannelPdfPageImporter.instance : null,
       preferencesStore: preferencesStore,
+      interruptedSaveRemover: isAndroid
+          ? PlatformPdfDocumentSaver.removeInterruptedSave
+          : null,
     );
     return MaterialApp(
       title: 'FOSScanner',

@@ -55,6 +55,19 @@ class PlatformPdfDocumentSaver implements PdfDocumentSaver {
   bool get isSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
+  /// Removes the still-empty document of a save that an earlier run never
+  /// finished (the app was killed while exporting). Returns true when one
+  /// was removed. Call once at startup. Never throws.
+  static Future<bool> removeInterruptedSave() async {
+    try {
+      // Keep the contract in sync with MainActivity.handleRemoveInterruptedSave.
+      return await _channel.invokeMethod<bool>('removeInterruptedSave') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   Future<PdfSaveTarget?> chooseTarget({required String fileName}) async {
     if (!isSupported) throw UnsupportedError('Saving requires Android');

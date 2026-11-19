@@ -358,7 +358,24 @@ void main() {
     }
     // One activity instance owns the draft; shares arrive via onNewIntent.
     expect(manifest, contains('android:launchMode="singleTask"'));
-    expect(activity, isNot(contains('takePersistableUriPermission')));
+    // The only persisted grant is the user's chosen save location, held
+    // until it is written or discarded, never a shared image.
+    expect('takePersistableUriPermission('.allMatches(activity).length, 1);
+    expect(
+      activity,
+      matches(
+        RegExp(
+          r'fun holdSaveTargetGrant\([^)]*\) \{[^}]*'
+          r'takePersistableUriPermission\(',
+        ),
+      ),
+    );
+    expect(
+      File(
+        'android/app/src/main/kotlin/com/fosscanner/app/SharedImageInbox.kt',
+      ).readAsStringSync(),
+      isNot(contains('Persistable')),
+    );
     expect(activity, contains('override fun onNewIntent'));
   });
 

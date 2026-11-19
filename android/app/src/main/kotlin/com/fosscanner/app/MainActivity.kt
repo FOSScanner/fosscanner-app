@@ -55,6 +55,11 @@ class MainActivity : FlutterActivity() {
     // location it returned, held until Dart writes or discards it.
     private var pendingSaveTarget: MethodChannel.Result? = null
     private var saveTarget: Uri? = null
+    // The chosen location, on disk until it is written or discarded, so an
+    // empty document left by a killed process is removed on the next launch.
+    private val pendingSaveJournal by lazy {
+        PendingSaveJournal(File(noBackupFilesDir, PendingSaveJournal.FILE_NAME))
+    }
 
     // Shared images are copied off the UI thread on their own worker, so a
     // running OCR export never delays them (Dart blocks intake during export).
@@ -217,6 +222,7 @@ class MainActivity : FlutterActivity() {
                     discardSaveTarget()
                     result.success(null)
                 }
+                "removeInterruptedSave" -> handleRemoveInterruptedSave(result)
                 else -> result.notImplemented()
             }
         }
@@ -583,6 +589,8 @@ class MainActivity : FlutterActivity() {
                 // discarded meanwhile.
                 if (renamed != null && saveTarget == destination) {
                     saveTarget = renamed
+                    holdSaveTargetGrant(renamed, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    pendingSaveJournal.record(renamed.toString())
                     result.success(name)
                 } else {
                     result.success(null)
@@ -611,10 +619,12 @@ class MainActivity : FlutterActivity() {
                 output.use { stream ->
                     source.inputStream().use { input -> input.copyTo(stream, 64 * 1024) }
                 }
+                finishSaveTarget(destination)
                 mainHandler.post { result.success(null) }
             } catch (e: Exception) {
                 // Do not leave an empty or truncated document at the chosen place.
                 deleteDocumentQuietly(destination)
+                finishSaveTarget(destination)
                 // Do not expose paths or provider messages to Dart.
                 mainHandler.post { result.error("save_failed", "Could not write the document", null) }
             }
@@ -625,8 +635,79 @@ class MainActivity : FlutterActivity() {
     private fun discardSaveTarget() {
         val destination = saveTarget ?: return
         saveTarget = null
-        Thread { deleteDocumentQuietly(destination) }.start()
+        Thread {
+            deleteDocumentQuietly(destination)
+            finishSaveTarget(destination)
+        }.start()
     }
+
+    /**
+     * Keeps write access to the chosen document across a process death, so
+     * the next launch can still remove it if it stays empty. Only this one
+     * document is held, and only until [finishSaveTarget].
+     */
+    private fun holdSaveTargetGrant(document: Uri, grantedFlags: Int) {
+        val flags = grantedFlags and
+            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        if (flags == 0) return
+        try {
+            contentResolver.takePersistableUriPermission(document, flags)
+        } catch (_: Exception) {
+            // Not persistable here: cleanup then works only while the grant lasts.
+        }
+    }
+
+    /** Forgets a save location once written or removed, and its grant. */
+    private fun finishSaveTarget(document: Uri) {
+        mainHandler.post {
+            // A newer save may already be journaled; leave it alone.
+            if (pendingSaveJournal.pending() == document.toString()) pendingSaveJournal.clear()
+        }
+        releaseSaveTargetGrant(document)
+    }
+
+    private fun releaseSaveTargetGrant(document: Uri) {
+        try {
+            contentResolver.releasePersistableUriPermission(
+                document,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        } catch (_: Exception) {
+            // No persisted grant for it.
+        }
+    }
+
+    // Called once by Dart at startup: removes the still-empty document of a
+    // save the previous process never finished. Replies true if one was.
+    private fun handleRemoveInterruptedSave(result: MethodChannel.Result) {
+        if (pendingSaveTarget != null || saveTarget != null) {
+            // The journal belongs to the save in progress.
+            result.success(false)
+            return
+        }
+        // Taken on the main thread, before any new save can record itself.
+        val recorded = pendingSaveJournal.take()
+        if (recorded == null) {
+            result.success(false)
+            return
+        }
+        Thread {
+            val removed = PendingSaveJournal.removeIfEmpty(
+                recorded,
+                sizeOf = ::documentSize,
+                delete = { DocumentsContract.deleteDocument(contentResolver, Uri.parse(it)) },
+                release = { releaseSaveTargetGrant(Uri.parse(it)) },
+            )
+            mainHandler.post { result.success(removed) }
+        }.start()
+    }
+
+    /** The document's size in bytes, or null when unknown or gone. */
+    private fun documentSize(document: String): Long? =
+        contentResolver.query(Uri.parse(document), arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+            }
 
     private fun deleteDocumentQuietly(document: Uri) {
         try {
@@ -785,7 +866,16 @@ class MainActivity : FlutterActivity() {
             super.onActivityResult(requestCode, resultCode, data)
             return
         }
-        val pending = pendingSaveTarget ?: return
+        val pending = pendingSaveTarget
+        if (pending == null) {
+            // The save that asked for this location died with its process;
+            // the picker has still created an empty document there.
+            val orphan = data?.data
+            if (resultCode == Activity.RESULT_OK && orphan != null) {
+                Thread { deleteDocumentQuietly(orphan) }.start()
+            }
+            return
+        }
         pendingSaveTarget = null
         val destination = data?.data
         if (resultCode != Activity.RESULT_OK || destination == null) {
@@ -793,6 +883,8 @@ class MainActivity : FlutterActivity() {
             return
         }
         saveTarget = destination
+        holdSaveTargetGrant(destination, data.flags)
+        pendingSaveJournal.record(destination.toString())
         pending.success(
             // Null keeps the suggested name on the Dart side.
             mapOf("fileName" to PdfExportContract.savedName(displayNameOf(destination))),
