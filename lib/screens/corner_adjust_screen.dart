@@ -50,6 +50,9 @@ enum PageReviewSource {
 
 enum _Step { corners, filter }
 
+/// Appearance controls shown in the landscape side column.
+enum _Panel { filters, adjust }
+
 enum _PreviewStatus { pending, updating, ready, failed }
 
 /// Post-capture review, in two steps:
@@ -156,6 +159,12 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   _Step _step = _Step.corners;
   LocalHistoryEntry? _filterHistoryEntry;
+  // Side by side (landscape), Filters and Adjust open in the control column
+  // rather than as bottom sheets, so the preview stays fully visible. Back
+  // closes the panel first, like a sheet.
+  _Panel? _sidePanel;
+  LocalHistoryEntry? _panelHistoryEntry;
+  bool _isSideBySide = false;
   late PageFilter _selectedFilter = widget.initialFilter;
   late int _rotationQuarterTurns = widget.initialRotationQuarterTurns;
   late double _brightness = widget.initialBrightness;
@@ -449,6 +458,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       );
       // Otherwise Navigator.pop would consume the local filter history entry
       // instead of completing this route with the scanned page.
+      _panelHistoryEntry?.remove();
       _filterHistoryEntry?.remove();
       if (!mounted) return;
       if (scanNext) widget.onScanNext!();
@@ -641,11 +651,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               IconButton(
                 icon: const Icon(Icons.photo_filter_outlined),
                 tooltip: 'Filters',
+                // Marks the open side panel; never changes the button's size.
+                isSelected: _sidePanel == _Panel.filters,
                 onPressed: _isProcessing ? null : _showFilters,
               ),
               IconButton(
                 icon: const Icon(Icons.tune_outlined),
                 tooltip: 'Adjust',
+                isSelected: _sidePanel == _Panel.adjust,
                 onPressed: _isProcessing ? null : _showAdjustments,
               ),
               IconButton(
@@ -819,15 +832,23 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   /// Landscape control column, shared by both steps so the canvas, preview
   /// and actions keep the same places when switching steps. Actions sit at
   /// the bottom, within thumb reach, and scroll only if they cannot fit.
+  /// [panel] fills the space above them without moving them.
   Widget _sideColumn(
     BoxConstraints constraints, {
     required Key scrollKey,
     required Widget child,
+    Widget? panel,
   }) => SizedBox(
     width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
-    child: Align(
-      alignment: Alignment.bottomCenter,
-      child: SingleChildScrollView(key: scrollKey, child: child),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: panel ?? const SizedBox.shrink()),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: constraints.maxHeight),
+          child: SingleChildScrollView(key: scrollKey, child: child),
+        ),
+      ],
     ),
   );
 
@@ -971,9 +992,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         // confirm buttons share the screen with the preview. Large text
         // scales those buttons, which the fixed layout absorbs; only very
         // short viewports need to scroll.
-        if (constraints.maxWidth > constraints.maxHeight) {
+        _isSideBySide = constraints.maxWidth > constraints.maxHeight;
+        if (_isSideBySide) {
           // Side by side: the preview keeps the full height and the confirm
           // buttons stay visible, without scrolling, in the side column.
+          // Filters and Adjust open above them, never over the preview.
           return Row(
             children: [
               Expanded(child: _filterPreview(previewBytes)),
@@ -981,8 +1004,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 constraints,
                 scrollKey: const Key('filter_step_controls'),
                 child: _filterActions(singleLine: true),
+                panel: _sidePanelView(context),
               ),
             ],
+          );
+        }
+        // A panel opened side by side has no place in this layout.
+        if (_sidePanel != null) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _closeSidePanel(),
           );
         }
         if (constraints.maxHeight >= 480) {
@@ -1163,73 +1193,110 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Future<void> _showFilters() async {
-    if (_isProcessing || _isLeaving || _step != _Step.filter) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      // No scrim: the preview behind shows the effect while choosing.
-      barrierColor: Colors.transparent,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, updateSheet) => ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.75,
-          ),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                16 + MediaQuery.viewPaddingOf(context).bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Filters',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close',
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                      ),
-                    ],
-                  ),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 16,
-                    children: [
-                      for (final filter in PageFilter.values)
-                        _filterChip(
-                          context,
-                          filter,
-                          onSelected: () => updateSheet(() {}),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+  /// Header shared by the Filters and Adjust sheets and side panels.
+  Widget _panelHeader(
+    BuildContext context,
+    String title, {
+    required VoidCallback onClose,
+  }) => Row(
+    children: [
+      Expanded(
+        child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+      ),
+      IconButton(
+        tooltip: 'Close',
+        icon: const Icon(Icons.close),
+        onPressed: onClose,
+      ),
+    ],
+  );
+
+  /// [refresh] rebuilds the sheet route, whose content does not rebuild
+  /// with this state.
+  Widget _filtersContent(
+    BuildContext context, {
+    required VoidCallback onClose,
+    required VoidCallback refresh,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _panelHeader(context, 'Filters', onClose: onClose),
+        Wrap(
+          spacing: 12,
+          runSpacing: 16,
+          children: [
+            for (final filter in PageFilter.values)
+              _filterChip(context, filter, onSelected: refresh),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  /// Brightness, contrast and Reset. Values live in this state, so they
+  /// persist across openings; the preview updates when a slider is released.
+  Widget _adjustContent(
+    BuildContext context, {
+    required VoidCallback onClose,
+    required VoidCallback refresh,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _panelHeader(context, 'Adjust', onClose: onClose),
+      ),
+      _adjustmentSlider(
+        label: 'Brightness',
+        value: _brightness,
+        min: -100,
+        max: 100,
+        describe: (v) => '${v > 0 ? '+' : ''}${v.round()}',
+        announce: (v) => '${v.round()}, neutral 0',
+        onChanged: (value) => _brightness = value,
+        onSheetChanged: refresh,
+      ),
+      _adjustmentSlider(
+        label: 'Contrast',
+        // Log scale: neutral 1.0× sits in the middle.
+        value: contrastToSliderPosition(_contrast),
+        min: -1,
+        max: 1,
+        describe: (position) =>
+            '${sliderPositionToContrast(position).toStringAsFixed(2)}×',
+        announce: (position) =>
+            '${sliderPositionToContrast(position).toStringAsFixed(2)} '
+            'times, neutral 1',
+        onChanged: (position) => _contrast = sliderPositionToContrast(position),
+        onSheetChanged: refresh,
+      ),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: _resetAdjustmentsButton(onSheetChanged: refresh),
         ),
       ),
-    );
-  }
+    ],
+  );
 
-  /// Brightness, contrast and Reset open on demand, like Filters, so the
-  /// preview keeps the screen. Values live in this state, so they persist
-  /// across openings; the preview updates when a slider is released. The
-  /// sheet is its own route, so Back closes it before leaving the step.
-  Future<void> _showAdjustments() async {
+  Future<void> _showFilters() => _showPanel(_Panel.filters);
+
+  Future<void> _showAdjustments() => _showPanel(_Panel.adjust);
+
+  /// Side by side, toggles [panel] in the control column; otherwise opens
+  /// it as a bottom sheet. Either way Back closes it before leaving the
+  /// step.
+  Future<void> _showPanel(_Panel panel) async {
     if (_isProcessing || _isLeaving || _step != _Step.filter) return;
+    if (_isSideBySide) {
+      _toggleSidePanel(panel);
+      return;
+    }
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1238,80 +1305,87 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       barrierColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, updateSheet) {
-          void refreshSheet() => updateSheet(() {});
+          void refresh() => updateSheet(() {});
+          void close() => Navigator.of(sheetContext).pop();
           return ConstrainedBox(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.sizeOf(context).height * 0.75,
             ),
             child: SingleChildScrollView(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  0,
-                  16,
-                  0,
-                  16 + MediaQuery.viewPaddingOf(context).bottom,
+                padding: EdgeInsets.only(
+                  top: 16,
+                  bottom: 16 + MediaQuery.viewPaddingOf(context).bottom,
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Adjust',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Close',
-                            icon: const Icon(Icons.close),
-                            onPressed: () => Navigator.of(sheetContext).pop(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _adjustmentSlider(
-                      label: 'Brightness',
-                      value: _brightness,
-                      min: -100,
-                      max: 100,
-                      describe: (v) => '${v > 0 ? '+' : ''}${v.round()}',
-                      announce: (v) => '${v.round()}, neutral 0',
-                      onChanged: (value) => _brightness = value,
-                      onSheetChanged: refreshSheet,
-                    ),
-                    _adjustmentSlider(
-                      label: 'Contrast',
-                      // Log scale: neutral 1.0× sits in the middle.
-                      value: contrastToSliderPosition(_contrast),
-                      min: -1,
-                      max: 1,
-                      describe: (position) =>
-                          '${sliderPositionToContrast(position).toStringAsFixed(2)}×',
-                      announce: (position) =>
-                          '${sliderPositionToContrast(position).toStringAsFixed(2)} '
-                          'times, neutral 1',
-                      onChanged: (position) =>
-                          _contrast = sliderPositionToContrast(position),
-                      onSheetChanged: refreshSheet,
-                    ),
-                    Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: _resetAdjustmentsButton(
-                          onSheetChanged: refreshSheet,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                child: switch (panel) {
+                  _Panel.filters => _filtersContent(
+                    context,
+                    onClose: close,
+                    refresh: refresh,
+                  ),
+                  _Panel.adjust => _adjustContent(
+                    context,
+                    onClose: close,
+                    refresh: refresh,
+                  ),
+                },
               ),
             ),
           );
+        },
+      ),
+    );
+  }
+
+  void _toggleSidePanel(_Panel panel) {
+    if (_sidePanel == panel) {
+      _closeSidePanel();
+      return;
+    }
+    setState(() => _sidePanel = panel);
+    if (_panelHistoryEntry != null) return;
+    late final LocalHistoryEntry entry;
+    entry = LocalHistoryEntry(
+      onRemove: () {
+        if (identical(_panelHistoryEntry, entry)) _panelHistoryEntry = null;
+        if (mounted && _sidePanel != null) {
+          setState(() => _sidePanel = null);
+        }
+      },
+    );
+    _panelHistoryEntry = entry;
+    ModalRoute.of(context)?.addLocalHistoryEntry(entry);
+  }
+
+  void _closeSidePanel() {
+    final entry = _panelHistoryEntry;
+    if (entry != null) {
+      entry.remove();
+    } else if (mounted && _sidePanel != null) {
+      setState(() => _sidePanel = null);
+    }
+  }
+
+  Widget? _sidePanelView(BuildContext context) {
+    final panel = _sidePanel;
+    if (panel == null) return null;
+    void refresh() {}
+    return Material(
+      key: const Key('appearance_side_panel'),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: switch (panel) {
+          _Panel.filters => _filtersContent(
+            context,
+            onClose: _closeSidePanel,
+            refresh: refresh,
+          ),
+          _Panel.adjust => _adjustContent(
+            context,
+            onClose: _closeSidePanel,
+            refresh: refresh,
+          ),
         },
       ),
     );

@@ -111,6 +111,8 @@ void main() {
 
   for (final sheet in ['Filters', 'Adjust']) {
     testWidgets('the $sheet sheet leaves the preview undimmed', (tester) async {
+      // Portrait: side by side, the controls open beside the preview.
+      applyLayoutCase(tester, const LayoutCase(Size(390, 844), 1.0));
       await tester.pumpWidget(
         MaterialApp(
           home: CornerAdjustScreen(
