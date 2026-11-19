@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
@@ -17,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.PersistableBundle
+import android.view.View
 import android.view.WindowManager
 import android.provider.DocumentsContract
 import com.googlecode.leptonica.android.ReadFile
@@ -42,6 +44,7 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var channel: MethodChannel? = null
     private var privacyChannel: MethodChannel? = null
+    private var gestureExclusionChannel: MethodChannel? = null
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
@@ -212,6 +215,22 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Keep this contract synchronized with lib/services/gesture_exclusion.dart.
+        gestureExclusionChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, GESTURE_EXCLUSION_CHANNEL)
+        gestureExclusionChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setExclusionRects" -> {
+                    val values = call.argument<List<Int>>("rects")
+                    if (values == null || values.size % 4 != 0) {
+                        result.error("invalid_args", "'rects' must hold left, top, right, bottom quadruples", null)
+                    } else {
+                        setGestureExclusionRects(values)
+                        result.success(null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         if (sharedImageExecutor.isShutdown) sharedImageExecutor = Executors.newSingleThreadExecutor()
         sharedImageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARED_IMAGES_CHANNEL)
         sharedImageChannel?.setMethodCallHandler { call, result ->
@@ -241,6 +260,8 @@ class MainActivity : FlutterActivity() {
         channel = null
         privacyChannel?.setMethodCallHandler(null)
         privacyChannel = null
+        gestureExclusionChannel?.setMethodCallHandler(null)
+        gestureExclusionChannel = null
         sharedImageChannel?.setMethodCallHandler(null)
         sharedImageChannel = null
         sharedImageExecutor.shutdown()
@@ -745,6 +766,20 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Lets drags that start on handles and sliders near the screen edge reach
+     * Flutter instead of triggering the Back gesture. Rects are in the Flutter
+     * view's physical pixels; Android ignores exclusion beyond 200 dp per edge,
+     * which Dart already respects. Gesture navigation exists from Android 10.
+     */
+    private fun setGestureExclusionRects(values: List<Int>) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val view: View = findViewById<View>(FlutterActivity.FLUTTER_VIEW_ID) ?: window.decorView
+        view.systemGestureExclusionRects = values.chunked(4).map { (left, top, right, bottom) ->
+            Rect(left, top, right, bottom)
+        }
+    }
+
     companion object {
         private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
         @Volatile private var secureScreen = false
@@ -757,6 +792,7 @@ class MainActivity : FlutterActivity() {
         private const val MAX_PAGES = 100
         private const val SHARED_IMAGES_CHANNEL = "com.fosscanner.app/shared_images"
         private const val PDF_IMPORT_CHANNEL = "com.fosscanner.app/pdf_import"
+        private const val GESTURE_EXCLUSION_CHANNEL = "com.fosscanner.app/gesture_exclusion"
         private const val KEY_SHARE_PENDING = "fosscanner.sharePending"
     }
 }

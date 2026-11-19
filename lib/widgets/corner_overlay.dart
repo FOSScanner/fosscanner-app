@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 
 import '../services/corner_geometry.dart';
+import '../services/gesture_exclusion.dart';
 
 const _cornerLabels = [
   'Top-left corner',
@@ -453,7 +454,14 @@ class _CornerOverlayState extends State<CornerOverlay> {
 
     return Positioned.fromRect(
       rect: targetRect,
-      child: KeyedSubtree(key: ValueKey('corner-handle-$index'), child: child),
+      // A drag that starts on a handle near the screen edge must move the
+      // handle, not trigger system Back.
+      child: GestureExclusionRegion(
+        child: KeyedSubtree(
+          key: ValueKey('corner-handle-$index'),
+          child: child,
+        ),
+      ),
     );
   }
 }

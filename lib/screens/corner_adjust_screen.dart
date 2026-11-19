@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../models/scanned_page.dart';
 import '../services/corner_adjust_operations.dart';
 import '../services/corner_geometry.dart';
+import '../services/gesture_exclusion.dart';
 import '../services/image_processing_queue.dart';
 import '../widgets/corner_overlay.dart';
 import '../widgets/transient_message.dart';
@@ -601,8 +603,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     Size imageSize,
     List<Offset> corners,
   ) {
-    final preview = Padding(
-      padding: const EdgeInsets.all(8),
+    // Keep handles out of the system gesture zones along the screen edges
+    // the canvas touches, so a drag that starts on one never becomes Back
+    // or Home. Edge handles are also excluded from the Back gesture.
+    final gestureInsets = MediaQuery.systemGestureInsetsOf(context);
+    EdgeInsets canvasPadding({required bool landscape}) => EdgeInsets.fromLTRB(
+      math.max(8, gestureInsets.left),
+      8,
+      landscape ? 8 : math.max(8, gestureInsets.right),
+      landscape ? math.max(8, gestureInsets.bottom) : 8,
+    );
+    Widget preview({required bool landscape}) => Padding(
+      padding: canvasPadding(landscape: landscape),
       child: Stack(
         children: [
           Positioned.fill(
@@ -682,7 +694,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         if (constraints.maxWidth > constraints.maxHeight) {
           return Row(
             children: [
-              Expanded(child: preview),
+              Expanded(child: preview(landscape: true)),
               SizedBox(
                 width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
                 child: controls,
@@ -692,7 +704,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         }
         return Column(
           children: [
-            Expanded(child: preview),
+            Expanded(child: preview(landscape: false)),
             ConstrainedBox(
               constraints: BoxConstraints(
                 maxHeight: constraints.maxHeight * 0.35,
@@ -973,27 +985,30 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           MergeSemantics(
             child: Semantics(
               label: label,
-              child: Slider(
-                value: value,
-                min: min,
-                max: max,
-                semanticFormatterCallback: (v) => label == 'Brightness'
-                    ? '${v.round()}, neutral 0'
-                    : '${v.toStringAsFixed(2)} times, neutral 1',
-                onChanged: _isProcessing
-                    ? null
-                    : (newValue) {
-                        if (!mounted || _isProcessing) return;
-                        setState(() {
-                          onChanged(newValue);
-                          _finalPreviewGeneration++;
-                          _previewStatus = _PreviewStatus.pending;
-                        });
-                        onSheetChanged();
-                      },
-                onChangeEnd: _isProcessing
-                    ? null
-                    : (_) => unawaited(_updateFinalPreview()),
+              // Dragging from the track's ends must not trigger system Back.
+              child: GestureExclusionRegion(
+                child: Slider(
+                  value: value,
+                  min: min,
+                  max: max,
+                  semanticFormatterCallback: (v) => label == 'Brightness'
+                      ? '${v.round()}, neutral 0'
+                      : '${v.toStringAsFixed(2)} times, neutral 1',
+                  onChanged: _isProcessing
+                      ? null
+                      : (newValue) {
+                          if (!mounted || _isProcessing) return;
+                          setState(() {
+                            onChanged(newValue);
+                            _finalPreviewGeneration++;
+                            _previewStatus = _PreviewStatus.pending;
+                          });
+                          onSheetChanged();
+                        },
+                  onChangeEnd: _isProcessing
+                      ? null
+                      : (_) => unawaited(_updateFinalPreview()),
+                ),
               ),
             ),
           ),
