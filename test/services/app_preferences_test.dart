@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/services/app_preferences.dart';
+import 'package:fosscanner/services/pdf_export_options.dart';
 
 void main() {
   late Directory directory;
@@ -97,5 +98,20 @@ void main() {
     expect(await memory.load(), const AppPreferences());
     await memory.save(const AppPreferences(searchablePdf: true));
     expect(await memory.load(), const AppPreferences(searchablePdf: true));
+  });
+
+  test('page size and quality round-trip and default when unknown', () async {
+    const chosen = AppPreferences(
+      searchablePdf: true,
+      pdfPageSize: PdfPageSize.letter,
+      pdfQuality: PdfQuality.small,
+    );
+    await store.save(chosen);
+    expect(await store.load(), chosen);
+
+    await preferencesFile().writeAsString(
+      '{"searchablePdf": true, "pdfPageSize": "tabloid", "pdfQuality": 3}',
+    );
+    expect(await store.load(), const AppPreferences(searchablePdf: true));
   });
 }

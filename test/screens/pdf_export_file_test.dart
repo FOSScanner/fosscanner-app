@@ -9,6 +9,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/app_preferences.dart';
 import 'package:fosscanner/services/pdf_export_files.dart';
+import 'package:fosscanner/services/pdf_export_options.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:share_plus_platform_interface/share_plus_platform_interface.dart';
@@ -31,6 +32,7 @@ class _Share implements SharePlatform {
   ShareParams? params;
   String? sharedPath;
   String? header;
+  Uint8List? bytes;
 
   @override
   Future<ShareResult> share(ShareParams params) async {
@@ -38,7 +40,8 @@ class _Share implements SharePlatform {
     final file = params.files!.single;
     sharedPath = file.path;
     // Synchronous on purpose: the platform reads the file before returning.
-    header = latin1.decode(File(file.path).readAsBytesSync().take(5).toList());
+    bytes = File(file.path).readAsBytesSync();
+    header = latin1.decode(bytes!.take(5).toList());
     if (fail) throw PlatformException(code: 'share_failed', message: '/x/y');
     return const ShareResult('', ShareResultStatus.success);
   }
@@ -177,6 +180,52 @@ void main() {
     expect(share.header, '%PDF-');
     expect(share.sharedPath, contains('/$pdfExportDirectoryPrefix'));
     expect(share.params!.text, 'Searchable document scanned with FOSScanner');
+  });
+
+  testWidgets('chosen page size and quality persist and shape the export', (
+    tester,
+  ) async {
+    final share = _Share();
+    final store = MemoryAppPreferencesStore();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerHomePage(
+          searchablePdfEnabled: false,
+          sharePlus: SharePlus.custom(share),
+          temporaryDirectory: () async => cache,
+          preferencesStore: store,
+          initialPages: [
+            ScannedPage(
+              originalBytes: image,
+              processedBytes: image,
+              corners: const [],
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('PDF export options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Letter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Small'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('email and upload limits'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(
+      await tester.runAsync(store.load),
+      const AppPreferences(
+        pdfPageSize: PdfPageSize.letter,
+        pdfQuality: PdfQuality.small,
+      ),
+    );
+
+    await tester.tap(find.text('Export PDF (1 page)'));
+    await pumpUntil(tester, () => share.bytes != null);
+    expect(latin1.decode(share.bytes!), contains('/MediaBox[0 0 612 792]'));
+    await pumpUntil(tester, () => exportDirectories().isEmpty);
   });
 
   testWidgets('the export bar keeps its height while exporting at 200%', (

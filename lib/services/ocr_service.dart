@@ -1,12 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show Uint8List, defaultTargetPlatform, TargetPlatform;
+    show Uint8List, compute, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart'
     show MethodCall, MethodChannel, PlatformException;
 import 'package:path_provider/path_provider.dart';
 
 import 'image_metadata.dart';
+import 'pdf_export_options.dart';
 
 // Android's Tesseract renderer preserves page images and adds selectable text.
 const _channel = MethodChannel('com.fosscanner.app/ocr');
@@ -57,9 +58,16 @@ void _checkCancellation() {
 // native PDF renderer, and moves the finished file to [outputPath]. The PDF is
 // never read into the Dart heap. Whenever this throws, no file is left at
 // [outputPath].
+//
+// [pageSize] and [quality] are applied before OCR: each page is resampled,
+// and for A4/Letter centered on a white page-shaped canvas, on a worker, and
+// its density is sent along because Tesseract sizes pages as pixels / DPI.
+// Original/High sends the pages untouched at the historical 150 DPI.
 Future<void> createSearchablePdf(
   List<Uint8List> pageImages, {
   required String outputPath,
+  PdfPageSize pageSize = PdfPageSize.original,
+  PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
 }) async {
   if (!isSupported) {
@@ -95,12 +103,29 @@ Future<void> createSearchablePdf(
       _checkCancellation();
       jobDirectory = await tempDir.createTemp('fosscanner_ocr_');
       _checkCancellation();
+      final keepsOriginal =
+          pageSize == PdfPageSize.original && quality == PdfQuality.high;
       final imageFiles = <File>[];
+      final pageDpis = <int>[];
       for (var i = 0; i < images.length; i++) {
+        var bytes = images[i];
+        var dpi = originalPageDpi.round();
+        if (!keepsOriginal) {
+          final prepared = await compute(preparePdfPage, (
+            bytes: bytes,
+            pageSize: pageSize,
+            quality: quality,
+            padToPage: true,
+          ));
+          _checkCancellation();
+          bytes = prepared.bytes;
+          dpi = prepared.plan.nativeDpi;
+        }
         final file = File('${jobDirectory.path}/page_$i.jpg');
-        await file.writeAsBytes(images[i]);
+        await file.writeAsBytes(bytes);
         _checkCancellation();
         imageFiles.add(file);
+        pageDpis.add(dpi);
       }
       final outputPathNoExtension = '${jobDirectory.path}/document';
       final pdfFile = File('$outputPathNoExtension.pdf');
@@ -110,6 +135,7 @@ Future<void> createSearchablePdf(
         pdfPath = await _channel.invokeMethod<String>('createSearchablePdf', {
           'imagePaths': [for (final file in imageFiles) file.path],
           'outputPath': outputPathNoExtension,
+          'pageDpis': pageDpis,
         });
       } finally {
         _nativeRendering = false;

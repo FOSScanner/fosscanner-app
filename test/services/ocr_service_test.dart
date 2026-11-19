@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 import 'package:fosscanner/services/ocr_service.dart' as ocr;
+import 'package:fosscanner/services/pdf_export_options.dart';
+import 'package:image/image.dart' as im;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -294,6 +296,53 @@ void main() {
       final large = Uint8List(maxEncodedImageBytes);
       await expectLater(create(List.filled(9, large)), throwsArgumentError);
       expect(calls, isEmpty);
+    },
+  );
+
+  test('sends the historical density for Original/High pages', () async {
+    expect(await exportPdf([page, page]), pdf);
+    final render = calls.singleWhere((c) => c.method == 'createSearchablePdf');
+    expect((render.arguments as Map)['pageDpis'], [150, 150]);
+  });
+
+  test(
+    'A4 pages are padded to the page shape with a matching density',
+    () async {
+      final jpeg = im.encodeJpg(im.Image(width: 300, height: 200));
+      late List<int> dpis;
+      late List<(int, int)> sizes;
+      render = (call) async {
+        final args = call.arguments as Map;
+        dpis = (args['pageDpis'] as List).cast<int>();
+        sizes = [
+          for (final path in (args['imagePaths'] as List).cast<String>())
+            () {
+              final decoded = im.decodeJpg(File(path).readAsBytesSync())!;
+              return (decoded.width, decoded.height);
+            }(),
+        ];
+        final output = File('${args['outputPath']}.pdf');
+        await output.writeAsBytes(pdf);
+        return output.path;
+      };
+      await ocr.createSearchablePdf(
+        [jpeg],
+        outputPath: outputPath(),
+        pageSize: PdfPageSize.a4,
+        quality: PdfQuality.small,
+      );
+      await readOutput();
+      final expected = planPdfPage(
+        sourceWidth: 300,
+        sourceHeight: 200,
+        pageSize: PdfPageSize.a4,
+        quality: PdfQuality.small,
+      );
+      expect(dpis, [expected.nativeDpi]);
+      expect(sizes, [(expected.canvasWidth!, expected.canvasHeight!)]);
+      // Landscape A4: the rendered page is pixels / DPI.
+      expect(sizes.single.$1 / dpis.single * 72, closeTo(841.89, 1));
+      expect(sizes.single.$2 / dpis.single * 72, closeTo(595.28, 1));
     },
   );
 }

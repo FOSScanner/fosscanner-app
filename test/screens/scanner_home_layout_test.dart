@@ -153,13 +153,16 @@ void main() {
     );
   });
 
-  testWidgets('image-only platforms do not offer unavailable OCR settings', (
+  testWidgets('image-only platforms offer layout but not OCR settings', (
     tester,
   ) async {
     await pumpHome(tester, searchable: false);
     expect(find.text('Export PDF (1 page)'), findsOneWidget);
-    expect(find.byTooltip('PDF export options'), findsNothing);
+    await openOptions(tester);
     expect(find.byType(SwitchListTile), findsNothing);
+    expect(find.textContaining('Latin-script'), findsNothing);
+    expect(find.text('Page size'), findsOneWidget);
+    expect(find.text('Quality'), findsOneWidget);
   });
 
   testWidgets('empty home has no footer and About is in the overflow menu', (
@@ -197,6 +200,11 @@ void main() {
           tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
           isTrue,
         );
+        await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Small'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ChoiceChip, 'Small'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
         await tester.ensureVisible(find.widgetWithText(FilledButton, 'Done'));
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton, 'Done'));

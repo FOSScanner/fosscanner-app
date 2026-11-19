@@ -43,7 +43,9 @@ No account, no cloud processing, no tracking.
    back arrow to revisit the crop; back again leaves the editor without saving.
    Save an edit with **Save changes**.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
-   On Android, **PDF export options** lets you turn searchable text on or off.
+   **PDF export options** sets the page size (Original, A4 or Letter) and
+   quality (High, Balanced or Small); on Android it also turns searchable text
+   on or off. Your choices are remembered.
 
 Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
 **Move later**, or long-press and drag pages to reorder them. The page grid
@@ -88,6 +90,15 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | Temporary draft restoration after app restart | Yes | Yes |
 | QR/barcode scanning and full-result inspection | Yes | Yes |
 | System light/dark theme | Yes | Yes |
+
+**Page size and quality.** *Original* sizes each page from its pixels, as
+before. *A4* and *Letter* fit each page image inside the page, centered, and
+turn the page to landscape for landscape images. *High* keeps full
+resolution; *Balanced* (up to 200 DPI) and *Small* (up to 150 DPI, stronger
+JPEG compression) make much smaller files for email and upload limits. On
+*Original* pages the DPI limit is measured against an A4-sized page. The
+same settings apply to searchable PDFs; lower resolutions can reduce text
+recognition accuracy on fine print. The app does not predict the file size.
 
 Perspective correction and filters use OpenCV. Searchable PDFs use bundled,
 offline Tesseract data. On Android, searchable text is off by default; enable it

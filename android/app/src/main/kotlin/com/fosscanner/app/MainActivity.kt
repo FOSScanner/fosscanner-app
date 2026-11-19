@@ -246,6 +246,13 @@ class MainActivity : FlutterActivity() {
             result.error("invalid_args", "Between 1 and 100 images and an output path are required", null)
             return
         }
+        // Dart sizes each page through its density (page = pixels / DPI), so
+        // export presets and A4/Letter pages need one value per image.
+        val pageDpis = PdfExportContract.pageDpis(call.argument<Any>("pageDpis"), imagePaths.size)
+        if (pageDpis == null) {
+            result.error("invalid_args", "One valid density per image is required", null)
+            return
+        }
         if (!rendering.compareAndSet(false, true)) {
             result.error("ocr_busy", "An OCR export is already running", null)
             return
@@ -280,7 +287,7 @@ class MainActivity : FlutterActivity() {
                     require(encodedBytes <= MAX_DOCUMENT_BYTES)
                 }
                 checkNotCancelled(jobDetached)
-                renderPdf(filesDir, images, output.path, jobDetached)
+                renderPdf(filesDir, images, pageDpis, output.path, jobDetached)
                 checkNotCancelled(jobDetached)
                 succeeded = true
                 "$outputPath.pdf"
@@ -301,16 +308,25 @@ class MainActivity : FlutterActivity() {
         result.success(null)
     }
 
-    private fun renderPdf(filesDir: File, images: List<File>, outputPath: String, jobDetached: AtomicBoolean) {
+    private fun renderPdf(
+        filesDir: File,
+        images: List<File>,
+        pageDpis: List<Int>,
+        outputPath: String,
+        jobDetached: AtomicBoolean,
+    ) {
+        require(pageDpis.size == images.size)
         val baseApi = TessBaseAPI()
         try {
             check(baseApi.init(filesDir.absolutePath, OcrModelStore.language, TessBaseAPI.OEM_LSTM_ONLY))
-            check(baseApi.setVariable("user_defined_dpi", OCR_DPI.toString()))
             val renderer = TessPdfRenderer(baseApi, outputPath)
             try {
                 check(baseApi.beginDocument(renderer, "FOSScanner"))
-                for (image in images) {
+                for ((index, image) in images.withIndex()) {
                     checkNotCancelled(jobDetached)
+                    // Tesseract reads this for every page, and its PDF renderer
+                    // sizes the page as pixels / DPI.
+                    check(baseApi.setVariable("user_defined_dpi", pageDpis[index].toString()))
                     // Mirror image_metadata.dart's source limits before allocating
                     // bitmap/Pix buffers, including pass-through imported pages.
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -329,7 +345,7 @@ class MainActivity : FlutterActivity() {
                         pix.recycle()
                     }
                     check(File("$outputPath.pdf").length() <= MAX_DOCUMENT_BYTES)
-                    reportProgress(images.size, images.indexOf(image) + 1)
+                    reportProgress(images.size, index + 1)
                 }
                 checkNotCancelled(jobDetached)
                 check(baseApi.endDocument(renderer))
@@ -363,7 +379,6 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
-        private const val OCR_DPI = 150
         private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
         @Volatile private var secureScreen = false
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024

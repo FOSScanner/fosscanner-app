@@ -6,9 +6,9 @@ import 'package:image/image.dart' as im;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-const _scanDpi = 150.0;
+import 'pdf_export_options.dart';
 
-/// Thrown by [createImageOnlyPdf] when its caller asked it to stop.
+/// Thrown by [writeImageOnlyPdf] when its caller asked it to stop.
 class ImagePdfCancelledException implements Exception {
   const ImagePdfCancelledException();
 }
@@ -26,9 +26,14 @@ class ImagePdfCancelledException implements Exception {
 /// after the caller gave up. Page conversion and assembly run through
 /// [compute], which uses a worker isolate on every platform that has one and
 /// falls back to the calling isolate on web.
+///
+/// [pageSize] and [quality] choose the page box and image resolution; see
+/// [planPdfPage]. The defaults reproduce the historical output exactly.
 Future<void> writeImageOnlyPdf(
   List<Uint8List> pages,
   String outputPath, {
+  PdfPageSize pageSize = PdfPageSize.original,
+  PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
   bool Function()? isCancelled,
 }) async {
@@ -36,6 +41,8 @@ Future<void> writeImageOnlyPdf(
     await _writeImageOnlyPdf(
       pages,
       outputPath,
+      pageSize: pageSize,
+      quality: quality,
       onProgress: onProgress,
       isCancelled: isCancelled,
     );
@@ -52,10 +59,14 @@ Future<void> writeImageOnlyPdf(
 Future<void> _writeImageOnlyPdf(
   List<Uint8List> pages,
   String outputPath, {
+  required PdfPageSize pageSize,
+  required PdfQuality quality,
   void Function(int completed, int total)? onProgress,
   bool Function()? isCancelled,
 }) async {
-  final jpegPages = <Uint8List>[];
+  final keepsOriginal =
+      pageSize == PdfPageSize.original && quality == PdfQuality.high;
+  final jpegPages = <_Page>[];
   for (final bytes in pages) {
     if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
     // The PDF library retains raw RGB(A) buffers for non-JPEG images until
@@ -64,11 +75,19 @@ Future<void> _writeImageOnlyPdf(
     // JPEG and pass through untouched; anything else is re-encoded on a
     // worker, keeping both the decoded bitmap and the encoder off this
     // isolate.
-    jpegPages.add(
-      im.JpegDecoder().isValidFile(bytes)
-          ? bytes
-          : await compute(_encodeJpegPage, bytes),
-    );
+    // Presets other than Original/High resample or re-encode on the worker
+    // too, and return the page's placement with it.
+    if (keepsOriginal && im.JpegDecoder().isValidFile(bytes)) {
+      jpegPages.add((bytes: bytes, plan: null));
+    } else {
+      final prepared = await compute(preparePdfPage, (
+        bytes: bytes,
+        pageSize: pageSize,
+        quality: quality,
+        padToPage: false,
+      ));
+      jpegPages.add((bytes: prepared.bytes, plan: prepared.plan));
+    }
     onProgress?.call(jpegPages.length, pages.length);
   }
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
@@ -81,37 +100,32 @@ Future<void> _writeImageOnlyPdf(
   if (isCancelled?.call() ?? false) throw const ImagePdfCancelledException();
 }
 
-// Re-encodes one page as an opaque JPEG. Top-level so compute can run it.
-Uint8List _encodeJpegPage(Uint8List bytes) {
-  final decoded = im.decodeImage(bytes, frame: 0);
-  if (decoded == null) throw const FormatException('Could not decode PDF page');
-  var opaque = decoded;
-  if (decoded.hasAlpha) {
-    opaque = im.Image(
-      width: decoded.width,
-      height: decoded.height,
-      numChannels: 3,
-    );
-    im.fill(opaque, color: im.ColorRgb8(255, 255, 255));
-    im.compositeImage(opaque, decoded);
-  }
-  return im.encodeJpg(opaque, quality: 95);
-}
+/// A page image ready to embed; a null plan keeps the historical layout.
+typedef _Page = ({Uint8List bytes, PdfPagePlan? plan});
 
-Future<void> _assembleDocument(
-  ({List<Uint8List> pages, String path}) job,
-) async {
+Future<void> _assembleDocument(({List<_Page> pages, String path}) job) async {
   final pdf = pw.Document();
-  for (final bytes in job.pages) {
-    final image = pw.MemoryImage(bytes);
+  for (final page in job.pages) {
+    final image = pw.MemoryImage(page.bytes);
+    final plan = page.plan;
     pdf.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat(
-          image.width! / _scanDpi * PdfPageFormat.inch,
-          image.height! / _scanDpi * PdfPageFormat.inch,
-        ),
+        pageFormat: plan == null
+            ? PdfPageFormat(
+                image.width! / originalPageDpi * PdfPageFormat.inch,
+                image.height! / originalPageDpi * PdfPageFormat.inch,
+              )
+            : PdfPageFormat(plan.pageWidth, plan.pageHeight),
         margin: pw.EdgeInsets.zero,
-        build: (_) => pw.Image(image, fit: pw.BoxFit.fill),
+        build: (_) => plan == null
+            ? pw.Image(image, fit: pw.BoxFit.fill)
+            : pw.Center(
+                child: pw.SizedBox(
+                  width: plan.imageWidth,
+                  height: plan.imageHeight,
+                  child: pw.Image(image, fit: pw.BoxFit.fill),
+                ),
+              ),
       ),
     );
   }

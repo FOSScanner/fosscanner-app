@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show debugPrint, immutable, kDebugMode;
 import 'package:path_provider/path_provider.dart';
 
+import 'pdf_export_options.dart';
+
 /// User choices that outlive a session.
 ///
 /// Every field has a safe default, and [AppPreferences.fromJson] falls back to
@@ -13,15 +15,37 @@ import 'package:path_provider/path_provider.dart';
 /// [toJson], [fromJson] and equality.
 @immutable
 class AppPreferences {
-  const AppPreferences({this.searchablePdf = false});
+  const AppPreferences({
+    this.searchablePdf = false,
+    this.pdfPageSize = PdfPageSize.original,
+    this.pdfQuality = PdfQuality.high,
+  });
 
   /// Whether exports run on-device OCR (where the platform supports it).
   final bool searchablePdf;
 
-  AppPreferences copyWith({bool? searchablePdf}) =>
-      AppPreferences(searchablePdf: searchablePdf ?? this.searchablePdf);
+  /// Page box of exported PDFs.
+  final PdfPageSize pdfPageSize;
 
-  Map<String, Object?> toJson() => {'searchablePdf': searchablePdf};
+  /// Image resolution and compression of exported PDFs.
+  final PdfQuality pdfQuality;
+
+  AppPreferences copyWith({
+    bool? searchablePdf,
+    PdfPageSize? pdfPageSize,
+    PdfQuality? pdfQuality,
+  }) => AppPreferences(
+    searchablePdf: searchablePdf ?? this.searchablePdf,
+    pdfPageSize: pdfPageSize ?? this.pdfPageSize,
+    pdfQuality: pdfQuality ?? this.pdfQuality,
+  );
+
+  // Enums are stored by name, so reordering them cannot change a choice.
+  Map<String, Object?> toJson() => {
+    'searchablePdf': searchablePdf,
+    'pdfPageSize': pdfPageSize.name,
+    'pdfQuality': pdfQuality.name,
+  };
 
   factory AppPreferences.fromJson(Object? json) {
     if (json is! Map) return const AppPreferences();
@@ -29,15 +53,39 @@ class AppPreferences {
     final searchable = json['searchablePdf'];
     return AppPreferences(
       searchablePdf: searchable is bool ? searchable : defaults.searchablePdf,
+      pdfPageSize: _enumByName(
+        PdfPageSize.values,
+        json['pdfPageSize'],
+        defaults.pdfPageSize,
+      ),
+      pdfQuality: _enumByName(
+        PdfQuality.values,
+        json['pdfQuality'],
+        defaults.pdfQuality,
+      ),
     );
+  }
+
+  static T _enumByName<T extends Enum>(
+    List<T> values,
+    Object? name,
+    T fallback,
+  ) {
+    for (final value in values) {
+      if (value.name == name) return value;
+    }
+    return fallback;
   }
 
   @override
   bool operator ==(Object other) =>
-      other is AppPreferences && other.searchablePdf == searchablePdf;
+      other is AppPreferences &&
+      other.searchablePdf == searchablePdf &&
+      other.pdfPageSize == pdfPageSize &&
+      other.pdfQuality == pdfQuality;
 
   @override
-  int get hashCode => searchablePdf.hashCode;
+  int get hashCode => Object.hash(searchablePdf, pdfPageSize, pdfQuality);
 }
 
 /// Loads and saves [AppPreferences]. Implementations never throw from [load].

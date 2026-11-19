@@ -1070,7 +1070,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('PDF export options'), findsNothing);
     await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 

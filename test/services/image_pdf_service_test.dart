@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/services/image_pdf_service.dart';
+import 'package:fosscanner/services/pdf_export_options.dart';
 import 'package:image/image.dart' as im;
+import 'package:pdf/pdf.dart';
 
 List<Uint8List> embeddedJpegs(Uint8List pdf) {
   final images = <Uint8List>[];
@@ -28,12 +31,16 @@ String _outputPath() => '${_outputs.path}/document.pdf';
 /// Writes the PDF to a file and reads it back for inspection.
 Future<Uint8List> createImageOnlyPdf(
   List<Uint8List> pages, {
+  PdfPageSize pageSize = PdfPageSize.original,
+  PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
   bool Function()? isCancelled,
 }) async {
   await writeImageOnlyPdf(
     pages,
     _outputPath(),
+    pageSize: pageSize,
+    quality: quality,
     onProgress: onProgress,
     isCancelled: isCancelled,
   );
@@ -41,6 +48,28 @@ Future<Uint8List> createImageOnlyPdf(
   final bytes = await file.readAsBytes();
   await file.delete();
   return bytes;
+}
+
+List<List<double>> mediaBoxes(Uint8List pdf) =>
+    RegExp(r'/MediaBox\s*\[([^\]]+)\]')
+        .allMatches(latin1.decode(pdf))
+        .map(
+          (match) =>
+              match[1]!.trim().split(RegExp(r'\s+')).map(double.parse).toList(),
+        )
+        .toList();
+
+Uint8List noisyJpeg(int width, int height) {
+  final random = math.Random(width * height);
+  final image = im.Image(width: width, height: height, numChannels: 3);
+  for (final pixel in image) {
+    final v = 128 + random.nextInt(64);
+    pixel
+      ..r = v
+      ..g = v
+      ..b = v;
+  }
+  return im.encodeJpg(image, quality: 95);
 }
 
 void main() {
@@ -181,5 +210,46 @@ void main() {
       ], isCancelled: () => true),
       throwsA(isA<ImagePdfCancelledException>()),
     );
+  });
+
+  test('A4 and Letter exports use exact page boxes for every page', () async {
+    final portrait = noisyJpeg(200, 300);
+    final landscape = noisyJpeg(300, 200);
+    final a4 = await createImageOnlyPdf([
+      portrait,
+      landscape,
+    ], pageSize: PdfPageSize.a4);
+    final boxes = mediaBoxes(a4);
+    expect(boxes, hasLength(2));
+    expect(boxes[0][2], closeTo(PdfPageFormat.a4.width, 0.01));
+    expect(boxes[0][3], closeTo(PdfPageFormat.a4.height, 0.01));
+    expect(boxes[1][2], closeTo(PdfPageFormat.a4.height, 0.01));
+    expect(boxes[1][3], closeTo(PdfPageFormat.a4.width, 0.01));
+    // High keeps the JPEG untouched even on a fixed page size.
+    expect(embeddedJpegs(a4).first, orderedEquals(portrait));
+
+    final letter = await createImageOnlyPdf([
+      portrait,
+    ], pageSize: PdfPageSize.letter);
+    expect(mediaBoxes(letter).single.sublist(2), [612, 792]);
+  });
+
+  test('presets measurably shrink a representative 10-page document', () async {
+    final pages = [for (var i = 0; i < 10; i++) noisyJpeg(620 + i, 877)];
+    final high = await createImageOnlyPdf(pages, pageSize: PdfPageSize.a4);
+    final balanced = await createImageOnlyPdf(
+      pages,
+      pageSize: PdfPageSize.a4,
+      quality: PdfQuality.balanced,
+    );
+    final small = await createImageOnlyPdf(
+      pages,
+      pageSize: PdfPageSize.a4,
+      quality: PdfQuality.small,
+    );
+    expect(balanced.length, lessThan(high.length * 0.75));
+    expect(small.length, lessThan(balanced.length));
+    expect(small.length, lessThan(high.length / 2));
+    expect(mediaBoxes(small), hasLength(10));
   });
 }

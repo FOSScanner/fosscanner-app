@@ -22,6 +22,7 @@ import '../services/image_metadata.dart';
 import '../services/image_pdf_service.dart' as image_pdf;
 import '../services/ocr_service.dart' as ocr_service;
 import '../services/pdf_export_files.dart';
+import '../services/pdf_export_options.dart';
 import '../services/platform_capabilities.dart';
 import '../services/shared_image_inbox.dart';
 import '../widgets/transient_message.dart';
@@ -1381,6 +1382,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return ocr_service.createSearchablePdf(
       [for (final page in pages) page.processedBytes],
       outputPath: output.path,
+      pageSize: _preferences.pdfPageSize,
+      quality: _preferences.pdfQuality,
       onProgress: _updatePdfProgress,
     );
   }
@@ -1433,6 +1436,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return image_pdf.writeImageOnlyPdf(
       [for (final page in pages) page.processedBytes],
       output.path,
+      pageSize: _preferences.pdfPageSize,
+      quality: _preferences.pdfQuality,
       onProgress: _updatePdfProgress,
       isCancelled: () => _isCancellingPdf,
     );
@@ -1573,7 +1578,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Future<void> _showExportOptions() async {
-    if (!_canExport || !_ocrSupported) return;
+    if (!_canExport) return;
+    // Every control re-checks that the sheet still belongs to an idle screen,
+    // so a stale callback cannot change settings during an export.
+    bool canChange(BuildContext sheetContext) =>
+        mounted && _canExport && sheetContext.mounted;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1592,31 +1601,69 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   'PDF export options',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 8),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Searchable text'),
-                  subtitle: Text(
-                    _preferences.searchablePdf
-                        ? 'Recognize text so you can search and select it in the PDF.'
-                        : 'Image-only PDF without text recognition.',
+                if (_ocrSupported) ...[
+                  const SizedBox(height: 8),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Searchable text'),
+                    subtitle: Text(
+                      _preferences.searchablePdf
+                          ? 'Recognize text so you can search and select it in the PDF.'
+                          : 'Image-only PDF without text recognition.',
+                    ),
+                    value: _preferences.searchablePdf,
+                    onChanged: (value) {
+                      if (!canChange(sheetContext)) return;
+                      _updatePreferences(
+                        _preferences.copyWith(searchablePdf: value),
+                      );
+                      updateSheet(() {});
+                    },
                   ),
-                  value: _preferences.searchablePdf,
-                  onChanged: (value) {
-                    if (!mounted || !_canExport || !sheetContext.mounted) {
-                      return;
-                    }
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Text recognition supports Latin-script text and runs '
+                    'entirely on your device. Your scans stay private.',
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _buildOptionChoices<PdfPageSize>(
+                  title: 'Page size',
+                  values: PdfPageSize.values,
+                  selected: _preferences.pdfPageSize,
+                  label: (size) => size.label,
+                  onSelected: (size) {
+                    if (!canChange(sheetContext)) return;
                     _updatePreferences(
-                      _preferences.copyWith(searchablePdf: value),
+                      _preferences.copyWith(pdfPageSize: size),
+                    );
+                    updateSheet(() {});
+                  },
+                ),
+                const SizedBox(height: 16),
+                _buildOptionChoices<PdfQuality>(
+                  title: 'Quality',
+                  values: PdfQuality.values,
+                  selected: _preferences.pdfQuality,
+                  label: (quality) => quality.label,
+                  onSelected: (quality) {
+                    if (!canChange(sheetContext)) return;
+                    _updatePreferences(
+                      _preferences.copyWith(pdfQuality: quality),
                     );
                     updateSheet(() {});
                   },
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Text recognition supports Latin-script text and runs '
-                  'entirely on your device. Your scans stay private.',
-                ),
+                Text(switch (_preferences.pdfQuality) {
+                  PdfQuality.high => 'Full resolution. Largest files.',
+                  PdfQuality.balanced =>
+                    'Up to 200 DPI with moderate compression. Much smaller '
+                        'files that print well.',
+                  PdfQuality.small =>
+                    'Up to 150 DPI with strong compression, for email and '
+                        'upload limits. Fine print may lose detail.',
+                }),
                 const SizedBox(height: 16),
                 Align(
                   alignment: AlignmentDirectional.centerEnd,
@@ -1633,6 +1680,35 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  // Chips wrap onto new lines at large text sizes instead of overflowing.
+  Widget _buildOptionChoices<T>({
+    required String title,
+    required List<T> values,
+    required T selected,
+    required String Function(T value) label,
+    required void Function(T value) onSelected,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final value in values)
+              ChoiceChip(
+                label: Text(label(value)),
+                selected: value == selected,
+                onSelected: (_) => onSelected(value),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   String get _exportStatus {
     if (_isClearingDraft) return 'Clearing draft...';
     if (_isCancellingPdf) return 'Cancelling PDF...';
@@ -1640,6 +1716,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_pdfProgress == null) return 'Preparing PDF...';
     return 'Generating PDF ${(_pdfProgress! * 100).round()}%';
   }
+
+  String get _exportOptionsSummary => [
+    if (_ocrSupported)
+      _exportsSearchable ? 'Searchable text enabled' : 'Image-only PDF',
+    '${_preferences.pdfPageSize.label} page size',
+    '${_preferences.pdfQuality.label} quality',
+  ].join(', ');
 
   String get _exportLabel {
     final pages = '${_pages.length} ${_pages.length == 1 ? 'page' : 'pages'}';
@@ -1717,19 +1800,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         ),
                       ),
                     ),
-                    if (_ocrSupported) ...[
-                      const SizedBox(width: 8),
-                      Semantics(
-                        value: _exportsSearchable
-                            ? 'Searchable text enabled'
-                            : 'Image-only PDF',
-                        child: IconButton.filledTonal(
-                          onPressed: _canExport ? _showExportOptions : null,
-                          tooltip: 'PDF export options',
-                          icon: const Icon(Icons.tune),
-                        ),
+                    const SizedBox(width: 8),
+                    Semantics(
+                      value: _exportOptionsSummary,
+                      child: IconButton.filledTonal(
+                        onPressed: _canExport ? _showExportOptions : null,
+                        tooltip: 'PDF export options',
+                        icon: const Icon(Icons.tune),
                       ),
-                    ],
+                    ),
                   ],
           ),
         ),
