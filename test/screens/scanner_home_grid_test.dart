@@ -150,27 +150,38 @@ void main() {
   );
 
   // #160
-  // #160: large text may shrink a label to fit, but never below the default
-  // size; a label that still does not fit wraps inside the footer.
+  // #160, #153: large text may shrink "Page N" to fit, a little below the
+  // default size at most; where it still does not fit beside the footer
+  // buttons, the card shows the number alone. Never wrapped or cut.
   testLayoutMatrix(
-    'page labels keep at least the default size',
+    'page labels stay whole on one line',
     (tester, layoutCase) async {
       await pumpHome(tester, layoutCase, pageCount: 12);
       // Material 3 labelLarge: 14 px on a 20 px line.
       double? sharedScale;
+      bool? sharedNumberOnly;
       for (final index in [0, 1, 9, 10, 11]) {
-        final label = find.text('Page ${index + 1}');
+        final label = find.byKey(ValueKey('page_label_$index'));
         await tester.scrollUntilVisible(label, 100);
+        final text = tester.widget<Text>(label).data!;
+        final numberOnly = text == '${index + 1}';
+        expect(numberOnly || text == 'Page ${index + 1}', isTrue);
         final paragraph = tester.renderObject<RenderParagraph>(label);
         final scale = paragraph.textScaler.scale(14) / 14;
-        expect(scale, greaterThanOrEqualTo(1));
+        if (!numberOnly) expect(scale, greaterThanOrEqualTo(0.85));
         expect(scale, lessThanOrEqualTo(layoutCase.textScale));
         sharedScale ??= scale;
+        sharedNumberOnly ??= numberOnly;
         expect(scale, sharedScale, reason: 'page ${index + 1}');
-        // One line at a larger size, or up to two at the default size: both
-        // fit the 48 px footer.
-        final lines = paragraph.maxLines!;
-        expect(lines, scale > 1 ? 1 : 2);
+        expect(numberOnly, sharedNumberOnly, reason: 'page ${index + 1}');
+        expect(paragraph.maxLines, 1);
+        expect(
+          paragraph.size.width,
+          greaterThanOrEqualTo(
+            paragraph.getMaxIntrinsicWidth(double.infinity) - 0.5,
+          ),
+          reason: '"$text" is cut off',
+        );
         expect(paragraph.size.height, lessThanOrEqualTo(48));
       }
       expect(tester.takeException(), isNull);
@@ -194,7 +205,10 @@ void main() {
     expect(tester.getSize(feedback), card);
     // The copy shows the same one-line label as the card.
     expect(
-      find.descendant(of: feedback, matching: find.text('Page 1')),
+      find.descendant(
+        of: feedback,
+        matching: find.byKey(const ValueKey('page_label_0')),
+      ),
       findsOneWidget,
     );
     await gesture.up();

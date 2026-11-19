@@ -454,7 +454,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(importer.pickCalls, 0);
 
-    await tester.tap(find.text('Image intake help'));
+    await tester.tap(find.byTooltip('Image intake help'));
     await tester.pumpAndSettle();
     expect(
       find.textContaining('reached the $maxDocumentPages-page limit'),

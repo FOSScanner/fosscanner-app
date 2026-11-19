@@ -515,7 +515,25 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Image intake help'));
+      // The camera button looks and reads as unavailable (#151).
+      final semantics = tester.ensureSemantics();
+      FloatingActionButton camera() => tester.widget<FloatingActionButton>(
+        find.byType(FloatingActionButton),
+      );
+      expect(camera().onPressed, isNull);
+      expect(camera().backgroundColor, isNotNull);
+      expect(camera().elevation, 0);
+      expect(
+        tester.getSemantics(find.byType(FloatingActionButton)),
+        isSemantics(
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+          tooltip: 'Scan a page',
+        ),
+      );
+      semantics.dispose();
+      await tester.tap(find.byTooltip('Image intake help'));
       await tester.pumpAndSettle();
       expect(
         find.textContaining('$maxDocumentPages-page limit'),
@@ -528,13 +546,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Delete page 1'));
       await tester.pumpAndSettle();
-      expect(find.text('Image intake help'), findsNothing);
-      expect(
-        tester
-            .widget<FloatingActionButton>(find.byType(FloatingActionButton))
-            .onPressed,
-        isNotNull,
-      );
+      expect(find.byTooltip('Image intake help'), findsNothing);
+      expect(camera().onPressed, isNotNull);
+      expect(camera().backgroundColor, isNull);
+      expect(camera().elevation, isNull);
     },
   );
 
@@ -558,7 +573,7 @@ void main() {
           .onPressed,
       isNull,
     );
-    await tester.tap(find.text('Image intake help'));
+    await tester.tap(find.byTooltip('Image intake help'));
     await tester.pumpAndSettle();
     expect(find.textContaining('not enough document memory'), findsOneWidget);
     expect(find.textContaining('pending draft save'), findsOneWidget);
@@ -577,7 +592,7 @@ void main() {
     );
     await tester.pump(const Duration(seconds: 10));
     await tester.pumpAndSettle();
-    expect(find.text('Image intake help'), findsNothing);
+    expect(find.byTooltip('Image intake help'), findsNothing);
     expect(
       tester
           .widget<FloatingActionButton>(find.byType(FloatingActionButton))
@@ -594,7 +609,7 @@ void main() {
     );
     await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Image intake help'));
+    await tester.tap(find.byTooltip('Image intake help'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Use Import from gallery'), findsOneWidget);
     await tester.tap(find.text('Close'));

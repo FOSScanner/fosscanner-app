@@ -160,6 +160,83 @@ void main() {
   );
 
   testLayoutMatrix(
+    'the empty state shows its copy and button unscrolled where they fit, '
+    'and a scrollbar where they do not',
+    (tester, layoutCase) async {
+      await pumpHome(tester, layoutCase, pageCount: 0);
+      final scrollView = find.byKey(const Key('empty_state_scroll_view'));
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: scrollView, matching: find.byType(Scrollable)),
+          )
+          .position;
+      final viewport = tester.getRect(scrollView);
+      final button = find.widgetWithText(OutlinedButton, 'Import from gallery');
+      final copy = find.text(
+        'Scan your first page, or import from your gallery.',
+      );
+      if (position.maxScrollExtent == 0) {
+        for (final finder in [copy, button]) {
+          final rect = tester.getRect(finder);
+          expect(viewport.intersect(rect), rect, reason: '$finder is cut off');
+        }
+      } else {
+        // Content that does not fit starts at the top margin instead of
+        // being pushed below the fold by centring (the 412 × 915 @2.0× QA
+        // phone with Roboto fits; the wider test font does not).
+        expect(
+          tester.getRect(find.byKey(const Key('empty_state_icon'))).top -
+              viewport.top,
+          moreOrLessEquals(32, epsilon: 0.5),
+        );
+        // Whatever does not fit is reachable, and the scrollbar says so.
+        final scrollbar = tester.widget<Scrollbar>(
+          find.ancestor(of: scrollView, matching: find.byType(Scrollbar)),
+        );
+        expect(scrollbar.thumbVisibility, isTrue);
+      }
+      expect(tester.takeException(), isNull);
+    },
+    cases: [...largeDisplayCases, ...layoutMatrix],
+  );
+
+  // #153
+  testLayoutMatrix(
+    'every page card shows its whole page number on one line',
+    (tester, layoutCase) async {
+      const pageCount = 12;
+      await pumpHome(tester, layoutCase, pageCount: pageCount);
+      final semantics = tester.ensureSemantics();
+      final labels = <String>{};
+      for (var i = 0; i < pageCount; i++) {
+        final label = find.byKey(ValueKey('page_label_$i'));
+        if (label.evaluate().isEmpty) continue;
+        final text = tester.widget<Text>(label).data!;
+        expect(text, anyOf('Page ${i + 1}', '${i + 1}'));
+        labels.add(text.startsWith('Page') ? 'long' : 'short');
+        final paragraph = tester.renderObject<RenderParagraph>(label);
+        expect(paragraph.didExceedMaxLines, isFalse);
+        expect(
+          paragraph.size.width,
+          greaterThanOrEqualTo(
+            paragraph.getMaxIntrinsicWidth(double.infinity) - 0.5,
+          ),
+          reason: '"$text" is clipped',
+        );
+        expect(
+          find.bySemanticsLabel('Page ${i + 1} of $pageCount'),
+          findsOneWidget,
+        );
+      }
+      // All cards make the same choice.
+      expect(labels.length, 1);
+      semantics.dispose();
+      expect(tester.takeException(), isNull);
+    },
+    cases: [...largeDisplayCases, ...layoutMatrix],
+  );
+
+  testLayoutMatrix(
     'the export label is shown whole',
     (tester, layoutCase) async {
       await pumpHome(tester, layoutCase, pageCount: 12);

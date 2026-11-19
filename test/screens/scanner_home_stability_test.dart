@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -10,6 +11,7 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
+import 'package:fosscanner/services/image_metadata.dart';
 
 import '../support/home_menu.dart';
 import '../support/layout_stability.dart';
@@ -151,7 +153,7 @@ void main() {
   );
 
   testLayoutMatrix(
-    'image intake help shares the status slot instead of moving the grid',
+    'image intake help is not offered while images are only being selected',
     (tester, layoutCase) async {
       final picker = _CameraPicker()..gallery = Completer<List<XFile>>();
       ImagePickerPlatform.instance = picker;
@@ -162,21 +164,57 @@ void main() {
         'first card': find.byType(Card).first,
         'status slot': find.byKey(const Key('draft_status_slot')),
       };
-      expect(find.text('Image intake help'), findsNothing);
+      expect(find.byTooltip('Image intake help'), findsNothing);
 
       await expectStableRects(tester, anchors, () async {
         await tester.tap(find.byTooltip('Import from gallery'));
         await tester.pump();
-        expect(find.text('Image intake help'), findsOneWidget);
+        expect(find.byTooltip('Image intake help'), findsNothing);
       }, reason: 'selection in progress');
 
       await expectStableRects(tester, anchors, () async {
         picker.gallery!.complete(const []);
         await tester.pumpAndSettle();
-        expect(find.text('Image intake help'), findsNothing);
+        expect(find.byTooltip('Image intake help'), findsNothing);
       }, reason: 'selection finished');
       expect(tester.takeException(), isNull);
     },
+  );
+
+  testLayoutMatrix(
+    'the hint keeps its place and every word when intake help appears',
+    (tester, layoutCase) async {
+      const hint = 'Drafts are temporary. Export a PDF to keep a copy.';
+      await pumpHome(tester, layoutCase, pageCount: 4);
+      await tester.pumpAndSettle();
+      final anchors = {
+        'grid': find.byType(GridView),
+        'status slot': find.byKey(const Key('draft_status_slot')),
+        'hint': find.text(hint),
+      };
+      expect(find.byTooltip('Image intake help'), findsNothing);
+      final before = captureRects(tester, anchors);
+
+      // At the page limit, intake is limited: help is offered in place.
+      await tester.pumpWidget(const SizedBox());
+      await pumpHome(tester, layoutCase, pageCount: maxDocumentPages);
+      await tester.pumpAndSettle();
+      final help = find.byTooltip('Image intake help');
+      expect(help, findsOneWidget);
+      final after = captureRects(tester, anchors);
+      for (final name in anchors.keys) {
+        expect(after[name], before[name], reason: '$name moved');
+      }
+      final slot = tester.getRect(anchors['status slot']!);
+      final helpRect = tester.getRect(help);
+      expect(slot.intersect(helpRect), helpRect, reason: 'help is clipped');
+      expect(helpRect.overlaps(tester.getRect(find.text(hint))), isFalse);
+      // The whole hint is laid out: nothing is cut off or ellipsized.
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(hint));
+      expect(paragraph.didExceedMaxLines, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+    cases: [...layoutMatrix, ...highDensityLargeTextCases],
   );
 
   // #151

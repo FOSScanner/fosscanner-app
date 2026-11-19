@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -299,10 +300,24 @@ void main() {
         isNull,
       );
       expect(find.byTooltip('Import from gallery'), findsNothing);
+      final semantics = tester.ensureSemantics();
       pending.completeError(StateError('PRIVATE retry error'));
       await tester.pumpAndSettle();
       expect(find.text('Could not restore the saved draft'), findsOneWidget);
       expect(find.textContaining('PRIVATE'), findsNothing);
+      // A retry that fails again says so, and screen readers hear it.
+      const stillFailing = "The saved draft still can't be restored.";
+      expect(find.text(stillFailing), findsOneWidget);
+      var announced = false;
+      for (
+        SemanticsNode? node = tester.getSemantics(find.text(stillFailing));
+        node != null && !announced;
+        node = node.parent
+      ) {
+        announced = node.getSemanticsData().flagsCollection.isLiveRegion;
+      }
+      expect(announced, isTrue, reason: 'not in a live region');
+      semantics.dispose();
       expect(store.saves, isEmpty);
       expect(store.clearCalls, 0);
     },

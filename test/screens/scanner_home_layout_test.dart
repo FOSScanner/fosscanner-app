@@ -231,7 +231,7 @@ void main() {
     ) async {
       setViewport(tester, size);
       await pumpHome(tester, pageCount: maxDocumentPages, textScale: 2);
-      final status = find.text('Image intake help');
+      final status = find.byTooltip('Image intake help');
       await tester.ensureVisible(status);
       await tester.pumpAndSettle();
       await tester.tap(status);
@@ -348,7 +348,12 @@ void main() {
     final image = tester.widget<Image>(preview);
     final bounds = tester.getRect(preview);
     expect(image.fit, BoxFit.contain);
-    expect(bounds.overlaps(tester.getRect(find.text('Page 1'))), isFalse);
+    expect(
+      bounds.overlaps(
+        tester.getRect(find.byKey(const ValueKey('page_label_0'))),
+      ),
+      isFalse,
+    );
     expect(
       bounds.overlaps(tester.getRect(find.byTooltip('Delete page 1'))),
       isFalse,

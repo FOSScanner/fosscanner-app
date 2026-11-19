@@ -224,7 +224,7 @@ void main() {
 
       await tester.tap(findShareButton(2));
       await tester.pump();
-      await tester.tap(find.text('Image intake help'));
+      await tester.tap(find.byTooltip('Image intake help'));
       await tester.pump();
       expect(find.textContaining('Export is in progress'), findsOneWidget);
       expect(find.textContaining('page limit'), findsNothing);
@@ -317,11 +317,8 @@ void main() {
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pump();
     expect(picker.calls, 1);
-    await tester.tap(find.text('Image intake help'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('selection or page review'), findsOneWidget);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
+    // Selecting images is not a limit: no help is offered for it.
+    expect(find.byTooltip('Image intake help'), findsNothing);
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
@@ -333,7 +330,7 @@ void main() {
     picker.result.complete([]);
     await tester.pump();
     await tester.pumpAndSettle();
-    expect(find.text('Image intake help'), findsNothing);
+    expect(find.byTooltip('Image intake help'), findsNothing);
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,

@@ -285,6 +285,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _preferencesChanged = false;
   final _fabLocation = _ExportBarFabLocation();
   final _gridScroll = ScrollController();
+  final _emptyStateScrollController = ScrollController();
   // The page grid's latest layout, used to scroll a page into view.
   _PageGridGeometry? _gridGeometry;
   // The grid's viewport and the home scaffold, to find a message's position.
@@ -379,6 +380,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     _tapGuard?.cancel();
     _autoScroll?.cancel();
     _gridScroll.dispose();
+    _emptyStateScrollController.dispose();
     _sharedImageRetry?.cancel();
     widget.sharedImageInbox?.setListener(null);
     super.dispose();
@@ -542,10 +544,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  static const _draftStillUnreadableMessage =
+      "The saved draft still can't be restored.";
+
   Future<void> _retryDraftRestore() async {
     if (_isRestoringDraft || _isClearingDraft || !_draftRestoreFailed) return;
     setState(() => _isRestoringDraft = true);
     await _restoreDraft();
+    // Without this, a retry that fails again looks as if nothing happened.
+    if (mounted && _draftRestoreFailed) {
+      _showMessage(_draftStillUnreadableMessage);
+    }
     _resumeIntakeAfterDraftDecision();
   }
 
@@ -747,11 +756,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (_isGeneratingPdf) {
       return 'Export is in progress. Finish or cancel the export before adding images.';
     }
-    if (_isPickingImages || _isOpeningImageRoute) {
-      return 'Image selection or page review is in progress. Finish or cancel it '
-          'before adding more images.';
-    }
-    if (!_canStartImagePick) {
+    // Selecting, capturing and reviewing images happen in their own screens
+    // and are not a limit: help would only flash up around every scan.
+    if (!_canStartImagePick && !_isOpeningImageRoute) {
       if (_pages.length >= maxDocumentPages) return _documentLimitMessage;
       return '$_documentMemoryLimitMessage '
           'Memory held by Undo or a pending draft save is released when they finish.';
@@ -2965,8 +2972,63 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool get _canClearPages =>
       _pages.isNotEmpty && !_isClearingDraft && !_isGeneratingPdf;
 
+  /// The camera button. Material 3 draws a disabled FAB like an enabled one,
+  /// so while capture is unavailable it takes the disabled colors of other
+  /// buttons and no elevation, and says so to screen readers; Image intake
+  /// help explains why, as for the gallery button.
+  Widget _buildCameraButton() {
+    final enabled =
+        !_isPickingImages && !_isClearingDraft && _canStartImagePick;
+    final scheme = Theme.of(context).colorScheme;
+    return FloatingActionButton(
+      key: const Key('camera_button'),
+      onPressed: enabled ? _captureImage : null,
+      tooltip: 'Scan a page',
+      // Opaque, so nothing scrolled behind shows through.
+      backgroundColor: enabled
+          ? null
+          : Color.alphaBlend(
+              scheme.onSurface.withValues(alpha: 0.12),
+              scheme.surface,
+            ),
+      foregroundColor: enabled
+          ? null
+          : scheme.onSurface.withValues(alpha: 0.38),
+      elevation: enabled ? null : 0,
+      focusElevation: enabled ? null : 0,
+      hoverElevation: enabled ? null : 0,
+      highlightElevation: enabled ? null : 0,
+      disabledElevation: 0,
+      child: const Icon(Icons.camera_alt_outlined),
+    );
+  }
+
+  /// The width kept at the end of the status slot for the help button.
+  static const _statusHelpExtent = 48.0;
+
   static const _draftHint =
       'Drafts are temporary. Export a PDF to keep a copy.';
+
+  static const _restoringTitle = 'Restoring draft…';
+  static const _readyTitle = 'Ready to scan';
+
+  /// The height [text] takes at [maxWidth].
+  static double _textHeight(
+    String text, {
+    required TextStyle? style,
+    required TextScaler textScaler,
+    required double maxWidth,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+      textScaler: textScaler,
+    )..layout(maxWidth: math.max(0, maxWidth));
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
 
   /// How many lines [text] takes at [maxWidth], at most [maxLines].
   static int _lineCount(
@@ -3000,21 +3062,34 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   /// cutting it off early.
   /// Short landscape screens keep one line for the pages. The height depends
   /// only on the screen and the text size, never on the state.
-  /// Image intake help shares the line, so it never moves the grid either.
+  /// Image intake help is an icon button at the end of the line, with room
+  /// kept for it, so it never moves the hint or the grid either.
   Widget _buildDraftStatusSlot(BuildContext context) {
     final theme = Theme.of(context);
     final textScaler = MediaQuery.textScalerOf(context);
     final screen = MediaQuery.sizeOf(context);
     final style = theme.textTheme.bodySmall;
+    // The hint leaves room for the help button whether or not it is shown,
+    // so the hint never rewraps or moves when help appears.
+    final hintWidth = screen.width - 32 - _statusHelpExtent;
     final hintLines = screen.height < 480
         ? 1
         : _lineCount(
             _draftHint,
             style: style,
             textScaler: textScaler,
-            maxWidth: screen.width - 32,
+            maxWidth: hintWidth,
             maxLines: screen.height < 600 ? 2 : 3,
           );
+    final hintFits =
+        _lineCount(
+          _draftHint,
+          style: style,
+          textScaler: textScaler,
+          maxWidth: hintWidth,
+          maxLines: hintLines + 1,
+        ) <=
+        hintLines;
     final lineHeight =
         textScaler.scale(style?.fontSize ?? 12) * (style?.height ?? 1.33);
     final height = math.max(
@@ -3059,25 +3134,42 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     } else {
       final help = _imageIntakeStatus == null
           ? null
-          : TextButton.icon(
+          : IconButton(
+              key: const Key('image_intake_help'),
               onPressed: _showImageIntakeStatus,
               icon: const Icon(Icons.info_outline),
-              label: const Text('Image intake help', maxLines: 1),
+              tooltip: 'Image intake help',
             );
       content = Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (_pages.isNotEmpty)
-            Expanded(
-              child: Text(
-                _draftHint,
-                style: style,
-                textAlign: TextAlign.center,
-                maxLines: hintLines,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          if (help != null) Flexible(child: help),
+          Expanded(
+            child: _pages.isEmpty
+                ? const SizedBox.shrink()
+                : hintFits
+                ? Text(
+                    _draftHint,
+                    style: style,
+                    textAlign: TextAlign.center,
+                    maxLines: hintLines,
+                  )
+                // Where the slot is too short for the whole hint at this
+                // text size, it shrinks rather than losing words.
+                : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: SizedBox(
+                      width: math.max(0, hintWidth),
+                      child: Text(
+                        _draftHint,
+                        style: style,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+          ),
+          SizedBox(
+            width: _statusHelpExtent,
+            child: help == null ? null : Center(child: help),
+          ),
         ],
       );
     }
@@ -3092,19 +3184,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   Widget _buildEmptyState(BuildContext context) {
-    final textScaler = MediaQuery.textScalerOf(context);
-    // Nominal height of the ready state (icon, one-line title, two lines of
-    // copy and the gallery button). The top inset centers that block, but
-    // depends only on the viewport: the restoring and ready states start at
-    // the same place, so the icon and title never move between them.
-    final readyHeight =
-        80 + 16 + textScaler.scale(32) + 8 + textScaler.scale(40) + 24 + 48;
     return LayoutBuilder(
       builder: (context, constraints) {
         // Like the page grid, the content ends above the camera button on
         // tall screens and keeps a column beside it on short ones, so
-        // nothing is ever under the button, scrolled or not. Content taller
-        // than that scrolls.
+        // nothing is ever under the button, scrolled or not.
         final geometry = _pageGridGeometry(constraints.biggest);
         final besideCamera = geometry.padding.end > _pageGridSpacing
             ? geometry.padding.end
@@ -3114,9 +3198,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           padding: EdgeInsets.only(bottom: geometry.cameraInset),
           child: _buildEmptyStateContent(
             context,
+            minHeight: math.max(0, height - 64),
             padding: EdgeInsetsDirectional.fromSTEB(
               32,
-              math.max(32, (height - readyHeight) / 2),
+              32,
               math.max(32, besideCamera),
               32,
             ),
@@ -3126,67 +3211,115 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  /// Centred in [minHeight] when it fits, so the whole copy and the gallery
+  /// button show without scrolling; taller content scrolls, with a visible
+  /// scrollbar saying so. The restoring state lays out the ready state's
+  /// copy and button invisibly, so the icon and title never move between
+  /// the two.
   Widget _buildEmptyStateContent(
     BuildContext context, {
+    required double minHeight,
     required EdgeInsetsDirectional padding,
   }) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    return SingleChildScrollView(
-      padding: padding,
-      child: Center(
+    return Scrollbar(
+      controller: _emptyStateScrollController,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        key: const Key('empty_state_scroll_view'),
+        controller: _emptyStateScrollController,
+        padding: padding,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // The spinner gets the icon's 80 px square.
-              Center(
-                child: SizedBox.square(
-                  key: const Key('empty_state_icon'),
-                  dimension: 80,
-                  child: _isRestoringDraft
-                      ? const Center(child: CircularProgressIndicator())
-                      : Icon(
-                          _cameraSupported
-                              ? Icons.camera_alt_outlined
-                              : Icons.photo_library_outlined,
-                          size: 80,
-                          color: muted,
-                        ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _isRestoringDraft ? 'Restoring draft…' : 'Ready to scan',
-                key: const Key('empty_state_title'),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.headlineSmall,
-              ),
-              if (!_isRestoringDraft) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _cameraSupported
-                      ? 'Scan your first page, or import from your gallery.'
-                      : 'Import from your gallery to add your first page.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: muted),
-                ),
-                const SizedBox(height: 24),
-                Center(
-                  child: OutlinedButton.icon(
-                    onPressed:
-                        _isPickingImages ||
-                            _isClearingDraft ||
-                            !_canStartImagePick
-                        ? null
-                        : _importFromGallery,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Import from gallery'),
+          constraints: BoxConstraints(minHeight: minHeight),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // The spinner gets the icon's 80 px square.
+                  Center(
+                    child: SizedBox.square(
+                      key: const Key('empty_state_icon'),
+                      dimension: 80,
+                      child: _isRestoringDraft
+                          ? const Center(child: CircularProgressIndicator())
+                          : Icon(
+                              _cameraSupported
+                                  ? Icons.camera_alt_outlined
+                                  : Icons.photo_library_outlined,
+                              size: 80,
+                              color: muted,
+                            ),
+                    ),
                   ),
-                ),
-              ],
-            ],
+                  const SizedBox(height: 16),
+                  // As tall as the taller of the two titles.
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final style = theme.textTheme.headlineSmall;
+                      final height = [_restoringTitle, _readyTitle]
+                          .map(
+                            (title) => _textHeight(
+                              title,
+                              style: style,
+                              textScaler: MediaQuery.textScalerOf(context),
+                              maxWidth: constraints.maxWidth,
+                            ),
+                          )
+                          .reduce(math.max);
+                      return SizedBox(
+                        height: height,
+                        child: Text(
+                          _isRestoringDraft ? _restoringTitle : _readyTitle,
+                          key: const Key('empty_state_title'),
+                          textAlign: TextAlign.center,
+                          style: style,
+                        ),
+                      );
+                    },
+                  ),
+                  Visibility(
+                    visible: !_isRestoringDraft,
+                    maintainSize: true,
+                    maintainAnimation: true,
+                    maintainState: true,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: 8),
+                        Text(
+                          _cameraSupported
+                              ? 'Scan your first page, or import from your '
+                                    'gallery.'
+                              : 'Import from your gallery to add your first '
+                                    'page.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: muted),
+                        ),
+                        const SizedBox(height: 24),
+                        Center(
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                _isRestoringDraft ||
+                                    _isPickingImages ||
+                                    _isClearingDraft ||
+                                    !_canStartImagePick
+                                ? null
+                                : _importFromGallery,
+                            icon: const Icon(Icons.photo_library_outlined),
+                            label: const Text('Import from gallery'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -3422,40 +3555,58 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     if (!_isTapGuarded) unawaited(_openPage(index));
   }
 
-  /// A card's "Page N" label. Large text shrinks towards the default size
-  /// until the longest possible label fits on one line, but never below the
-  /// default size: a label that does not fit then wraps onto a second line,
-  /// which the 48 px footer holds at the default size. Every card shares
-  /// the scale, so the labels match for any page number or count.
+  /// A card's "Page N" label, always on one line and never cut. Large text
+  /// shrinks towards the default size until the longest possible label
+  /// fits, and slightly below it if that is all it takes. Where even that
+  /// does not fit beside the footer buttons, the card shows just the
+  /// number, as large as fits; the page's semantics still say "Page N".
+  /// Every card shares the choice and the scale, so the labels match for
+  /// any page number or count.
   Widget _pageLabel(int index) => LayoutBuilder(
     builder: (context, constraints) {
       final style = Theme.of(context).textTheme.labelLarge;
       final textScaler = MediaQuery.textScalerOf(context);
       final fontSize = style?.fontSize ?? 14;
       final scale = math.max(1.0, textScaler.scale(fontSize) / fontSize);
-      var fitted = scale;
-      if (constraints.hasBoundedWidth) {
+      double widthAt1(String text) {
         final painter = TextPainter(
-          text: TextSpan(text: 'Page $maxDocumentPages', style: style),
+          text: TextSpan(text: text, style: style),
           textDirection: TextDirection.ltr,
-          textScaler: TextScaler.linear(scale),
           maxLines: 1,
         )..layout();
         final width = painter.width;
         painter.dispose();
-        if (width > constraints.maxWidth) {
-          fitted = (scale * constraints.maxWidth / width).clamp(1.0, scale);
+        return width;
+      }
+
+      var fitted = scale;
+      var numberOnly = false;
+      if (constraints.hasBoundedWidth) {
+        final available = constraints.maxWidth;
+        final fullWidth = widthAt1('Page $maxDocumentPages');
+        if (fullWidth * scale > available) {
+          fitted = available / fullWidth;
+          if (fitted < _minPageLabelScale) {
+            numberOnly = true;
+            fitted = math.min(scale, available / widthAt1('$maxDocumentPages'));
+          }
         }
       }
       return Text(
-        'Page ${index + 1}',
-        maxLines: fitted > 1 ? 1 : 2,
-        overflow: TextOverflow.ellipsis,
+        numberOnly ? '${index + 1}' : 'Page ${index + 1}',
+        key: ValueKey('page_label_$index'),
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.clip,
         textScaler: TextScaler.linear(fitted),
         style: style,
       );
     },
   );
+
+  /// The smallest scale of the default label size a "Page N" label shrinks
+  /// to before the card shows only the number.
+  static const _minPageLabelScale = 0.85;
 
   Widget _buildPageCard(BuildContext context, int index, Size cardSize) {
     final page = _pages[index];
@@ -3682,16 +3833,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
         ],
       ),
-      floatingActionButton: _cameraSupported
-          ? FloatingActionButton(
-              onPressed:
-                  _isPickingImages || _isClearingDraft || !_canStartImagePick
-                  ? null
-                  : _captureImage,
-              tooltip: 'Scan a page',
-              child: const Icon(Icons.camera_alt_outlined),
-            )
-          : null,
+      floatingActionButton: _cameraSupported ? _buildCameraButton() : null,
       floatingActionButtonLocation: _fabLocation,
       bottomNavigationBar: _pages.isEmpty
           ? _buildExportBarSpace(context)
