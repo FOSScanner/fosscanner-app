@@ -61,11 +61,13 @@ No account, no cloud processing, no tracking.
 Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
 **Move later** (disabled while the document has a single page), or long-press
 and drag pages to reorder them. The page grid adds columns on tablets and in
-landscape. Deleting a page
-offers **Undo** for ten seconds. In a multi-image gallery import, **Skip image** skips only the
-current image; remaining images are still reviewed. The review title shows
-the position (for example *Image 2 of 5*), and **Stop importing** (or Back)
-ends the batch while keeping pages already added. Canceling an unsaved
+landscape. Deleting a page offers **Undo** for ten seconds. In a multi-image
+gallery import, **Skip image** skips only the current image; remaining images
+are still reviewed. The review title shows the position (for example *Image 2
+of 5*), and **Stop importing** (or Back) ends the batch while keeping pages
+already added. An image that cannot be read only offers **Go back**, which
+moves on to the next one; it is counted in the summary shown after the
+import. Canceling an unsaved
 capture or single-image review adds no page.
 
 ## Screenshots

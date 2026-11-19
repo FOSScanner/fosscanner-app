@@ -73,6 +73,7 @@ class CornerAdjustScreen extends StatefulWidget {
     this.onStopImport,
     this.onScanNext,
     this.onRetake,
+    this.onUnreadable,
     this.initialCorners,
     this.startWithAdjustments = false,
     this.detectPageEdges = true,
@@ -112,6 +113,11 @@ class CornerAdjustScreen extends StatefulWidget {
   /// **Retake**: this is called before the route pops without a page so the
   /// caller can relaunch the camera. System Back still just leaves.
   final VoidCallback? onRetake;
+
+  /// Called when [originalBytes] cannot be decoded. The review then only
+  /// offers Go back and closes without a page, so callers can report the
+  /// image as unreadable instead of skipped. Leaving it never stops a batch.
+  final VoidCallback? onUnreadable;
   final List<Offset>? initialCorners;
 
   /// Open saved appearance directly; crop remains available.
@@ -236,6 +242,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       setState(() {
         _error = 'Could not read this image.';
       });
+      widget.onUnreadable?.call();
     }
   }
 
@@ -600,8 +607,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         }
         // Back during batch review leaves the import instead of silently
         // skipping to the next image; Skip image remains the explicit skip.
+        // An unreadable image has nothing to review: leaving it moves on.
         if (!_isLeaving &&
             result == null &&
+            _error == null &&
             _step == _Step.corners &&
             _canStopImport) {
           widget.onStopImport!();

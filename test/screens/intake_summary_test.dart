@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show DebugPrintCallback, debugPrint;
+import 'package:flutter/foundation.dart'
+    show DebugPrintCallback, debugPrint, listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,8 +91,16 @@ class _OversizedXFile extends XFile {
 }
 
 class _Operations implements CornerAdjustOperations {
+  /// An image the platform can measure but the editor cannot decode.
+  Uint8List? undecodable;
+
   @override
-  Future<Size> decodeSize(Uint8List bytes) async => const Size(100, 100);
+  Future<Size> decodeSize(Uint8List bytes) async {
+    if (undecodable case final failing? when listEquals(bytes, failing)) {
+      throw const FormatException('injected decode failure');
+    }
+    return const Size(100, 100);
+  }
 
   @override
   Future<List<Offset>?> detectCorners(Uint8List bytes) async => _corners;
@@ -128,6 +137,8 @@ void main() {
   late _PdfImporter importer;
   late Directory directory;
   late Uint8List validBytes;
+  late _Operations operations;
+  final undecodableBytes = img.encodePng(img.Image(width: 10, height: 10));
   final tinyBytes = img.encodePng(img.Image(width: 2, height: 2));
   final notImageBytes = Uint8List.fromList('not an image, just text'.codeUnits);
   var fileCount = 0;
@@ -137,6 +148,7 @@ void main() {
     ImagePickerPlatform.instance = picker = _Picker();
     inbox = _Inbox();
     importer = _PdfImporter();
+    operations = _Operations()..undecodable = undecodableBytes;
     directory = Directory.systemTemp.createTempSync('intake-summary-');
     final data = await rootBundle.load('assets/icon/icon.png');
     validBytes = data.buffer.asUint8List(
@@ -168,7 +180,7 @@ void main() {
           initialPages: initialPages,
           draftStore: _Store(),
           searchablePdfEnabled: false,
-          cornerAdjustOperations: _Operations(),
+          cornerAdjustOperations: operations,
           sourceImageSizeReader: (_) async => const Size(100, 100),
           sharedImageInbox: inbox,
           pdfPageImporter: importer,
@@ -454,5 +466,85 @@ void main() {
 
     expect(find.text('Export PDF (1 page)'), findsOneWidget);
     expect(find.byType(SnackBar), findsNothing);
+  }, variant: _iOS);
+
+  // An image the editor cannot decode is reported, never taken for a Skip,
+  // and leaving it continues the batch instead of stopping it.
+  Future<void> waitForUnreadable(WidgetTester tester, String progress) async {
+    for (var i = 0; i < 100; i++) {
+      if (find.text(progress).evaluate().isNotEmpty &&
+          find.text('Go back').evaluate().isNotEmpty) {
+        await tester.pumpAndSettle();
+        return;
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    fail('Expected the decode failure of "$progress"');
+  }
+
+  for (final leave in ['Go back', 'system Back']) {
+    testWidgets('an image the editor cannot read is counted ($leave)', (
+      tester,
+    ) async {
+      picker.galleryPhotos = [
+        XFile(valid()),
+        XFile(file(undecodableBytes)),
+        XFile(valid()),
+      ];
+      await pumpHome(tester);
+      await settle(tester);
+      await tester.tap(find.byTooltip('Import from gallery'));
+      await waitForEditor(tester, 'Image 1 of 3');
+      await accept(tester);
+      await waitForUnreadable(tester, 'Image 2 of 3');
+      expect(find.text('Could not read this image.'), findsOneWidget);
+      if (leave == 'Go back') {
+        await tester.tap(find.text('Go back'));
+      } else {
+        await tester.binding.handlePopRoute();
+      }
+      await waitForEditor(tester, 'Image 3 of 3');
+      await accept(tester);
+      await settle(tester);
+
+      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expectOnlyMessage("1 of 3 images couldn't be added: 1 unreadable file.");
+    }, variant: _iOS);
+  }
+
+  testWidgets('a single image the editor cannot read is reported', (
+    tester,
+  ) async {
+    picker.galleryPhotos = [XFile(file(undecodableBytes))];
+    await pumpHome(tester);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await waitForUnreadable(tester, 'Adjust corners');
+    await tester.tap(find.text('Go back'));
+    await settle(tester);
+
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expectOnlyMessage('Could not read this image.');
+  }, variant: _iOS);
+
+  testWidgets('stopping at an unreadable image reports it and the stop', (
+    tester,
+  ) async {
+    picker.galleryPhotos = [XFile(file(undecodableBytes)), XFile(valid())];
+    await pumpHome(tester);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await waitForUnreadable(tester, 'Image 1 of 2');
+    await tester.tap(find.byTooltip('Stop importing'));
+    await settle(tester);
+
+    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expectOnlyMessage(
+      "1 of 2 images couldn't be added: 1 unreadable file. Import stopped. "
+      'Pages already added were kept.',
+    );
   }, variant: _iOS);
 }

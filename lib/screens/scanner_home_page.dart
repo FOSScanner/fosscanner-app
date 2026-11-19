@@ -1243,6 +1243,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     VoidCallback? onStopImport,
     VoidCallback? onScanNext,
     VoidCallback? onRetake,
+    VoidCallback? onUnreadable,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
@@ -1253,6 +1254,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       onStopImport: onStopImport,
       onScanNext: onScanNext,
       onRetake: onRetake,
+      onUnreadable: onUnreadable,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
       // PDF pages are already flat: start from the full page.
@@ -1442,6 +1444,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     var stopRequested = false;
     var scanNextRequested = false;
     var retakeRequested = false;
+    var unreadable = false;
     // Only camera capture loops back into the picker.
     final isCamera = source == PageReviewSource.camera;
     final result = await Navigator.of(context).push<ScannedPage>(
@@ -1455,9 +1458,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           onStopImport: () => stopRequested = true,
           onScanNext: isCamera ? () => scanNextRequested = true : null,
           onRetake: isCamera ? () => retakeRequested = true : null,
+          onUnreadable: () => unreadable = true,
         ),
       ),
     );
+    // The editor could not decode it: not the user's Skip, and reported
+    // even when the user then stops the import.
+    if (unreadable && result == null) reject(IntakeRejection.unreadable);
     if (stopRequested) {
       return end('stopped', 'Import stopped. Pages already added were kept.');
     }
@@ -1465,6 +1472,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       onRetake?.call(bytes);
       return _PhotoIntakeResult.retake;
     }
+    if (unreadable && result == null) return _PhotoIntakeResult.rejected;
     if (result == null) {
       // Skip, Cancel, or back: the user's choice, so nothing to report.
       _logIntake(source, item, 'left the review without adding');
