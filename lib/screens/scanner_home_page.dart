@@ -464,6 +464,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 icon: const Icon(Icons.code),
                 label: const Text('View source code'),
               ),
+              TextButton.icon(
+                onPressed: () => showLicensePage(
+                  context: dialogContext,
+                  applicationName: 'FOSScanner',
+                  applicationVersion: packageInfo.version,
+                  applicationIcon: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Image.asset(
+                      'assets/icon/icon.png',
+                      width: 48,
+                      height: 48,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('View licenses'),
+              ),
               const SizedBox(height: 4),
               Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
             ],

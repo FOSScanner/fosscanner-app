@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show LicenseRegistry;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'package:fosscanner/main.dart' show registerBundledLicenses;
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
@@ -323,6 +325,9 @@ void main() {
     await tester.ensureVisible(find.text('View source code'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('View licenses'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
@@ -349,6 +354,34 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('About opens the license page with the bundled OCR licenses', (
+    tester,
+  ) async {
+    registerBundledLicenses();
+    addTearDown(LicenseRegistry.reset);
+    await pumpHome(tester, pageCount: 0);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About FOSScanner'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('View licenses'));
+    // The license page collects entries asynchronously from asset bundles.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 200)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LicensePage), findsOneWidget);
+    expect(find.text('1.4.0'), findsOneWidget);
+    expect(find.text('Tesseract language data'), findsOneWidget);
+    expect(
+      find.text('Tesseract4Android and native OCR dependencies'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   // 640x300 at 200% text is left out: the header and export row leave the
   // grid less height than its FAB clearance (already with the former fixed
