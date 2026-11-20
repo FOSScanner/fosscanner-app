@@ -198,3 +198,172 @@ void _validateCornerRoles(List<Offset> corners) {
   }
   return (outputWidth, outputHeight);
 }
+
+/// Why a crop cannot be previewed, in terms the user can fix by dragging.
+enum CropProblem {
+  /// Two edges of the quad intersect (a bow-tie).
+  cornersCross,
+
+  /// One corner lies inside the triangle formed by the other three.
+  cornerInside,
+
+  /// The crop is too small to be a page: its width, height or area is
+  /// below [minCropFraction] of the image, however well shaped.
+  areaTooSmall,
+
+  /// The crop is spread out but has (almost) no shape: corners on top of
+  /// each other, three in a line, or three bunched together.
+  cornersInLine,
+}
+
+/// The smallest crop accepted, as a fraction of the image's shorter side:
+/// both crop dimensions must reach it and the area must reach its square.
+/// Anything smaller is a handful of pixels, not a page (for example four
+/// corners dragged into one clump on a plain page).
+const minCropFraction = 0.08;
+
+/// Corners closer to a straight line than this (the sine of the angle at a
+/// corner) are treated as collinear: the crop would be a triangle.
+const _minCornerSine = 0.05;
+
+/// Returns [corners] re-ordered clockwise from top-left when the four points
+/// form a convex quad in some order (for example after one handle was dragged
+/// past its neighbour). Anything else is returned unchanged: there is no
+/// single right order for a concave or degenerate set of points.
+List<Offset> sortCornersIfConvex(List<Offset> corners) {
+  final List<Offset> ordered;
+  try {
+    ordered = orderCorners(corners);
+    _validateConvexQuad(ordered);
+  } on ArgumentError {
+    return corners;
+  }
+  return ordered;
+}
+
+bool _segmentsCross(Offset a, Offset b, Offset c, Offset d) {
+  double side(Offset p, Offset q, Offset r) =>
+      (q.dx - p.dx) * (r.dy - p.dy) - (q.dy - p.dy) * (r.dx - p.dx);
+  final d1 = side(c, d, a);
+  final d2 = side(c, d, b);
+  final d3 = side(a, b, c);
+  final d4 = side(a, b, d);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+/// Checks [corners] against the same bounded-preview rules the warp uses,
+/// plus a minimum size relative to [imageSize], and returns the reason they
+/// are rejected, or null for a valid crop.
+CropProblem? cropProblem(List<Offset> corners, {required Size imageSize}) {
+  if (corners.length != 4 ||
+      corners.any((p) => !p.dx.isFinite || !p.dy.isFinite)) {
+    return CropProblem.areaTooSmall;
+  }
+  final minSide = minCropFraction * imageSize.shortestSide;
+  // A clump is too small whatever its shape: dragging one corner out
+  // would only turn it into another problem.
+  if (_longestDistance(corners) < minSide) return CropProblem.areaTooSmall;
+
+  try {
+    calculateWarpSize(
+      corners,
+      maxPixels: maxPreviewWarpPixels,
+      maxEdge: maxPreviewWarpEdge,
+    );
+  } on ArgumentError {
+    if (corners.toSet().length != 4) return CropProblem.cornersInLine;
+    if (_segmentsCross(corners[0], corners[1], corners[2], corners[3]) ||
+        _segmentsCross(corners[1], corners[2], corners[3], corners[0])) {
+      return CropProblem.cornersCross;
+    }
+    if (_isCollapsed(corners) || _hasStraightCorner(corners)) {
+      return CropProblem.cornersInLine;
+    }
+    double? winding;
+    for (var i = 0; i < 4; i++) {
+      final cross = _turn(
+        corners[i],
+        corners[(i + 1) % 4],
+        corners[(i + 2) % 4],
+      );
+      winding ??= cross.sign;
+      if (cross.sign != winding) return CropProblem.cornerInside;
+    }
+    // Convex but too thin, or convex with mislabelled corners; the editor
+    // re-sorts the latter, so what remains is a sliver.
+    return CropProblem.areaTooSmall;
+  }
+
+  // A valid quad: still reject a crop with a corner on the line between
+  // its neighbours (a triangle), or one too small to be a page.
+  if (_hasStraightCorner(corners)) return CropProblem.cornersInLine;
+  final width = math.max(
+    cornerDistance(corners[0], corners[1]),
+    cornerDistance(corners[3], corners[2]),
+  );
+  final height = math.max(
+    cornerDistance(corners[0], corners[3]),
+    cornerDistance(corners[1], corners[2]),
+  );
+  if (width < minSide ||
+      height < minSide ||
+      _area(corners) < minSide * minSide) {
+    return CropProblem.areaTooSmall;
+  }
+  return null;
+}
+
+/// Twice the signed area of triangle [a], [b], [c]: positive for one turn
+/// direction, negative for the other, zero when they are collinear.
+double _turn(Offset a, Offset b, Offset c) =>
+    (b.dx - a.dx) * (c.dy - b.dy) - (b.dy - a.dy) * (c.dx - b.dx);
+
+/// Whether the angle at some corner is (almost) straight, so that corner
+/// lies on the line between its neighbours.
+bool _hasStraightCorner(List<Offset> corners) {
+  for (var i = 0; i < 4; i++) {
+    final a = corners[i];
+    final b = corners[(i + 1) % 4];
+    final c = corners[(i + 2) % 4];
+    final lengths = (b - a).distance * (c - b).distance;
+    if (lengths == 0 || _turn(a, b, c).abs() / lengths < _minCornerSine) {
+      return true;
+    }
+  }
+  return false;
+}
+
+double _area(List<Offset> corners) {
+  var doubleArea = 0.0;
+  for (var i = 0; i < 4; i++) {
+    final a = corners[i];
+    final b = corners[(i + 1) % 4];
+    doubleArea += a.dx * b.dy - b.dx * a.dy;
+  }
+  return doubleArea.abs() / 2;
+}
+
+double _longestDistance(List<Offset> corners) {
+  var longest = 0.0;
+  for (var i = 0; i < 4; i++) {
+    for (var j = i + 1; j < 4; j++) {
+      longest = math.max(longest, (corners[i] - corners[j]).distance);
+    }
+  }
+  return longest;
+}
+
+/// Whether an invalid quad has (nearly) collapsed: three corners bunched
+/// together, two pairs of corners on top of each other, or almost no area
+/// for how far the corners spread. Moving the corners apart fixes it.
+bool _isCollapsed(List<Offset> corners) {
+  final longest = _longestDistance(corners);
+  if (longest == 0) return true;
+  var closePairs = 0;
+  for (var i = 0; i < 4; i++) {
+    for (var j = i + 1; j < 4; j++) {
+      if ((corners[i] - corners[j]).distance < 0.15 * longest) closePairs++;
+    }
+  }
+  return closePairs >= 2 || _area(corners) < 0.02 * longest * longest;
+}

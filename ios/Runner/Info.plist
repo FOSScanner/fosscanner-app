@@ -27,9 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>FOSScanner needs camera access to capture document pages. Photos are processed on-device and never uploaded anywhere.</string>
+	<string>Used to scan document pages. Images are processed on your device and never uploaded.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>FOSScanner needs photo library access to import document pages. Photos are processed on-device and never uploaded anywhere.</string>
+	<string>Used to import document pages from your library. Images are processed on your device and never uploaded.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import 'package:fosscanner/services/app_settings.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 class _Picker extends ImagePickerPlatform {
@@ -51,9 +52,14 @@ void main() {
   });
 
   Future<void> openCamera(WidgetTester tester) async {
-    await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
+    await tester.pumpWidget(
+      MaterialApp(
+        // No platform answer: a denial counts as final.
+        home: ScannerHomePage(cameraPromptCheck: () async => null),
+      ),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Capture Image'));
+    await tester.tap(find.byTooltip('Scan a page'));
     await tester.pumpAndSettle();
   }
 
@@ -82,7 +88,7 @@ void main() {
           await tester.tap(find.text('Import images'));
           await tester.pumpAndSettle();
           expect(picker.galleryCalls, 1);
-          expect(find.byTooltip('Capture Image'), findsOneWidget);
+          expect(find.byTooltip('Scan a page'), findsOneWidget);
         },
         variant: TargetPlatformVariant({platform}),
       );
@@ -123,6 +129,80 @@ void main() {
       expect(picker.galleryCalls, 1);
       expect(find.byType(FloatingActionButton), findsNothing);
     });
+  }
+
+  testWidgets(
+    'a denial offers the app settings page',
+    (tester) async {
+      picker.error = PlatformException(code: 'camera_access_denied');
+      var settingsOpened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            appSettingsOpener: () async {
+              settingsOpened++;
+              return true;
+            },
+            cameraPromptCheck: () async => false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Scan a page'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open settings'));
+      await tester.pumpAndSettle();
+      expect(settingsOpened, 1);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(picker.cameraCalls, 1);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets(
+    'a first denial offers Retry, and settings only once denied for good',
+    (tester) async {
+      picker.error = PlatformException(code: 'camera_access_denied');
+      var checks = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            appSettingsOpener: () async => true,
+            // Android would still ask after the first denial only.
+            cameraPromptCheck: () async => ++checks == 1,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Scan a page'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(cameraAccessNeededMessage), findsOneWidget);
+      expect(find.text('Open settings'), findsNothing);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(picker.cameraCalls, 2);
+      expect(find.textContaining(cameraAccessOffMessage), findsOneWidget);
+      expect(find.text('Open settings'), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  for (final (platform, code) in [
+    (TargetPlatform.android, 'camera_access_restricted'),
+    (TargetPlatform.iOS, 'camera_access_denied'),
+  ]) {
+    testWidgets(
+      '$platform $code has no app settings shortcut',
+      (tester) async {
+        picker.error = PlatformException(code: code);
+        await openCamera(tester);
+        expect(find.text('Camera unavailable'), findsOneWidget);
+        expect(find.text('Open settings'), findsNothing);
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
   }
 
   testWidgets('camera cancellation does not show an error', (tester) async {

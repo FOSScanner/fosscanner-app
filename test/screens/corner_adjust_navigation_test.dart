@@ -90,7 +90,7 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
     expect(
-      find.text(startWithAdjustments ? 'Adjust appearance' : 'Edit page'),
+      find.text(startWithAdjustments ? 'Appearance' : 'Edit page'),
       findsOneWidget,
     );
   }
@@ -147,10 +147,10 @@ void main() {
 
     await tester.tap(find.text('Preview page'));
     await tester.pump();
-    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     expect(
       ModalRoute.of(
-        tester.element(find.text('Adjust appearance')),
+        tester.element(find.text('Appearance')),
       )!.willHandlePopInternally,
       isTrue,
     );
@@ -207,7 +207,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Grayscale'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Close filters'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save changes'));
     await tester.pumpAndSettle();
@@ -236,13 +236,13 @@ void main() {
 
     await tester.binding.handlePopRoute();
     await tester.pump();
-    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Open'), findsNothing);
 
     completer.complete(imageBytes);
     await tester.pumpAndSettle();
     expect(find.text('Open'), findsOneWidget);
-    expect(find.text('Adjust appearance'), findsNothing);
+    expect(find.text('Appearance'), findsNothing);
     expect(result, isNotNull);
     expect(result!.processedBytes, orderedEquals(imageBytes));
   });

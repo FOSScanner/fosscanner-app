@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/screens/barcode_scan_screen.dart';
+import 'package:fosscanner/services/app_settings.dart';
 
 class _CameraPlatform extends CameraPlatform {
   String? failureCode = 'CameraAccessDenied';
@@ -140,8 +141,10 @@ void main() {
 
       expect(camera.attempts, 1);
       expect(find.text('Camera unavailable'), findsOneWidget);
-      expect(find.textContaining('device settings'), findsOneWidget);
+      expect(find.text(cameraAccessOffMessage), findsOneWidget);
       expect(find.textContaining('private native details'), findsNothing);
+      // Retry cannot ask again after a lasting denial; settings can.
+      expect(find.text('Open settings'), findsOneWidget);
 
       camera.failureCode = null;
       camera.enumerated = Completer<void>();
@@ -151,12 +154,65 @@ void main() {
       expect(camera.attempts, 2);
       expect(find.text('Camera unavailable'), findsNothing);
       expect(find.byKey(const Key('camera-preview')), findsOneWidget);
+      // The reader's own controls are labeled; its gallery button is
+      // replaced by the screen's "Scan an image" action.
+      expect(find.byTooltip('Switch camera'), findsOneWidget);
+      expect(find.byIcon(Icons.photo_library), findsNothing);
+      expect(find.byTooltip('Scan an image'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
     });
   }
+
+  testWidgets('Open settings retries the camera when the app resumes', (
+    tester,
+  ) async {
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BarcodeScanScreen(
+          appSettingsOpener: () async {
+            opened++;
+            return true;
+          },
+        ),
+      ),
+    );
+    await _finishCameraAttempt(tester, camera);
+    await tester.tap(find.text('Open settings'));
+    await tester.pump();
+    expect(opened, 1);
+    expect(camera.attempts, 1);
+
+    camera.failureCode = null;
+    camera.enumerated = Completer<void>();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await _finishCameraAttempt(tester, camera);
+
+    expect(camera.attempts, 2);
+    expect(find.text('Camera unavailable'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('restricted access offers no settings shortcut', (tester) async {
+    camera.failureCode = 'CameraAccessRestricted';
+    await tester.pumpWidget(const MaterialApp(home: BarcodeScanScreen()));
+    await _finishCameraAttempt(tester, camera);
+    expect(find.text(cameraAccessRestrictedMessage), findsOneWidget);
+    expect(find.text('Open settings'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+  });
 
   testWidgets('unrecognized camera errors hide native details', (tester) async {
     camera.failureCode = 'unknownNativeFailure';
