@@ -195,7 +195,10 @@ void main() {
           .onPressed!;
       final barcode = button(tester, 'Scan QR/barcode').onPressed!;
       final delete = button(tester, 'Delete page 1').onPressed!;
-      final clear = button(tester, 'Clear all').onPressed!;
+      final menu = tester
+          .widget<PopupMenuButton<String>>(find.byType(PopupMenuButton<String>))
+          .onSelected!;
+      void clear() => menu('clear');
       final reorder = tester
           .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
           .onAcceptWithDetails!;
@@ -229,7 +232,6 @@ void main() {
       for (final tooltip in [
         'Import from gallery',
         'Delete page 1',
-        'Clear all',
         'Scan QR/barcode',
       ]) {
         expect(button(tester, tooltip).onPressed, isNull);

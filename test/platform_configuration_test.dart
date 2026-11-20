@@ -222,6 +222,146 @@ void main() {
     );
   });
 
+  test('Android removes plugin permissions the app never uses', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final debugManifest = File(
+      'android/app/src/debug/AndroidManifest.xml',
+    ).readAsStringSync();
+    final uncommented = manifest.replaceAll(RegExp(r'<!--[\s\S]*?-->'), '');
+
+    expect(
+      uncommented,
+      contains('xmlns:tools="http://schemas.android.com/tools"'),
+    );
+    // CameraX declares the microphone and legacy storage for video, and its
+    // media3 dependency the network state; the barcode scanner uses neither.
+    for (final permission in [
+      'RECORD_AUDIO',
+      'ACCESS_NETWORK_STATE',
+      'READ_EXTERNAL_STORAGE',
+      'WRITE_EXTERNAL_STORAGE',
+    ]) {
+      expect(
+        uncommented,
+        matches(
+          RegExp(
+            '<uses-permission\\s+android:name="android\\.permission\\.'
+            '$permission"\\s+tools:node="remove"\\s*/>',
+          ),
+        ),
+        reason: permission,
+      );
+    }
+    final requested = RegExp(
+      r'<uses-permission\s+android:name="([^"]+)"\s*/>',
+    ).allMatches(uncommented).map((match) => match.group(1)).toList();
+    expect(requested, ['android.permission.CAMERA']);
+    // Only debug builds talk to the Flutter tool; the app itself is offline.
+    expect(uncommented, isNot(contains('android.permission.INTERNET')));
+    expect(debugManifest, contains('android.permission.INTERNET'));
+  });
+
+  test('CI rejects new permissions in the merged manifest and APK', () {
+    final script = File('tool/check_android_permissions.sh').readAsStringSync();
+    final ci = File('.github/workflows/ci.yml').readAsStringSync();
+    final android = _workflowJobs(ci).values.singleWhere(
+      (job) => _workflowRunCommands(
+        job.source,
+      ).any((run) => run.contains('flutter build apk --debug')),
+    );
+    final steps = _workflowSteps(android.source);
+    final buildIndex = steps.indexWhere(
+      (step) => step.run?.contains('flutter build apk --debug') ?? false,
+    );
+    final checkIndex = steps.indexWhere(
+      (step) => step.run?.contains('check_android_permissions.sh') ?? false,
+    );
+    expect(checkIndex, greaterThan(buildIndex));
+    final check = steps[checkIndex].run!;
+    expect(check, contains('./gradlew :app:processReleaseMainManifest'));
+    expect(
+      check,
+      contains(
+        'build/app/intermediates/merged_manifest/release/'
+        'processReleaseMainManifest/AndroidManifest.xml',
+      ),
+    );
+    expect(check, contains('build/app/outputs/flutter-apk/app-debug.apk'));
+
+    // An allowlist, so a plugin cannot add something nobody thought to ban.
+    final allowed = RegExp(
+      r"^allowed='(.+)'$",
+      multiLine: true,
+    ).firstMatch(script)!.group(1)!;
+    final debugAllowed = RegExp(
+      r"^debug_allowed='(.+)'$",
+      multiLine: true,
+    ).firstMatch(script)!.group(1)!;
+    final release = RegExp(allowed);
+    final debug = RegExp(debugAllowed);
+    expect(release.hasMatch('android.permission.CAMERA'), isTrue);
+    for (final applicationId in [
+      'com.fosscanner.app',
+      'com.fosscanner.app.debug',
+    ]) {
+      expect(
+        release.hasMatch(
+          '$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+        ),
+        isTrue,
+        reason: applicationId,
+      );
+    }
+    expect(
+      release.hasMatch('com.example.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'),
+      isFalse,
+    );
+    for (final permission in [
+      'android.permission.RECORD_AUDIO',
+      'android.permission.INTERNET',
+      'android.permission.ACCESS_NETWORK_STATE',
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.READ_MEDIA_IMAGES',
+      'android.permission.CAMERA2',
+    ]) {
+      expect(release.hasMatch(permission), isFalse, reason: permission);
+    }
+    expect(debug.hasMatch('android.permission.INTERNET'), isTrue);
+    expect(debug.hasMatch('android.permission.RECORD_AUDIO'), isFalse);
+    expect(script, contains('aapt2" dump permissions'));
+    expect(script, contains('set -euo pipefail'));
+  });
+
+  test('Android accepts shared images without persistent URI access', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final activity = File(
+      'android/app/src/main/kotlin/com/fosscanner/app/MainActivity.kt',
+    ).readAsStringSync();
+
+    for (final action in ['SEND', 'SEND_MULTIPLE']) {
+      expect(
+        manifest,
+        matches(
+          RegExp(
+            '<intent-filter>\\s*<action android:name="android\\.intent\\.'
+            'action\\.$action"/>\\s*<category android:name="android\\.'
+            'intent\\.category\\.DEFAULT"/>\\s*<data android:mimeType='
+            '"image/\\*"/>\\s*</intent-filter>',
+          ),
+        ),
+      );
+    }
+    // One activity instance owns the draft; shares arrive via onNewIntent.
+    expect(manifest, contains('android:launchMode="singleTask"'));
+    expect(activity, isNot(contains('takePersistableUriPermission')));
+    expect(activity, contains('override fun onNewIntent'));
+  });
+
   test('native drafts use the OS-managed application cache', () {
     final source = File(
       'lib/services/draft_store_native.dart',
@@ -454,6 +594,46 @@ void main() {
     );
   });
 
+  test('Android debug builds install beside the release app', () {
+    final gradle = _activeSource(
+      File('android/app/build.gradle.kts').readAsStringSync(),
+    );
+    expect(_assignmentValues(gradle, 'applicationId'), {
+      '"com.fosscanner.app"',
+    });
+    expect(_assignmentValues(gradle, 'namespace'), {'"com.fosscanner.app"'});
+    expect(
+      gradle,
+      matches(
+        RegExp(
+          r'defaultConfig \{[^}]*resValue\("string", "app_name", "FOSScanner"\)',
+        ),
+      ),
+    );
+    final debug = RegExp(
+      r'^\s+debug \{([^}]*)\}',
+      multiLine: true,
+    ).firstMatch(gradle);
+    expect(debug, isNotNull, reason: 'debug build type');
+    final debugBlock = debug?.group(1) ?? '';
+    expect(_assignmentValues(debugBlock, 'applicationIdSuffix'), {'".debug"'});
+    expect(_assignmentValues(debugBlock, 'versionNameSuffix'), {'"-debug"'});
+    expect(
+      debugBlock,
+      contains('resValue("string", "app_name", "FOSScanner Debug")'),
+    );
+    final release = RegExp(
+      r'^\s+release \{([\s\S]*?)^\s{8}\}',
+      multiLine: true,
+    ).firstMatch(gradle);
+    expect(release?.group(1), isNot(contains('applicationIdSuffix')));
+
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    expect(manifest, contains('android:label="@string/app_name"'));
+  });
+
   test('Android release signing cannot fall back to a debug key', () {
     final gradle = File('android/app/build.gradle.kts').readAsStringSync();
     final active = _activeSource(gradle);
@@ -588,6 +768,7 @@ void main() {
       );
       for (final command in [
         'flutter pub get',
+        'dart format --output=none --set-exit-if-changed lib test',
         'flutter analyze',
         'flutter test',
       ]) {
@@ -691,6 +872,29 @@ void main() {
 
     expect(_runner(jobWith('flutter analyze')), 'ubuntu-latest');
     expect(_runner(jobWith('flutter build apk --debug')), 'ubuntu-latest');
+    expect(
+      jobWith('dart format --output=none --set-exit-if-changed lib test').name,
+      jobWith('flutter analyze').name,
+      reason: 'the format check belongs to the quality job',
+    );
+
+    final androidJob = jobWith('flutter build apk --debug');
+    final androidSteps = _workflowSteps(androidJob.source);
+    final apkBuildIndex = androidSteps.indexWhere(
+      (step) => step.run?.contains('flutter build apk --debug') ?? false,
+    );
+    final kotlinTestIndex = androidSteps.indexWhere(
+      (step) => step.run == './gradlew :app:testDebugUnitTest',
+    );
+    expect(
+      kotlinTestIndex,
+      greaterThan(apkBuildIndex),
+      reason: 'Kotlin unit tests must run after the Flutter build',
+    );
+    expect(
+      androidSteps[kotlinTestIndex].source,
+      matches(RegExp(r'^\s+working-directory:\s*android\s*$', multiLine: true)),
+    );
     expect(_runner(jobWith('flutter build ios --no-codesign')), 'macos-latest');
     expect(source, isNot(contains('flutter build web')));
     expect(source, isNot(contains('flutter build linux')));
