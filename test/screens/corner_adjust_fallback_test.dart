@@ -300,7 +300,7 @@ void main() {
           find.text(
             'Skip this image only. Any remaining images will still be reviewed.',
           ),
-          findsOneWidget,
+          findsNothing,
         );
         await tester.ensureVisible(find.text('Skip image'));
         await tester.pumpAndSettle();

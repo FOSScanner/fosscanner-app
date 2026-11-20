@@ -53,7 +53,7 @@ void main() {
   Future<void> openCamera(WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Capture Image'));
+    await tester.tap(find.byTooltip('Scan a page'));
     await tester.pumpAndSettle();
   }
 
@@ -82,7 +82,7 @@ void main() {
           await tester.tap(find.text('Import images'));
           await tester.pumpAndSettle();
           expect(picker.galleryCalls, 1);
-          expect(find.byTooltip('Capture Image'), findsOneWidget);
+          expect(find.byTooltip('Scan a page'), findsOneWidget);
         },
         variant: TargetPlatformVariant({platform}),
       );
@@ -123,6 +123,49 @@ void main() {
       expect(picker.galleryCalls, 1);
       expect(find.byType(FloatingActionButton), findsNothing);
     });
+  }
+
+  testWidgets(
+    'a denial offers the app settings page',
+    (tester) async {
+      picker.error = PlatformException(code: 'camera_access_denied');
+      var settingsOpened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            appSettingsOpener: () async {
+              settingsOpened++;
+              return true;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Scan a page'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open settings'));
+      await tester.pumpAndSettle();
+      expect(settingsOpened, 1);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(picker.cameraCalls, 1);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  for (final (platform, code) in [
+    (TargetPlatform.android, 'camera_access_restricted'),
+    (TargetPlatform.iOS, 'camera_access_denied'),
+  ]) {
+    testWidgets(
+      '$platform $code has no app settings shortcut',
+      (tester) async {
+        picker.error = PlatformException(code: code);
+        await openCamera(tester);
+        expect(find.text('Camera unavailable'), findsOneWidget);
+        expect(find.text('Open settings'), findsNothing);
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
   }
 
   testWidgets('camera cancellation does not show an error', (tester) async {
