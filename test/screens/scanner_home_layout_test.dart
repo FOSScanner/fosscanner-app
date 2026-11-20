@@ -328,27 +328,72 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('last grid page and delete action clear the camera button', (
-    tester,
-  ) async {
-    setViewport(tester, const Size(390, 600));
-    await pumpHome(tester, pageCount: 8);
-    final scroll = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(GridView),
-        matching: find.byType(Scrollable),
-      ),
-    );
-    scroll.position.jumpTo(scroll.position.maxScrollExtent);
-    await tester.pumpAndSettle();
+  for (final (size, columns) in [
+    (const Size(320, 568), 2),
+    (const Size(390, 844), 2),
+    (const Size(640, 300), 3),
+    (const Size(800, 1280), 4),
+    (const Size(1280, 800), 6),
+  ]) {
+    testWidgets('page grid uses $columns columns at $size', (tester) async {
+      setViewport(tester, size);
+      await pumpHome(tester, pageCount: 8);
+      final firstRowTop = tester.getTopLeft(find.byType(Card).first).dy;
+      final cards = find.byType(Card);
+      final cardsInFirstRow = [
+        for (var i = 0; i < cards.evaluate().length; i++)
+          if (tester.getTopLeft(cards.at(i)).dy == firstRowTop) i,
+      ].length;
+      expect(cardsInFirstRow, columns);
+      expect(tester.getSize(cards.first).width, lessThanOrEqualTo(240));
+      expect(tester.takeException(), isNull);
+    });
+  }
 
-    final camera = tester.getRect(find.byType(FloatingActionButton));
-    final delete = tester.getRect(find.byTooltip('Delete page 8'));
-    final page = tester.getRect(find.byKey(const ValueKey('page_semantics_7')));
-    expect(delete.overlaps(camera), isFalse);
-    expect(page.overlaps(camera), isFalse);
-    expect(tester.takeException(), isNull);
-  });
+  // 640x300 at 200% text is left out: the header and export row leave the
+  // grid less height than its FAB clearance (already with the former fixed
+  // two columns), so the last page is never laid out at max scroll. Its reorder controls are
+  // covered by the large-text reorder test above.
+  for (final (size, textScale) in [
+    (const Size(390, 600), 1.0),
+    (const Size(390, 600), 2.0),
+    (const Size(640, 300), 1.0),
+    (const Size(1024, 768), 1.0),
+    (const Size(1024, 768), 2.0),
+    (const Size(1280, 800), 1.0),
+    (const Size(1280, 800), 2.0),
+  ]) {
+    testWidgets(
+      'last grid page and delete action clear the camera button at $size '
+      'and ${textScale}x text',
+      (tester) async {
+        setViewport(tester, size);
+        await pumpHome(tester, pageCount: 8, textScale: textScale);
+        final scroll = tester.state<ScrollableState>(
+          find.descendant(
+            of: find.byType(GridView),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        scroll.position.jumpTo(scroll.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+
+        final camera = tester.getRect(find.byType(FloatingActionButton));
+        final page = tester.getRect(
+          find.byKey(const ValueKey('page_semantics_7')),
+        );
+        for (final tooltip in ['Delete page 8', 'Reorder page 8']) {
+          expect(
+            tester.getRect(find.byTooltip(tooltip)).overlaps(camera),
+            isFalse,
+            reason: tooltip,
+          );
+        }
+        expect(page.overlaps(camera), isFalse);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('busy intake rejects a stale export-options callback', (
     tester,
