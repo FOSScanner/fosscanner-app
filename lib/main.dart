@@ -4,9 +4,17 @@ import 'package:flutter/services.dart';
 
 import 'screens/scanner_home_page.dart';
 import 'services/draft_store.dart';
+import 'services/shared_image_inbox.dart';
 import 'widgets/draft_session_gate.dart';
 
 void main() {
+  registerBundledLicenses();
+  runApp(FOSScannerApp(draftStore: createDraftStore()));
+}
+
+/// Adds the bundled OCR components to Flutter's license registry so they are
+/// listed on the license page opened from About.
+void registerBundledLicenses() {
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([
       'Tesseract language data',
@@ -15,7 +23,6 @@ void main() {
       'Tesseract4Android and native OCR dependencies',
     ], await rootBundle.loadString('assets/tessdata/THIRD_PARTY_NOTICES.txt'));
   });
-  runApp(FOSScannerApp(draftStore: createDraftStore()));
 }
 
 class FOSScannerApp extends StatelessWidget {
@@ -26,7 +33,14 @@ class FOSScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = draftStore ?? const NoOpDraftStore();
-    final scanner = ScannerHomePage(draftStore: store);
+    final scanner = ScannerHomePage(
+      draftStore: store,
+      // iOS would need a Share Extension target; only Android accepts shares.
+      sharedImageInbox:
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? MethodChannelSharedImageInbox.instance
+          : null,
+    );
     return MaterialApp(
       title: 'FOSScanner',
       theme: ThemeData(
