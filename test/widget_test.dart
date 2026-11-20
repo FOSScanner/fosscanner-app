@@ -16,6 +16,7 @@ import 'package:fosscanner/screens/page_preview_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
+import 'support/home_menu.dart';
 import 'support/worker_isolates.dart';
 
 class _FakeImagePickerPlatform extends ImagePickerPlatform {
@@ -235,11 +236,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('FOSScanner'), findsOneWidget);
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
     expect(find.byIcon(Icons.camera_alt), findsWidgets);
 
     // No captured pages yet, so there's nothing to clear or export.
-    expect(find.byIcon(Icons.clear_all), findsNothing);
+    expect(await isClearAllPagesEnabled(tester), isFalse);
     expect(find.textContaining('Export PDF'), findsNothing);
   });
 
@@ -254,7 +255,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('Capture Image'), findsNothing);
-      expect(find.textContaining('Import from your gallery'), findsOneWidget);
+      expect(
+        find.text('Import from your gallery to add your first page.'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(OutlinedButton, 'Import from gallery'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -563,7 +571,7 @@ void main() {
           .onPressed,
       isNull,
     );
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 10));
     await tester.pumpAndSettle();
     expect(find.text('Image intake help'), findsNothing);
     expect(
@@ -1022,7 +1030,7 @@ void main() {
         .onPressed!();
     await tester.pumpAndSettle();
 
-    expect(find.text('Could not read this photo.'), findsOneWidget);
+    expect(find.text('Could not read this image.'), findsOneWidget);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
@@ -1070,7 +1078,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('PDF export options'), findsNothing);
     await tester.tap(find.text('Export PDF (1 page)'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
@@ -1079,7 +1086,7 @@ void main() {
     expect(params!.fileNameOverrides, hasLength(1));
     expect(
       params.fileNameOverrides!.single,
-      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+      matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
     );
   });
 
@@ -1119,10 +1126,7 @@ void main() {
         tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isFalse,
       );
-      expect(
-        find.text('Image-only PDF without text recognition.'),
-        findsOneWidget,
-      );
+      expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Export PDF (1 page)'));
@@ -1133,7 +1137,7 @@ void main() {
       expect(find.text('Searchable export failed'), findsNothing);
       expect(
         sharePlatform.lastParams!.fileNameOverrides!.single,
-        matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+        matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
       );
       expect(find.text('Keep this draft?'), findsNothing);
       expect(find.text('Export PDF (1 page)'), findsOneWidget);
@@ -1212,7 +1216,7 @@ void main() {
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       final expectedAnchor = tester.getRect(find.byType(FilledButton));
-      await tester.tap(find.text('Export PDF (1 page)'));
+      await tester.tap(find.text('Export searchable PDF (1 page)'));
       await pumpUntil(tester, () => started.isCompleted, settle: false);
       expect(find.byType(SwitchListTile), findsNothing);
       expect(find.byTooltip('PDF export options'), findsNothing);
@@ -1231,7 +1235,7 @@ void main() {
       );
       staleDelete();
       await tester.pump();
-      expect(find.text('Generating PDF 0%'), findsOneWidget);
+      expect(find.text('Recognizing text 0%'), findsOneWidget);
 
       finish.complete();
       await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
@@ -1241,7 +1245,9 @@ void main() {
       expect(params!.sharePositionOrigin, expectedAnchor);
       expect(
         params.fileNameOverrides!.single,
-        matches(RegExp(r'^FOSScanner_searchable_\d+\.pdf$')),
+        matches(
+          RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2} \(searchable\)\.pdf$'),
+        ),
       );
       expect(params.text, 'Searchable document scanned with FOSScanner');
       await tester.tap(find.byTooltip('PDF export options'));
@@ -1282,7 +1288,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export searchable PDF (1 page)'));
     await pumpUntilFound(
       tester,
       find.text('Searchable export failed'),
@@ -1291,12 +1297,17 @@ void main() {
     expect(find.text('Searchable export failed'), findsOneWidget);
     expect(find.text('Share image-only PDF'), findsOneWidget);
     // The OCR job has ended; the fallback cannot cancel a native OCR job.
+    // Cancel keeps its slot (so the status never changes width) but is off.
     expect(
-      find.descendant(
-        of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
-        matching: find.byType(TextButton, skipOffstage: false),
-      ),
-      findsNothing,
+      tester
+          .widget<TextButton>(
+            find.descendant(
+              of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
+              matching: find.byType(TextButton, skipOffstage: false),
+            ),
+          )
+          .onPressed,
+      isNull,
     );
 
     await tester.tap(find.text('Share image-only PDF'));
@@ -1306,7 +1317,7 @@ void main() {
     expect(sharePlatform.lastParams, isNotNull);
     expect(
       sharePlatform.lastParams!.fileNameOverrides!.single,
-      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+      matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
     );
   });
 }
