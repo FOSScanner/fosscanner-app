@@ -35,42 +35,45 @@ class _DraftSessionGateState extends State<DraftSessionGate> {
       final busy = snapshot.error is DraftInUseException;
       return Scaffold(
         appBar: AppBar(title: const Text('FOSScanner')),
-        body: Center(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: failed
-                  ? Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          busy
-                              ? 'Draft already open'
-                              : 'Could not open the saved draft',
-                          style: Theme.of(context).textTheme.headlineSmall,
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          busy
-                              ? 'Close the other FOSScanner window, then try again.'
-                              : 'Check storage access and try again.',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        FilledButton(
-                          onPressed: () => setState(() {
-                            _acquisition = Future<void>.sync(
-                              widget.session.acquireSession,
-                            );
-                          }),
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    )
-                  : const CircularProgressIndicator(
-                      semanticsLabel: 'Opening draft',
-                    ),
+        body: SafeArea(
+          top: false,
+          child: Center(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: failed
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            busy
+                                ? 'Draft already open'
+                                : 'Could not open the saved draft',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            busy
+                                ? 'Close the other FOSScanner window, then try again.'
+                                : 'Check storage access and try again.',
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 24),
+                          FilledButton(
+                            onPressed: () => setState(() {
+                              _acquisition = Future<void>.sync(
+                                widget.session.acquireSession,
+                              );
+                            }),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : const CircularProgressIndicator(
+                        semanticsLabel: 'Opening draft',
+                      ),
+              ),
             ),
           ),
         ),

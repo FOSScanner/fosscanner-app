@@ -63,6 +63,14 @@ class _PreviewFixture implements CornerAdjustOperations {
   }) async => bytes;
 }
 
+class _UnreadablePhotoFixture extends _PreviewFixture {
+  _UnreadablePhotoFixture(super.bytes);
+
+  @override
+  Future<Size> decodeSize(Uint8List bytes) async =>
+      throw const FormatException('Synthetic unreadable photo');
+}
+
 Future<Uint8List> _sampleDocument() async {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
@@ -285,6 +293,25 @@ void main() {
     await tester.tap(find.text('Discard saved draft'));
     await tester.pumpAndSettle();
     await save('ui-draft-discard-confirmation');
+    await tester.pumpWidget(const SizedBox());
+    tester.view.physicalSize = const Size(600, 220);
+    tester.view.padding = const FakeViewPadding(
+      left: 38,
+      right: 24,
+      bottom: 20,
+    );
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await show(
+      CornerAdjustScreen(
+        originalBytes: bytes,
+        operations: _UnreadablePhotoFixture(bytes),
+      ),
+    );
+    await tester.ensureVisible(find.text('Go back'));
+    await tester.pumpAndSettle();
+    await save('ui-crop-error-short-insets');
     debugDisableShadows = previousShadows;
   });
 }
