@@ -7,6 +7,7 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/services/document_processor.dart';
 import 'package:fosscanner/widgets/corner_overlay.dart';
+import '../support/layout_stability.dart';
 
 const _fullBounds = [Offset.zero, Offset(99, 0), Offset(99, 79), Offset(0, 79)];
 const _detectedCorners = [
@@ -189,15 +190,7 @@ void main() {
         expect(overlay.corners, _fullBounds);
         expect(operations.previewCorners, isNotEmpty);
         expect(operations.previewCorners.first, _fullBounds);
-        expect(find.text(_notice), findsOneWidget);
-        expect(
-          tester
-              .getSemantics(find.text(_notice))
-              .getSemanticsData()
-              .flagsCollection
-              .isLiveRegion,
-          isTrue,
-        );
+        expect(find.text(_notice), findsNothing);
         expect(tester.takeException(), isNull);
       } finally {
         semantics.dispose();
@@ -212,7 +205,7 @@ void main() {
     await pumpEditor(tester, operations, initialCorners: const [Offset.zero]);
     expect(operations.detectionCalls, 0);
     expect(operations.previewCorners.first, _fullBounds);
-    expect(find.text(_notice), findsOneWidget);
+    expect(find.text(_notice), findsNothing);
   });
 
   testWidgets('the smallest supported image keeps its boundary pixels', (
@@ -250,7 +243,7 @@ void main() {
     expect(find.text(_notice), findsNothing);
   });
 
-  testWidgets('manual adjustment removes the full-image status', (
+  testWidgets('manual adjustment remains available without fallback status', (
     tester,
   ) async {
     final operations = _Operations(imageBytes);
@@ -267,13 +260,15 @@ void main() {
   });
 
   for (final size in [const Size(320, 568), const Size(640, 300)]) {
-    testWidgets('fallback guidance fits $size with 200% text', (tester) async {
+    testWidgets('fallback stays uncluttered at $size with 200% text', (
+      tester,
+    ) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await pumpEditor(tester, _Operations(imageBytes), textScale: 2);
-      expect(find.text(_notice), findsOneWidget);
+      expect(find.text(_notice), findsNothing);
       await tester.ensureVisible(find.text('Preview page'));
       await tester.pumpAndSettle();
       expect(find.text('Preview page').hitTestable(), findsOneWidget);
@@ -295,7 +290,7 @@ void main() {
           textScale: 2,
           isBatchImport: true,
         );
-        expect(find.text(_notice), findsOneWidget);
+        expect(find.text(_notice), findsNothing);
         expect(
           find.text(
             'Skip this image only. Any remaining images will still be reviewed.',
@@ -312,6 +307,28 @@ void main() {
       },
     );
   }
+
+  testWidgets('missing detection does not move the crop preview or actions', (
+    tester,
+  ) async {
+    await pumpEditor(
+      tester,
+      _Operations(imageBytes, detection: _detectedCorners),
+    );
+    await expectStableRects(
+      tester,
+      [
+        find.byType(CornerOverlay),
+        find.text('Cancel'),
+        find.text('Preview page'),
+      ],
+      () async {
+        await tester.pumpWidget(const SizedBox());
+        await pumpEditor(tester, _Operations(imageBytes));
+      },
+    );
+    expect(find.text(_notice), findsNothing);
+  });
 
   testWidgets('confirm exports and saves the full-image fallback corners', (
     tester,

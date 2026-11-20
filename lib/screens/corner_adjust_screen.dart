@@ -102,7 +102,6 @@ class CornerAdjustScreen extends StatefulWidget {
 class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
-  bool _showFullImageNotice = false;
   bool _isProcessing = false;
   bool _isLeaving = false;
   String? _error;
@@ -172,7 +171,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       setState(() {
         _imageSize = size;
         _corners = corners;
-        _showFullImageNotice = !hasCorners;
       });
       if (widget.startWithAdjustments && hasCorners) _enterFilterStep();
       unawaited(_updatePreviews());
@@ -582,18 +580,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final actions = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (_showFullImageNotice)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: Text(
-                'No page edges detected. Full image selected.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-          ),
         if (_canSkipImage)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -687,7 +673,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   void _setCrop(List<Offset> corners) {
     setState(() {
       _corners = corners;
-      _showFullImageNotice = false;
     });
     unawaited(_updatePreviews());
   }

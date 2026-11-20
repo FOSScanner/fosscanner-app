@@ -10,7 +10,6 @@ quality.
 | `ui-home-empty.png` | Initial document screen |
 | `ui-home-pages.png` | Three-page document and compact export bar |
 | `ui-home-pages-dark.png` | The same document in the dark theme |
-| `ui-reorder-pages.png` | Visible earlier/later actions in a page's reorder menu |
 | `ui-batch-review-position.png` | Batch position and explicit Stop importing action |
 | `ui-adjustment-preview-failure.png` | Preview error/retry painted inside the preview without moving controls |
 | `ui-open-source-licenses.png` | Registered bundled OCR and package licenses, opened from About |
@@ -18,8 +17,7 @@ quality.
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
 | `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |
 | `ui-filters-panel.png` | Filter choices opened explicitly from the Filters icon |
-| `ui-intake-page-limit.png` | Discoverable intake help at the page-count limit |
-| `ui-intake-limit-guidance.png` | Page-count limit and recovery guidance |
+| `ui-intake-page-limit.png` | Compact previews with intake disabled at the page-count limit |
 | `ui-draft-restore-failure.png` | Restoration failure pauses intake and offers retry |
 | `ui-crop-error-short-insets.png` | Crop recovery scrolled into view at 600×220, 200% text, and simulated side/bottom cutouts |
 | `ui-draft-discard-confirmation.png` | Explicit confirmation before discarding cached generations |

@@ -249,11 +249,6 @@ void main() {
     await show(home(3));
     expect(find.text('Export PDF (3 pages)'), findsOneWidget);
     await save('ui-home-pages');
-    await tester.tap(find.byTooltip('Reorder page 2'));
-    await tester.pumpAndSettle();
-    await save('ui-reorder-pages');
-    Navigator.of(tester.element(find.text('Move earlier'))).pop();
-    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('PDF export options'));
     await tester.pumpAndSettle();
     await save('ui-export-options');
@@ -270,7 +265,7 @@ void main() {
     );
     expect(
       find.text('No page edges detected. Full image selected.'),
-      findsOneWidget,
+      findsNothing,
     );
     await save('crop-full-image-fallback');
     await tester.tap(find.text('Preview page'));
@@ -298,9 +293,6 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await show(home(maxDocumentPages));
     await save('ui-intake-page-limit');
-    await tester.tap(find.text('Image intake help'));
-    await tester.pumpAndSettle();
-    await save('ui-intake-limit-guidance');
     await tester.pumpWidget(const SizedBox());
     await show(ScannerHomePage(draftStore: _UnreadableDraftStore()));
     await save('ui-draft-restore-failure');
