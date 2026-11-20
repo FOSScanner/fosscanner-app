@@ -1339,77 +1339,135 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 56),
-          child: Row(
-            children: busy
-                ? [
-                    SizedBox.square(
-                      dimension: 24,
-                      child: CircularProgressIndicator(
-                        value: _isCancellingPdf ? null : _pdfProgress,
-                        strokeWidth: 2,
-                      ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked =
+                  constraints.maxWidth < 300 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 21;
+              final progress = Row(
+                children: [
+                  SizedBox.square(
+                    dimension: 24,
+                    child: CircularProgressIndicator(
+                      value: _isCancellingPdf ? null : _pdfProgress,
+                      strokeWidth: 2,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Semantics(
-                        liveRegion: true,
-                        child: Text(_exportStatus),
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(_exportStatus),
                     ),
-                    if (_isGeneratingPdf && _pdfProgress != null)
-                      TextButton(
-                        onPressed: _isCancellingPdf
-                            ? null
-                            : _cancelPdfGeneration,
-                        child: const Text('Cancel'),
+                  ),
+                ],
+              );
+              final cancel = _isGeneratingPdf && _pdfProgress != null
+                  ? TextButton(
+                      onPressed: _isCancellingPdf ? null : _cancelPdfGeneration,
+                      child: const Text('Cancel'),
+                    )
+                  : null;
+              if (busy) {
+                return stacked
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [progress, ?cancel],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: progress),
+                          ?cancel,
+                        ],
+                      );
+              }
+              final exportButton = FilledButton.icon(
+                key: _shareButtonKey,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 16,
+                  ),
+                ),
+                onPressed: _canExport ? _generateAndSharePdf : null,
+                icon: const Icon(Icons.picture_as_pdf),
+                label: Text(
+                  'Export PDF (${_pages.length} '
+                  '${_pages.length == 1 ? 'page' : 'pages'})',
+                  textAlign: TextAlign.center,
+                ),
+              );
+              final options = _ocrSupported
+                  ? Semantics(
+                      value: _useOcr
+                          ? 'Searchable text enabled'
+                          : 'Image-only PDF',
+                      child: IconButton.filledTonal(
+                        onPressed: _canExport ? _showExportOptions : null,
+                        tooltip: 'PDF export options',
+                        icon: const Icon(Icons.tune),
                       ),
-                  ]
-                : [
-                    Expanded(
-                      child: FilledButton.icon(
-                        key: _shareButtonKey,
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        onPressed: _canExport ? _generateAndSharePdf : null,
-                        icon: const Icon(Icons.picture_as_pdf),
-                        label: Text(
-                          'Export PDF (${_pages.length} '
-                          '${_pages.length == 1 ? 'page' : 'pages'})',
-                        ),
+                    )
+                  : null;
+              if (stacked) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    exportButton,
+                    if (options != null)
+                      Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: options,
                       ),
-                    ),
-                    if (_ocrSupported) ...[
-                      const SizedBox(width: 8),
-                      Semantics(
-                        value: _useOcr
-                            ? 'Searchable text enabled'
-                            : 'Image-only PDF',
-                        child: IconButton.filledTonal(
-                          onPressed: _canExport ? _showExportOptions : null,
-                          tooltip: 'PDF export options',
-                          icon: const Icon(Icons.tune),
-                        ),
-                      ),
-                    ],
                   ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: exportButton),
+                  if (options != null) ...[const SizedBox(width: 8), options],
+                ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
+  SliverGridDelegate _pageGridDelegate(BuildContext context, double width) {
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    // Keep ordinary phone cards compact, but give large text a full-width
+    // card instead of squeezing its label and two 48px actions into a footer.
+    final minCardWidth = 168 + 52 * (textScale - 1).clamp(0.0, 1.0);
+    final columns = ((width - 8) / (minCardWidth + 8)).floor().clamp(1, 6);
+    final cardWidth = (width - 16 - 8 * (columns - 1)) / columns;
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: columns,
+      crossAxisSpacing: 8,
+      mainAxisSpacing: 8,
+      mainAxisExtent: cardWidth * 1.3 + 48 + 36 * textScale,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_draftRestoreFailed) return _buildDraftRestoreFailure();
+    final compactActions =
+        MediaQuery.sizeOf(context).width -
+                MediaQuery.paddingOf(context).horizontal <
+            380 ||
+        MediaQuery.textScalerOf(context).scale(20) > 28;
     return Scaffold(
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
-          if (supportsBarcodeCamera(
-            platform: defaultTargetPlatform,
-            isWeb: kIsWeb,
-          ))
+          if (!compactActions &&
+              supportsBarcodeCamera(
+                platform: defaultTargetPlatform,
+                isWeb: kIsWeb,
+              ))
             IconButton(
               icon: const Icon(Icons.qr_code_scanner),
               onPressed: _isRestoringDraft || _isDocumentInteractionLocked
@@ -1425,7 +1483,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 : _importFromGallery,
             tooltip: 'Import from gallery',
           ),
-          if (_pages.isNotEmpty)
+          if (!compactActions && _pages.isNotEmpty)
             IconButton(
               icon: _isClearingDraft
                   ? const SizedBox.square(
@@ -1440,9 +1498,37 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             ),
           PopupMenuButton<String>(
             tooltip: 'More options',
-            onSelected: (_) => _showAppInfo(),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'about', child: Text('About FOSScanner')),
+            onSelected: (action) {
+              switch (action) {
+                case 'barcode':
+                  _openBarcodeScanner();
+                case 'clear':
+                  _clearPages();
+                case 'about':
+                  _showAppInfo();
+              }
+            },
+            itemBuilder: (_) => [
+              if (compactActions &&
+                  supportsBarcodeCamera(
+                    platform: defaultTargetPlatform,
+                    isWeb: kIsWeb,
+                  ))
+                PopupMenuItem(
+                  value: 'barcode',
+                  enabled: !_isRestoringDraft && !_isDocumentInteractionLocked,
+                  child: const Text('Scan QR/barcode'),
+                ),
+              if (compactActions && _pages.isNotEmpty)
+                PopupMenuItem(
+                  value: 'clear',
+                  enabled: !_isClearingDraft && !_isGeneratingPdf,
+                  child: const Text('Clear all'),
+                ),
+              const PopupMenuItem(
+                value: 'about',
+                child: Text('About FOSScanner'),
+              ),
             ],
           ),
         ],
@@ -1565,13 +1651,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                           8,
                           _cameraSupported ? 96 : 8,
                         ),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              crossAxisSpacing: 8,
-                              mainAxisSpacing: 8,
-                              childAspectRatio: 0.7,
-                            ),
+                        gridDelegate: _pageGridDelegate(
+                          context,
+                          constraints.maxWidth,
+                        ),
                         itemCount: _pages.length,
                         itemBuilder: (context, index) {
                           final page = _pages[index];
