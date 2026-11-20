@@ -214,11 +214,11 @@ cv.Mat _blackAndWhite(cv.Mat src, cv.Mat Function(cv.Mat) track) {
 /// normalized mod 4, so any integer (including negative, for counter-
 /// clockwise) works; 0 is a no-op that returns [imageBytes] unchanged.
 Uint8List rotateImage(Uint8List imageBytes, int quarterTurns) {
+  // Dart's % always returns a non-negative result for a positive divisor.
   final turns = quarterTurns % 4;
-  final normalized = turns < 0 ? turns + 4 : turns;
-  if (normalized == 0) return imageBytes;
+  if (turns == 0) return imageBytes;
 
-  final rotateCode = switch (normalized) {
+  final rotateCode = switch (turns) {
     1 => cv.ROTATE_90_CLOCKWISE,
     2 => cv.ROTATE_180,
     _ => cv.ROTATE_90_COUNTERCLOCKWISE,
