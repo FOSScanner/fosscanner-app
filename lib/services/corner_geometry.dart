@@ -198,3 +198,105 @@ void _validateCornerRoles(List<Offset> corners) {
   }
   return (outputWidth, outputHeight);
 }
+
+/// Why a crop cannot be previewed, in terms the user can fix by dragging.
+enum CropProblem {
+  /// Two edges of the quad intersect (a bow-tie).
+  cornersCross,
+
+  /// One corner lies inside the triangle formed by the other three.
+  cornerInside,
+
+  /// The corners coincide, are collinear, or enclose too thin a page.
+  areaTooSmall,
+}
+
+/// Returns [corners] re-ordered clockwise from top-left when the four points
+/// form a convex quad in some order (for example after one handle was dragged
+/// past its neighbour). Anything else is returned unchanged: there is no
+/// single right order for a concave or degenerate set of points.
+List<Offset> sortCornersIfConvex(List<Offset> corners) {
+  final List<Offset> ordered;
+  try {
+    ordered = orderCorners(corners);
+    _validateConvexQuad(ordered);
+  } on ArgumentError {
+    return corners;
+  }
+  return ordered;
+}
+
+bool _segmentsCross(Offset a, Offset b, Offset c, Offset d) {
+  double side(Offset p, Offset q, Offset r) =>
+      (q.dx - p.dx) * (r.dy - p.dy) - (q.dy - p.dy) * (r.dx - p.dx);
+  final d1 = side(c, d, a);
+  final d2 = side(c, d, b);
+  final d3 = side(a, b, c);
+  final d4 = side(a, b, d);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+/// Checks [corners] against the same bounded-preview rules the warp uses and
+/// returns the reason they are rejected, or null for a valid crop.
+CropProblem? cropProblem(List<Offset> corners) {
+  try {
+    calculateWarpSize(
+      corners,
+      maxPixels: maxPreviewWarpPixels,
+      maxEdge: maxPreviewWarpEdge,
+    );
+    return null;
+  } on ArgumentError {
+    if (corners.length != 4 ||
+        corners.any((p) => !p.dx.isFinite || !p.dy.isFinite) ||
+        corners.toSet().length != 4) {
+      return CropProblem.areaTooSmall;
+    }
+    if (_segmentsCross(corners[0], corners[1], corners[2], corners[3]) ||
+        _segmentsCross(corners[1], corners[2], corners[3], corners[0])) {
+      return CropProblem.cornersCross;
+    }
+    if (_isCollapsed(corners)) return CropProblem.areaTooSmall;
+    double? winding;
+    for (var i = 0; i < 4; i++) {
+      final a = corners[i];
+      final b = corners[(i + 1) % 4];
+      final c = corners[(i + 2) % 4];
+      final cross =
+          (b.dx - a.dx) * (c.dy - b.dy) - (b.dy - a.dy) * (c.dx - b.dx);
+      if (cross.abs() < 1e-9) return CropProblem.areaTooSmall;
+      winding ??= cross.sign;
+      if (cross.sign != winding) return CropProblem.cornerInside;
+    }
+    // Convex but too thin, or convex with mislabelled corners; the editor
+    // re-sorts the latter, so what remains is a sliver.
+    return CropProblem.areaTooSmall;
+  }
+}
+
+/// Whether an invalid quad has (nearly) collapsed: three corners bunched
+/// together, two pairs of corners on top of each other, or almost no area.
+/// Such a crop is technically concave, but "too small" is what the user sees
+/// and what dragging a corner out fixes.
+bool _isCollapsed(List<Offset> corners) {
+  var longest = 0.0;
+  for (var i = 0; i < 4; i++) {
+    for (var j = i + 1; j < 4; j++) {
+      longest = math.max(longest, (corners[i] - corners[j]).distance);
+    }
+  }
+  if (longest == 0) return true;
+  var closePairs = 0;
+  for (var i = 0; i < 4; i++) {
+    for (var j = i + 1; j < 4; j++) {
+      if ((corners[i] - corners[j]).distance < 0.15 * longest) closePairs++;
+    }
+  }
+  var doubleArea = 0.0;
+  for (var i = 0; i < 4; i++) {
+    final a = corners[i];
+    final b = corners[(i + 1) % 4];
+    doubleArea += a.dx * b.dy - b.dx * a.dy;
+  }
+  return closePairs >= 2 || doubleArea.abs() / 2 < 0.02 * longest * longest;
+}

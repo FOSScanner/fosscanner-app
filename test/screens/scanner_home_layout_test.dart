@@ -1,17 +1,20 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show LicenseRegistry;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'package:fosscanner/main.dart' show registerBundledLicenses;
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
 
 class _Picker extends ImagePickerPlatform {
   Completer<List<XFile>>? selection;
+  var galleryCalls = 0;
 
   @override
   bool supportsImageSource(ImageSource source) => true;
@@ -22,7 +25,10 @@ class _Picker extends ImagePickerPlatform {
   @override
   Future<List<XFile>> getMultiImageWithOptions({
     MultiImagePickerOptions options = const MultiImagePickerOptions(),
-  }) async => await selection?.future ?? const [];
+  }) async {
+    galleryCalls++;
+    return await selection?.future ?? const [];
+  }
 }
 
 void main() {
@@ -122,7 +128,10 @@ void main() {
     await openOptions(tester);
     expect(find.text('Searchable text'), findsOneWidget);
     expect(find.textContaining('Latin-script'), findsOneWidget);
-    expect(find.textContaining('entirely on your device'), findsOneWidget);
+    expect(
+      find.text('Supports Latin-script text. Runs on your device.'),
+      findsOneWidget,
+    );
     expect(
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
       isFalse,
@@ -130,10 +139,7 @@ void main() {
 
     await tester.tap(find.text('Searchable text'));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Recognize text so you can search and select it in the PDF.'),
-      findsOneWidget,
-    );
+    expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsNothing);
@@ -151,13 +157,16 @@ void main() {
     );
   });
 
-  testWidgets('image-only platforms do not offer unavailable OCR settings', (
+  testWidgets('image-only platforms offer layout but not OCR settings', (
     tester,
   ) async {
     await pumpHome(tester, searchable: false);
     expect(find.text('Export PDF (1 page)'), findsOneWidget);
-    expect(find.byTooltip('PDF export options'), findsNothing);
+    await openOptions(tester);
     expect(find.byType(SwitchListTile), findsNothing);
+    expect(find.textContaining('Latin-script'), findsNothing);
+    expect(find.text('Page size'), findsOneWidget);
+    expect(find.text('Quality'), findsOneWidget);
   });
 
   testWidgets('empty home has no footer and About is in the overflow menu', (
@@ -195,6 +204,11 @@ void main() {
           tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
           isTrue,
         );
+        await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Small'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ChoiceChip, 'Small'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
         await tester.ensureVisible(find.widgetWithText(FilledButton, 'Done'));
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton, 'Done'));
@@ -280,6 +294,31 @@ void main() {
       );
     }
   }
+  testWidgets(
+    'empty home offers scanning and gallery import as first actions',
+    (tester) async {
+      await pumpHome(tester, pageCount: 0);
+      final title = tester.widget<Text>(find.text('Ready to scan'));
+      expect(
+        title.style,
+        Theme.of(
+          tester.element(find.text('Ready to scan')),
+        ).textTheme.headlineSmall,
+      );
+      expect(
+        find.text('Scan your first page, or import from your gallery.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Privacy-first'), findsNothing);
+      expect(find.byTooltip('Scan a page'), findsOneWidget);
+
+      final import = find.widgetWithText(OutlinedButton, 'Import from gallery');
+      expect(import, findsOneWidget);
+      await tester.tap(import);
+      await tester.pumpAndSettle();
+      expect(picker.galleryCalls, 1);
+    },
+  );
 
   testWidgets('short empty home scrolls without large-text overflow', (
     tester,
@@ -287,7 +326,7 @@ void main() {
     setViewport(tester, const Size(640, 260));
     await pumpHome(tester, pageCount: 0, textScale: 2);
     expect(tester.takeException(), isNull);
-    await tester.ensureVisible(find.textContaining('Tap the camera button'));
+    await tester.ensureVisible(find.textContaining('Scan your first page'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
@@ -323,32 +362,108 @@ void main() {
     await tester.ensureVisible(find.text('View source code'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('View licenses'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('last grid page and delete action clear the camera button', (
+  for (final (size, columns) in [
+    (const Size(320, 568), 2),
+    (const Size(390, 844), 2),
+    (const Size(640, 300), 3),
+    (const Size(800, 1280), 4),
+    (const Size(1280, 800), 6),
+  ]) {
+    testWidgets('page grid uses $columns columns at $size', (tester) async {
+      setViewport(tester, size);
+      await pumpHome(tester, pageCount: 8);
+      final firstRowTop = tester.getTopLeft(find.byType(Card).first).dy;
+      final cards = find.byType(Card);
+      final cardsInFirstRow = [
+        for (var i = 0; i < cards.evaluate().length; i++)
+          if (tester.getTopLeft(cards.at(i)).dy == firstRowTop) i,
+      ].length;
+      expect(cardsInFirstRow, columns);
+      expect(tester.getSize(cards.first).width, lessThanOrEqualTo(240));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('About opens the license page with the bundled OCR licenses', (
     tester,
   ) async {
-    setViewport(tester, const Size(390, 600));
-    await pumpHome(tester, pageCount: 8);
-    final scroll = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(GridView),
-        matching: find.byType(Scrollable),
-      ),
-    );
-    scroll.position.jumpTo(scroll.position.maxScrollExtent);
+    registerBundledLicenses();
+    addTearDown(LicenseRegistry.reset);
+    await pumpHome(tester, pageCount: 0);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About FOSScanner'));
     await tester.pumpAndSettle();
 
-    final camera = tester.getRect(find.byType(FloatingActionButton));
-    final delete = tester.getRect(find.byTooltip('Delete page 8'));
-    final page = tester.getRect(find.byKey(const ValueKey('page_semantics_7')));
-    expect(delete.overlaps(camera), isFalse);
-    expect(page.overlaps(camera), isFalse);
+    await tester.tap(find.text('View licenses'));
+    // The license page collects entries asynchronously from asset bundles.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 200)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LicensePage), findsOneWidget);
+    expect(find.text('1.4.0'), findsOneWidget);
+    expect(find.text('Tesseract language data'), findsOneWidget);
+    expect(
+      find.text('Tesseract4Android and native OCR dependencies'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
+
+  // 640x300 at 200% text is left out: the header and export row leave the
+  // grid less height than its FAB clearance (already with the former fixed
+  // two columns), so the last page is never laid out at max scroll. Its reorder controls are
+  // covered by the large-text reorder test above.
+  for (final (size, textScale) in [
+    (const Size(390, 600), 1.0),
+    (const Size(390, 600), 2.0),
+    (const Size(640, 300), 1.0),
+    (const Size(1024, 768), 1.0),
+    (const Size(1024, 768), 2.0),
+    (const Size(1280, 800), 1.0),
+    (const Size(1280, 800), 2.0),
+  ]) {
+    testWidgets(
+      'last grid page and delete action clear the camera button at $size '
+      'and ${textScale}x text',
+      (tester) async {
+        setViewport(tester, size);
+        await pumpHome(tester, pageCount: 8, textScale: textScale);
+        final scroll = tester.state<ScrollableState>(
+          find.descendant(
+            of: find.byType(GridView),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        scroll.position.jumpTo(scroll.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+
+        final camera = tester.getRect(find.byType(FloatingActionButton));
+        final page = tester.getRect(
+          find.byKey(const ValueKey('page_semantics_7')),
+        );
+        for (final tooltip in ['Delete page 8', 'Reorder page 8']) {
+          expect(
+            tester.getRect(find.byTooltip(tooltip)).overlaps(camera),
+            isFalse,
+            reason: tooltip,
+          );
+        }
+        expect(page.overlaps(camera), isFalse);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('busy intake rejects a stale export-options callback', (
     tester,

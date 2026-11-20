@@ -1,11 +1,28 @@
 package com.fosscanner.app
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.PersistableBundle
+import android.view.View
+import android.view.WindowManager
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import android.provider.Settings
 import com.googlecode.leptonica.android.ReadFile
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.googlecode.tesseract.android.TessPdfRenderer
@@ -15,6 +32,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,13 +45,157 @@ class MainActivity : FlutterActivity() {
     private var executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var channel: MethodChannel? = null
+    private var privacyChannel: MethodChannel? = null
+    private var gestureExclusionChannel: MethodChannel? = null
+    private var appSettingsChannel: MethodChannel? = null
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
+    // The one save waiting for the system document picker, if any, and the
+    // location it returned, held until Dart writes or discards it.
+    private var pendingSaveTarget: MethodChannel.Result? = null
+    private var saveTarget: Uri? = null
+
+    // Shared images are copied off the UI thread on their own worker, so a
+    // running OCR export never delays them (Dart blocks intake during export).
+    private var sharedImageExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var sharedImageChannel: MethodChannel? = null
+    private val sharedImages by lazy {
+        SharedImageInbox<Uri>(
+            directory = File(cacheDir, SharedImageInbox.DIRECTORY_NAME),
+            open = { contentResolver.openInputStream(it) },
+            typeOf = { contentResolver.getType(it) },
+            maxImageBytes = MAX_IMAGE_BYTES,
+            maxImages = MAX_PAGES,
+        )
+    }
+
+    // PDF import renders on its own worker so it never waits behind OCR, and
+    // keeps only the temporary read grant of the picked document.
+    private var pdfImportExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var pdfImportChannel: MethodChannel? = null
+    private var pendingPdfPick: MethodChannel.Result? = null
+    private var pickedPdf: Uri? = null
+    private val pdfImportRunning = AtomicBoolean(false)
+    private val pdfImportCancelled = AtomicBoolean(false)
+    private val pdfImportDirectory: File
+        get() = File(cacheDir, PdfPageImport.DIRECTORY_NAME)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         orphanCacheCleanup.schedule(applicationContext.cacheDir, executor::execute)
+        // Renders a killed process left behind; no Dart isolate holds them yet.
+        val pdfDirectory = pdfImportDirectory
+        pdfImportExecutor.execute { PdfPageImport.clearDirectory(pdfDirectory) }
+        // No Dart isolate of this activity can hold a copied path yet. The
+        // single worker runs this cleanup before any later copy.
+        val inbox = sharedImages
+        sharedImageExecutor.execute { inbox.clearDirectory() }
         super.onCreate(savedInstanceState)
+        // Scans are often IDs or bank statements: keep page content out of the
+        // Recents thumbnail without blocking screenshots. Older APIs have no
+        // equivalent short of FLAG_SECURE, which is the opt-in below.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false)
+        }
+        applySecureScreen()
+        // After recreation the intent was already delivered; only re-read it
+        // if Dart had not pulled its images yet.
+        if (savedInstanceState == null || savedInstanceState.getBoolean(KEY_SHARE_PENDING)) {
+            receiveSharedImages(intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (receiveSharedImages(intent)) {
+            sharedImageChannel?.invokeMethod("sharedImagesAvailable", null)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_SHARE_PENDING, sharedImages.hasPending)
+    }
+
+    /**
+     * Queues image URIs from a share intent. Only the temporary read grant
+     * that comes with the intent is used: no persistable permission is taken,
+     * and nothing is read until Dart asks for the images.
+     */
+    private fun receiveSharedImages(intent: Intent?): Boolean {
+        if (intent == null) return false
+        val streams = try {
+            SharedImageIntents.sharedStreams(
+                action = intent.action,
+                mimeType = intent.type,
+                flags = intent.flags,
+                single = if (intent.action == Intent.ACTION_SEND) singleStream(intent) else null,
+                multiple = if (intent.action == Intent.ACTION_SEND_MULTIPLE) multipleStreams(intent) else null,
+            )
+        } catch (_: Exception) {
+            // Malformed extras from another app must not crash the scanner.
+            emptyList()
+        }
+        return sharedImages.offer(streams)
+    }
+
+    private fun singleStream(intent: Intent): Uri? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+
+    private fun multipleStreams(intent: Intent): List<Uri?>? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+
+    private fun handleTakeSharedImages(call: MethodCall, result: MethodChannel.Result) {
+        val maxCount = call.argument<Int>("maxCount") ?: 0
+        val inbox = sharedImages
+        try {
+            sharedImageExecutor.execute {
+                try {
+                    val batch = inbox.take(maxCount)
+                    mainHandler.post { result.success(batch.toChannelMap()) }
+                } catch (e: Exception) {
+                    // Do not expose provider exception messages or URIs.
+                    mainHandler.post { result.error("share_failed", "Could not read shared images", null) }
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            result.error("share_unavailable", "Shared image worker is unavailable", null)
+        }
+    }
+
+    // FLAG_SECURE blocks screenshots, screen recording and the Recents
+    // thumbnail on every API level. The choice is process-wide so it survives
+    // activity recreation (rotation, theme change) until Flutter changes it.
+    // The app's details page in system settings, where a camera permission
+    // denied for good can be turned back on.
+    private fun openAppSettings(): Boolean = try {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse(AppSettingsContract.detailsUri(packageName))),
+        )
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: IllegalArgumentException) {
+        false
+    }
+
+    private fun applySecureScreen() {
+        if (secureScreen) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -44,7 +207,78 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "ensureTessdata" -> handleEnsureTessdata(result)
                 "createSearchablePdf" -> handleCreateSearchablePdf(call, result)
+                // Cancels whichever OCR job is running, PDF or text copy.
                 "cancelSearchablePdf" -> handleCancelSearchablePdf(result)
+                "copyRecognizedText" -> handleCopyRecognizedText(call, result)
+                "chooseSaveTarget" -> handleChooseSaveTarget(call, result)
+                "renameSaveTarget" -> handleRenameSaveTarget(call, result)
+                "writeSaveTarget" -> handleWriteSaveTarget(call, result)
+                "discardSaveTarget" -> {
+                    discardSaveTarget()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+        // Keep this contract synchronized with lib/services/screen_privacy.dart.
+        privacyChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.fosscanner.app/screen_privacy")
+        privacyChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setSecureScreen" -> {
+                    val enabled = call.argument<Boolean>("enabled")
+                    if (enabled == null) {
+                        result.error("invalid_args", "A boolean 'enabled' argument is required", null)
+                    } else {
+                        secureScreen = enabled
+                        applySecureScreen()
+                        result.success(null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+        // Keep this contract synchronized with lib/services/gesture_exclusion.dart.
+        gestureExclusionChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, GESTURE_EXCLUSION_CHANNEL)
+        gestureExclusionChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setExclusionRects" -> {
+                    val values = call.argument<List<Int>>("rects")
+                    if (values == null || values.size % 4 != 0) {
+                        result.error("invalid_args", "'rects' must hold left, top, right, bottom quadruples", null)
+                    } else {
+                        setGestureExclusionRects(values)
+                        result.success(null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+        // Keep this contract synchronized with lib/services/app_settings.dart.
+        appSettingsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AppSettingsContract.CHANNEL)
+        appSettingsChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                AppSettingsContract.OPEN_METHOD -> result.success(openAppSettings())
+                else -> result.notImplemented()
+            }
+        }
+        if (sharedImageExecutor.isShutdown) sharedImageExecutor = Executors.newSingleThreadExecutor()
+        sharedImageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARED_IMAGES_CHANNEL)
+        sharedImageChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "takeSharedImages" -> handleTakeSharedImages(call, result)
+                else -> result.notImplemented()
+            }
+        }
+        if (pdfImportExecutor.isShutdown) pdfImportExecutor = Executors.newSingleThreadExecutor()
+        pdfImportChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_IMPORT_CHANNEL)
+        pdfImportChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "pickPdf" -> handlePickPdf(result)
+                "renderPdf" -> handleRenderPdf(call, result)
+                "cancelPdfImport" -> {
+                    if (pdfImportRunning.get()) pdfImportCancelled.set(true)
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -54,31 +288,86 @@ class MainActivity : FlutterActivity() {
         detached.set(true)
         channel?.setMethodCallHandler(null)
         channel = null
+        privacyChannel?.setMethodCallHandler(null)
+        privacyChannel = null
+        gestureExclusionChannel?.setMethodCallHandler(null)
+        gestureExclusionChannel = null
+        appSettingsChannel?.setMethodCallHandler(null)
+        appSettingsChannel = null
+        sharedImageChannel?.setMethodCallHandler(null)
+        sharedImageChannel = null
+        sharedImageExecutor.shutdown()
+        pdfImportChannel?.setMethodCallHandler(null)
+        pdfImportChannel = null
+        pendingPdfPick = null
+        pickedPdf = null
+        // A running render sees the detached flag and deletes its files.
+        pdfImportExecutor.shutdown()
+        // Its Dart caller is gone with the engine; nothing is left to answer,
+        // and an unwritten location would stay an empty document.
+        pendingSaveTarget = null
+        discardSaveTarget()
         // Let the active native call finish and release its resources. Interrupting
         // the Java worker cannot safely interrupt Tesseract's native renderer.
         executor.shutdown()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
-    private fun submit(result: MethodChannel.Result, work: () -> Any?) {
+    /**
+     * Runs [work] on the OCR worker, then [deliver]s its value on the main
+     * thread and replies with the result. [onDone] runs on the main thread
+     * after every reply, including failures.
+     */
+    private fun submit(
+        result: MethodChannel.Result,
+        deliver: (Any?) -> Any? = { it },
+        onDone: () -> Unit = {},
+        work: () -> Any?,
+    ) {
         try {
             executor.execute {
+                var value: Any? = null
+                var failure: Throwable? = null
                 try {
-                    val value = work()
-                    mainHandler.post { result.success(value) }
-                } catch (e: OcrCancelledException) {
-                    mainHandler.post { result.error("ocr_cancelled", "OCR export cancelled", null) }
+                    value = work()
                 } catch (e: Exception) {
-                    // Do not expose native exception messages, paths, or OCR text.
-                    mainHandler.post { result.error("ocr_failed", "OCR operation failed", null) }
+                    failure = e
                 } catch (e: LinkageError) {
-                    mainHandler.post { result.error("ocr_unavailable", "OCR native library is unavailable", null) }
+                    failure = e
                 } catch (e: OutOfMemoryError) {
-                    mainHandler.post { result.error("ocr_memory", "Not enough memory for OCR", null) }
+                    failure = e
+                }
+                mainHandler.post {
+                    try {
+                        if (failure != null) {
+                            replyOcrError(result, failure)
+                        } else {
+                            val reply = try {
+                                deliver(value)
+                            } catch (e: Exception) {
+                                replyOcrError(result, e)
+                                return@post
+                            }
+                            result.success(reply)
+                        }
+                    } finally {
+                        onDone()
+                    }
                 }
             }
         } catch (e: RejectedExecutionException) {
+            onDone()
             result.error("ocr_unavailable", "OCR worker is unavailable", null)
+        }
+    }
+
+    // Do not expose native exception messages, paths, or OCR text.
+    private fun replyOcrError(result: MethodChannel.Result, error: Throwable) {
+        when (error) {
+            is OcrCancelledException -> result.error("ocr_cancelled", "OCR export cancelled", null)
+            is LinkageError -> result.error("ocr_unavailable", "OCR native library is unavailable", null)
+            is OutOfMemoryError -> result.error("ocr_memory", "Not enough memory for OCR", null)
+            else -> result.error("ocr_failed", "OCR operation failed", null)
         }
     }
 
@@ -100,6 +389,13 @@ class MainActivity : FlutterActivity() {
             result.error("invalid_args", "Between 1 and 100 images and an output path are required", null)
             return
         }
+        // Dart sizes each page through its density (page = pixels / DPI), so
+        // export presets and A4/Letter pages need one value per image.
+        val pageDpis = PdfExportContract.pageDpis(call.argument<Any>("pageDpis"), imagePaths.size)
+        if (pageDpis == null) {
+            result.error("invalid_args", "One valid density per image is required", null)
+            return
+        }
         if (!rendering.compareAndSet(false, true)) {
             result.error("ocr_busy", "An OCR export is already running", null)
             return
@@ -118,23 +414,12 @@ class MainActivity : FlutterActivity() {
             var succeeded = false
             try {
                 val output = File(outputPath).canonicalFile
-                val directory = requireNotNull(output.parentFile)
-                require(
-                    directory.parentFile == cacheDir.canonicalFile &&
-                        directory.name.startsWith(OcrCacheCleanupCoordinator.JOB_PREFIX),
-                )
-                require(output.name == "document" && directory.isDirectory)
+                val directory = OcrJobContract.jobDirectory(cacheDir, output)
+                require(output.name == "document")
                 jobDirectory = directory
-                val images = imagePaths.map { File(it).canonicalFile }
-                var encodedBytes = 0L
-                for ((index, image) in images.withIndex()) {
-                    require(image.parentFile == directory && image.name == "page_$index.jpg")
-                    require(image.isFile && image.length() in 1..MAX_IMAGE_BYTES)
-                    encodedBytes += image.length()
-                    require(encodedBytes <= MAX_DOCUMENT_BYTES)
-                }
+                val images = OcrJobContract.pageImages(directory, imagePaths, MAX_IMAGE_BYTES, MAX_DOCUMENT_BYTES)
                 checkNotCancelled(jobDetached)
-                renderPdf(filesDir, images, output.path, jobDetached)
+                renderPdf(filesDir, images, pageDpis, output.path, jobDetached)
                 checkNotCancelled(jobDetached)
                 succeeded = true
                 "$outputPath.pdf"
@@ -150,40 +435,402 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Recognizes the text of every page on the OCR worker and copies it to the
+     * clipboard on the main thread, replying with the number of characters
+     * copied (0 leaves the clipboard untouched). The text never crosses the
+     * channel and is never logged. Dart owns and removes the job directory.
+     */
+    private fun handleCopyRecognizedText(call: MethodCall, result: MethodChannel.Result) {
+        val imagePaths = call.argument<List<String>>("imagePaths")
+        if (imagePaths.isNullOrEmpty() || imagePaths.size > MAX_PAGES) {
+            result.error("invalid_args", "Between 1 and 100 images are required", null)
+            return
+        }
+        if (!rendering.compareAndSet(false, true)) {
+            result.error("ocr_busy", "An OCR export is already running", null)
+            return
+        }
+        cancellationRequested.set(false)
+        val cacheDir = applicationContext.cacheDir
+        val filesDir = applicationContext.filesDir
+        val jobDetached = detached
+        submit(
+            result,
+            deliver = { text ->
+                // A cancel that arrived while the last page finished still wins:
+                // nothing reaches the clipboard after the user cancelled.
+                checkNotCancelled(jobDetached)
+                val recognized = text as String
+                if (recognized.isNotEmpty()) copySensitiveText(recognized)
+                recognized.length
+            },
+            // Released on the main thread after the clipboard decision, so a
+            // cancel can never be dropped between recognition and copying.
+            onDone = { rendering.set(false) },
+        ) {
+            val directory = OcrJobContract.jobDirectory(cacheDir, File(imagePaths.first()))
+            val images = OcrJobContract.pageImages(directory, imagePaths, MAX_IMAGE_BYTES, MAX_DOCUMENT_BYTES)
+            checkNotCancelled(jobDetached)
+            recognizeText(filesDir, images, jobDetached)
+        }
+    }
+
+    private fun recognizeText(filesDir: File, images: List<File>, jobDetached: AtomicBoolean): String {
+        val pages = ArrayList<String?>(images.size)
+        val baseApi = TessBaseAPI()
+        try {
+            check(baseApi.init(filesDir.absolutePath, OcrModelStore.language, TessBaseAPI.OEM_LSTM_ONLY))
+            // Same density the searchable PDF uses for original pages.
+            check(baseApi.setVariable("user_defined_dpi", PdfExportContract.DEFAULT_OCR_DPI.toString()))
+            for ((index, image) in images.withIndex()) {
+                checkNotCancelled(jobDetached)
+                val pix = readPagePix(image)
+                try {
+                    baseApi.setImage(pix)
+                    pages.add(baseApi.getUTF8Text())
+                    baseApi.clear()
+                } finally {
+                    pix.recycle()
+                }
+                reportProgress(images.size, index + 1)
+            }
+            checkNotCancelled(jobDetached)
+        } finally {
+            baseApi.recycle()
+        }
+        return OcrJobContract.joinPages(pages)
+    }
+
+    // Mirror image_metadata.dart's source limits before allocating bitmap/Pix
+    // buffers, including pass-through imported pages.
+    private fun readPagePix(image: File): com.googlecode.leptonica.android.Pix {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(image.path, bounds)
+        require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192)
+        require(bounds.outWidth.toLong() * bounds.outHeight <= 20_000_000)
+        val bitmap = requireNotNull(BitmapFactory.decodeFile(image.path))
+        return try {
+            requireNotNull(ReadFile.readBitmap(bitmap))
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    // Marks the clip sensitive so keyboards' clipboard suggestions and the
+    // Android 13+ copy preview hide it.
+    private fun copySensitiveText(text: String) {
+        val clipboard = requireNotNull(getSystemService(ClipboardManager::class.java))
+        val clip = ClipData.newPlainText("Recognized text", text)
+        // Clip description extras exist since Android 7.0; the system honours
+        // the flag from Android 13, some keyboards before that.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val extra = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ClipDescription.EXTRA_IS_SENSITIVE
+            } else {
+                OcrJobContract.SENSITIVE_CLIP_EXTRA
+            }
+            clip.description.extras = PersistableBundle().apply { putBoolean(extra, true) }
+        }
+        clipboard.setPrimaryClip(clip)
+    }
+
+    // Lets the user pick a location with the system picker (ACTION_CREATE_DOCUMENT)
+    // before anything is generated: no storage permission, works without Google
+    // apps, and the user can rename the suggested file. Replies with the chosen
+    // name, or null when cancelled; the location is kept for writeSaveTarget.
+    private fun handleChooseSaveTarget(call: MethodCall, result: MethodChannel.Result) {
+        if (pendingSaveTarget != null) {
+            result.error("save_busy", "A save is already waiting for a location", null)
+            return
+        }
+        // A location Dart never used is an empty document; remove it.
+        discardSaveTarget()
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/pdf")
+            .putExtra(Intent.EXTRA_TITLE, PdfExportContract.documentTitle(call.argument<String>("fileName")))
+        pendingSaveTarget = result
+        try {
+            startActivityForResult(intent, SAVE_DOCUMENT_REQUEST)
+        } catch (e: ActivityNotFoundException) {
+            pendingSaveTarget = null
+            result.error("save_unavailable", "No document picker is available", null)
+        }
+    }
+
+    // Renames the chosen, still empty document, e.g. when a searchable export
+    // fell back to an image-only PDF. Best effort: many providers cannot
+    // rename. Replies with the document's new name, or null when unchanged.
+    private fun handleRenameSaveTarget(call: MethodCall, result: MethodChannel.Result) {
+        val destination = saveTarget
+        val requested = call.argument<String>("fileName")
+        if (destination == null || requested.isNullOrBlank()) {
+            result.success(null)
+            return
+        }
+        val title = PdfExportContract.documentTitle(requested)
+        val resolver = applicationContext.contentResolver
+        Thread {
+            val renamed = try {
+                DocumentsContract.renameDocument(resolver, destination, title)
+            } catch (_: Exception) {
+                null
+            }
+            val name = renamed?.let { PdfExportContract.savedName(displayNameOf(it)) ?: title }
+            mainHandler.post {
+                // Only adopt the new location if the target was not used or
+                // discarded meanwhile.
+                if (renamed != null && saveTarget == destination) {
+                    saveTarget = renamed
+                    result.success(name)
+                } else {
+                    result.success(null)
+                }
+            }
+        }.start()
+    }
+
+    private fun handleWriteSaveTarget(call: MethodCall, result: MethodChannel.Result) {
+        val destination = saveTarget
+        val source = PdfExportContract.exportFile(
+            applicationContext.cacheDir,
+            call.argument<String>("sourcePath"),
+        )
+        if (destination == null || source == null) {
+            result.error("invalid_args", "A chosen location and an exported PDF are required", null)
+            return
+        }
+        saveTarget = null
+        val resolver = applicationContext.contentResolver
+        // Streams the file in chunks off the main thread; it can be large.
+        Thread {
+            try {
+                val output = resolver.openOutputStream(destination, "w")
+                    ?: throw IOException("No output stream")
+                output.use { stream ->
+                    source.inputStream().use { input -> input.copyTo(stream, 64 * 1024) }
+                }
+                mainHandler.post { result.success(null) }
+            } catch (e: Exception) {
+                // Do not leave an empty or truncated document at the chosen place.
+                deleteDocumentQuietly(destination)
+                // Do not expose paths or provider messages to Dart.
+                mainHandler.post { result.error("save_failed", "Could not write the document", null) }
+            }
+        }.start()
+    }
+
+    /** Removes the empty document of an unused save location, best effort. */
+    private fun discardSaveTarget() {
+        val destination = saveTarget ?: return
+        saveTarget = null
+        Thread { deleteDocumentQuietly(destination) }.start()
+    }
+
+    private fun deleteDocumentQuietly(document: Uri) {
+        try {
+            DocumentsContract.deleteDocument(applicationContext.contentResolver, document)
+        } catch (_: Exception) {
+            // Best effort; some providers do not support deletion.
+        }
+    }
+
+    private fun displayNameOf(document: Uri): String? = try {
+        contentResolver.query(document, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    } catch (_: Exception) {
+        null
+    }
+
+    // Opens the system document picker for one PDF. Replies true once a PDF
+    // was picked (kept for renderPdf) and false when the picker was cancelled.
+    private fun handlePickPdf(result: MethodChannel.Result) {
+        if (pendingPdfPick != null || pdfImportRunning.get()) {
+            result.error("pdf_busy", "A PDF import is already running", null)
+            return
+        }
+        pickedPdf = null
+        // No persistable grant is requested: the read grant of the result is
+        // enough to copy the document once.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/pdf")
+        pendingPdfPick = result
+        try {
+            startActivityForResult(intent, PICK_PDF_REQUEST)
+        } catch (e: ActivityNotFoundException) {
+            pendingPdfPick = null
+            result.error("pdf_unavailable", "No document picker is available", null)
+        }
+    }
+
+    private fun handleRenderPdf(call: MethodCall, result: MethodChannel.Result) {
+        val request = PdfImportRequest.parse(
+            call.argument<Any>("dpi"),
+            call.argument<Any>("maxPages"),
+            call.argument<Any>("maxPagePixels"),
+            call.argument<Any>("maxTotalBytes"),
+            call.argument<Any>("jpegQuality"),
+        )
+        if (request == null) {
+            result.error("invalid_args", "Valid PDF import limits are required", null)
+            return
+        }
+        val uri = pickedPdf
+        pickedPdf = null
+        if (uri == null) {
+            result.error("invalid_args", "No PDF was picked", null)
+            return
+        }
+        if (!pdfImportRunning.compareAndSet(false, true)) {
+            result.error("pdf_busy", "A PDF import is already running", null)
+            return
+        }
+        pdfImportCancelled.set(false)
+        val directory = pdfImportDirectory
+        val resolver = applicationContext.contentResolver
+        val jobDetached = detached
+        try {
+            pdfImportExecutor.execute {
+                val source = File(directory, "source.pdf")
+                try {
+                    // Earlier renders were read (and deleted) by Dart before
+                    // it could start this import.
+                    PdfPageImport.clearDirectory(directory)
+                    if (!directory.isDirectory && !directory.mkdirs()) throw IOException("No cache directory")
+                    // PdfRenderer needs a seekable file; providers may only stream.
+                    val input = resolver.openInputStream(uri) ?: throw PdfUnreadableException()
+                    val copied = input.use { SharedImageInbox.copyBounded(it, source, PdfPageImport.MAX_PDF_BYTES) }
+                    if (!copied) throw PdfUnreadableException()
+                    val value = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        val renderer = try {
+                            PdfRenderer(descriptor)
+                        } catch (e: SecurityException) {
+                            // Password-protected.
+                            throw PdfUnreadableException()
+                        } catch (e: IOException) {
+                            throw PdfUnreadableException()
+                        }
+                        renderer.use { pdf ->
+                            PdfPageImport.renderPages(
+                                directory = directory,
+                                pageCount = pdf.pageCount,
+                                request = request,
+                                pageSize = { index -> pdf.openPage(index).use { it.width to it.height } },
+                                render = { index, size, target -> renderPdfPage(pdf, index, size, target, request.jpegQuality) },
+                                isCancelled = { pdfImportCancelled.get() || jobDetached.get() },
+                                onProgress = { completed, total ->
+                                    mainHandler.post {
+                                        pdfImportChannel?.invokeMethod(
+                                            "pdfImportProgress",
+                                            mapOf("completed" to completed, "total" to total),
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    mainHandler.post { result.success(value.toChannelMap()) }
+                } catch (e: PdfImportCancelledException) {
+                    mainHandler.post { result.error("pdf_cancelled", "PDF import cancelled", null) }
+                } catch (e: PdfUnreadableException) {
+                    mainHandler.post { result.error("pdf_unreadable", "The PDF cannot be opened", null) }
+                } catch (e: OutOfMemoryError) {
+                    mainHandler.post { result.error("pdf_memory", "Not enough memory to render the PDF", null) }
+                } catch (e: Exception) {
+                    // Do not expose provider exception messages, paths or URIs.
+                    mainHandler.post { result.error("pdf_failed", "Could not import the PDF", null) }
+                } finally {
+                    source.delete()
+                    pdfImportRunning.set(false)
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            pdfImportRunning.set(false)
+            result.error("pdf_unavailable", "PDF import worker is unavailable", null)
+        }
+    }
+
+    private fun renderPdfPage(pdf: PdfRenderer, index: Int, size: PixelSize, target: File, jpegQuality: Int) {
+        val bitmap = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+        try {
+            // PdfRenderer leaves unpainted areas transparent, which JPEG turns black.
+            bitmap.eraseColor(Color.WHITE)
+            pdf.openPage(index).use { page ->
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            }
+            target.outputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, output))
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == PICK_PDF_REQUEST) {
+            val pending = pendingPdfPick ?: return
+            pendingPdfPick = null
+            val uri = data?.data
+            if (resultCode != Activity.RESULT_OK || uri == null) {
+                pending.success(false)
+            } else {
+                pickedPdf = uri
+                pending.success(true)
+            }
+            return
+        }
+        if (requestCode != SAVE_DOCUMENT_REQUEST) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val pending = pendingSaveTarget ?: return
+        pendingSaveTarget = null
+        val destination = data?.data
+        if (resultCode != Activity.RESULT_OK || destination == null) {
+            pending.success(null)
+            return
+        }
+        saveTarget = destination
+        pending.success(
+            // Null keeps the suggested name on the Dart side.
+            mapOf("fileName" to PdfExportContract.savedName(displayNameOf(destination))),
+        )
+    }
+
     private fun handleCancelSearchablePdf(result: MethodChannel.Result) {
         if (rendering.get()) cancellationRequested.set(true)
         result.success(null)
     }
 
-    private fun renderPdf(filesDir: File, images: List<File>, outputPath: String, jobDetached: AtomicBoolean) {
+    private fun renderPdf(
+        filesDir: File,
+        images: List<File>,
+        pageDpis: List<Int>,
+        outputPath: String,
+        jobDetached: AtomicBoolean,
+    ) {
+        require(pageDpis.size == images.size)
         val baseApi = TessBaseAPI()
         try {
             check(baseApi.init(filesDir.absolutePath, OcrModelStore.language, TessBaseAPI.OEM_LSTM_ONLY))
-            check(baseApi.setVariable("user_defined_dpi", OCR_DPI.toString()))
             val renderer = TessPdfRenderer(baseApi, outputPath)
             try {
                 check(baseApi.beginDocument(renderer, "FOSScanner"))
-                for (image in images) {
+                for ((index, image) in images.withIndex()) {
                     checkNotCancelled(jobDetached)
-                    // Mirror image_metadata.dart's source limits before allocating
-                    // bitmap/Pix buffers, including pass-through imported pages.
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(image.path, bounds)
-                    require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192)
-                    require(bounds.outWidth.toLong() * bounds.outHeight <= 20_000_000)
-                    val bitmap = requireNotNull(BitmapFactory.decodeFile(image.path))
-                    val pix = try {
-                        requireNotNull(ReadFile.readBitmap(bitmap))
-                    } finally {
-                        bitmap.recycle()
-                    }
+                    // Tesseract reads this for every page, and its PDF renderer
+                    // sizes the page as pixels / DPI.
+                    check(baseApi.setVariable("user_defined_dpi", pageDpis[index].toString()))
+                    val pix = readPagePix(image)
                     try {
                         check(baseApi.addPageToDocument(pix, image.path, renderer))
                     } finally {
                         pix.recycle()
                     }
                     check(File("$outputPath.pdf").length() <= MAX_DOCUMENT_BYTES)
-                    reportProgress(images.size, images.indexOf(image) + 1)
+                    reportProgress(images.size, index + 1)
                 }
                 checkNotCancelled(jobDetached)
                 check(baseApi.endDocument(renderer))
@@ -194,6 +841,10 @@ class MainActivity : FlutterActivity() {
             baseApi.recycle()
         }
         check(File("$outputPath.pdf").length() in 1..MAX_DOCUMENT_BYTES)
+        // Drop Tesseract's version and creation time so searchable PDFs carry
+        // the same minimal metadata as image-only ones. Best effort: an
+        // unexpected layout is left as Tesseract wrote it.
+        PdfMetadata.blankInfoDictionary(File("$outputPath.pdf"))
         // Tesseract4Android 4.9.0's JNI addPageToDocument ignores ProcessPage's
         // boolean result. Validate the finished document before reporting success.
         ParcelFileDescriptor.open(File("$outputPath.pdf"), ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -216,10 +867,33 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Lets drags that start on handles and sliders near the screen edge reach
+     * Flutter instead of triggering the Back gesture. Rects are in the Flutter
+     * view's physical pixels; Android ignores exclusion beyond 200 dp per edge,
+     * which Dart already respects. Gesture navigation exists from Android 10.
+     */
+    private fun setGestureExclusionRects(values: List<Int>) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val view: View = findViewById<View>(FlutterActivity.FLUTTER_VIEW_ID) ?: window.decorView
+        view.systemGestureExclusionRects = values.chunked(4).map { (left, top, right, bottom) ->
+            Rect(left, top, right, bottom)
+        }
+    }
+
     companion object {
-        private const val OCR_DPI = 150
         private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
+        @Volatile private var secureScreen = false
+        private const val SAVE_DOCUMENT_REQUEST = 0x5AFE
+        private const val PICK_PDF_REQUEST = 0x5DF0
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
+
+        // Mirror lib/services/image_metadata.dart's maxDocumentPages.
+        private const val MAX_PAGES = 100
+        private const val SHARED_IMAGES_CHANNEL = "com.fosscanner.app/shared_images"
+        private const val PDF_IMPORT_CHANNEL = "com.fosscanner.app/pdf_import"
+        private const val GESTURE_EXCLUSION_CHANNEL = "com.fosscanner.app/gesture_exclusion"
+        private const val KEY_SHARE_PENDING = "fosscanner.sharePending"
     }
 }
