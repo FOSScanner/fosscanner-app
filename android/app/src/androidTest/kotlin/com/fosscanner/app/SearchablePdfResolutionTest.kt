@@ -92,12 +92,20 @@ class SearchablePdfResolutionTest {
             "renderPdf",
             File::class.java,
             List::class.java,
+            List::class.java,
             String::class.java,
             AtomicBoolean::class.java,
         )
         method.isAccessible = true
         try {
-            method.invoke(activity, context.filesDir, images, outputPath, AtomicBoolean(false))
+            method.invoke(
+                activity,
+                context.filesDir,
+                images,
+                List(images.size) { PdfExportContract.DEFAULT_OCR_DPI },
+                outputPath,
+                AtomicBoolean(false),
+            )
         } catch (error: InvocationTargetException) {
             throw error.targetException
         }

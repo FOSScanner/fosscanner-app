@@ -183,6 +183,10 @@ void main() {
         await tester.tap(find.byTooltip('Close filters'));
         await tester.pump();
       case 'brightness' || 'contrast':
+        if (find.byType(Slider).evaluate().isEmpty) {
+          await tester.tap(find.byTooltip('Adjust'));
+          await tester.pumpAndSettle();
+        }
         final slider = tester.widget<Slider>(
           adjustment == 'brightness'
               ? find.byType(Slider).first
@@ -190,7 +194,12 @@ void main() {
         );
         final value = adjustment == 'brightness' ? 35.0 : 1.5;
         slider.onChanged!(value);
-        if (release) slider.onChangeEnd!(value);
+        if (release) {
+          slider.onChangeEnd!(value);
+          // A released slider leaves the sheet free to close; the preview
+          // updates behind it either way.
+          await tester.tap(find.byTooltip('Close adjustments'));
+        }
     }
     await pumpWork(tester);
   }
@@ -205,10 +214,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(previewImage(), findsNothing);
-    expect(
-      find.text('Preview unavailable. Retry to review this page.'),
-      findsOneWidget,
-    );
+    expect(find.text('Preview unavailable.'), findsOneWidget);
     expect(find.textContaining('private path'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(confirm(tester).onPressed, isNull);
@@ -232,10 +238,7 @@ void main() {
         await change(tester, adjustment);
         expect(operations.requests, hasLength(2));
         expect(previewBytes(tester), same(previous));
-        expect(
-          find.text('Updating preview. Previous result shown.'),
-          findsOneWidget,
-        );
+        expect(find.text('Updating preview…'), findsOneWidget);
         expect(confirm(tester).onPressed, isNull);
         staleConfirm();
         await tester.pump();
@@ -293,10 +296,8 @@ void main() {
       await change(tester, 'brightness', release: false);
       expect(operations.requests, hasLength(1));
       expect(previewBytes(tester), same(previous));
-      expect(
-        find.text('Release the slider to update the preview.'),
-        findsOneWidget,
-      );
+      // Pending changes only disable confirmation; no hint is inserted.
+      expect(find.byKey(const Key('preview_status')), findsNothing);
       expect(confirm(tester).onPressed, isNull);
       staleConfirm();
       await tester.pump();
@@ -322,10 +323,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(previewBytes(tester), same(previous));
       expect(confirm(tester).onPressed, isNull);
-      expect(
-        find.text('Release the slider to update the preview.'),
-        findsOneWidget,
-      );
+      // Pending changes only disable confirmation; no hint is inserted.
+      expect(find.byKey(const Key('preview_status')), findsNothing);
 
       tester.widget<Slider>(find.byType(Slider).first).onChangeEnd!(35);
       await pumpWork(tester);
