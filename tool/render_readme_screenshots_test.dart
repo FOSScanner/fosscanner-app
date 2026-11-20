@@ -7,8 +7,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
+import 'package:fosscanner/main.dart' show registerBundledLicenses;
 import 'package:fosscanner/services/draft_store.dart';
 import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
@@ -61,6 +63,18 @@ class _PreviewFixture implements CornerAdjustOperations {
     required double brightness,
     required double contrast,
   }) async => bytes;
+}
+
+class _FailedPreviewFixture extends _PreviewFixture {
+  _FailedPreviewFixture(super.bytes);
+
+  @override
+  Future<Uint8List> buildFinalPreview(
+    Uint8List bytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => throw StateError('Synthetic preview failure');
 }
 
 class _UnreadablePhotoFixture extends _PreviewFixture {
@@ -293,6 +307,50 @@ void main() {
     await tester.tap(find.text('Discard saved draft'));
     await tester.pumpAndSettle();
     await save('ui-draft-discard-confirmation');
+    await tester.pumpWidget(const SizedBox());
+    await show(
+      CornerAdjustScreen(
+        originalBytes: bytes,
+        source: PageReviewSource.gallery,
+        isBatchImport: true,
+        batchPosition: 2,
+        batchCount: 5,
+        onStopImport: () {},
+        operations: _PreviewFixture(bytes),
+      ),
+    );
+    await save('ui-batch-review-position');
+    await tester.pumpWidget(const SizedBox());
+    await show(
+      CornerAdjustScreen(
+        originalBytes: bytes,
+        initialCorners: corners,
+        startWithAdjustments: true,
+        operations: _FailedPreviewFixture(bytes),
+      ),
+    );
+    await save('ui-adjustment-preview-failure');
+    await tester.pumpWidget(const SizedBox());
+    registerBundledLicenses();
+    // This flutter_test documentation harness lives outside test/.
+    // ignore: invalid_use_of_visible_for_testing_member
+    PackageInfo.setMockInitialValues(
+      appName: 'FOSScanner',
+      packageName: 'com.fosscanner.app',
+      version: '1.5.2',
+      buildNumber: '10',
+      buildSignature: '',
+    );
+    await show(home(0));
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About FOSScanner'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('View licenses'));
+    await tester.tap(find.text('View licenses'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    await save('ui-open-source-licenses');
     await tester.pumpWidget(const SizedBox());
     tester.view.physicalSize = const Size(600, 220);
     tester.view.padding = const FakeViewPadding(

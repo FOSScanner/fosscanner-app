@@ -31,7 +31,7 @@ class _DocumentCapacityException implements Exception {
   const _DocumentCapacityException();
 }
 
-enum _PhotoIntakeResult { added, skipped, capacityReached }
+enum _PhotoIntakeResult { added, skipped, capacityReached, stopped }
 
 enum _CameraRecovery { retry, gallery }
 
@@ -466,6 +466,22 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 label: const Text('View source code'),
               ),
               const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: () => showLicensePage(
+                  context: dialogContext,
+                  applicationName: 'FOSScanner',
+                  applicationVersion:
+                      '${packageInfo.version} (build ${packageInfo.buildNumber})',
+                  applicationIcon: Image.asset(
+                    'assets/icon/icon.png',
+                    width: 48,
+                    height: 48,
+                  ),
+                ),
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('View licenses'),
+              ),
+              const SizedBox(height: 4),
               Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
             ],
           ),
@@ -511,13 +527,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           files[index],
           source: PageReviewSource.recovered,
           isBatchImport: files.length > 1,
+          batchPosition: index + 1,
+          batchCount: files.length,
           deleteAfterRead: true,
           documentGeneration: documentGeneration,
         );
-        if (result == _PhotoIntakeResult.capacityReached) {
+        if (result == _PhotoIntakeResult.capacityReached ||
+            result == _PhotoIntakeResult.stopped) {
+          // Recovered files are app-owned copies, so the rest of a stopped or
+          // full batch is deleted rather than left in the cache.
           for (final remaining in files.skip(index + 1)) {
             await _deleteFileQuietly(remaining.path);
           }
+          if (result == _PhotoIntakeResult.stopped) _showImportStopped();
           break;
         }
       }
@@ -649,7 +671,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         maxHeight: maxPickerEdge,
         limit: maxDocumentPages - _pages.length,
       );
-      for (final photo in photos) {
+      for (var index = 0; index < photos.length; index++) {
+        final photo = photos[index];
         if (_isClearingDraft) break;
         if (!_canStartImagePick) {
           _showDocumentLimit();
@@ -662,9 +685,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           photo,
           source: PageReviewSource.gallery,
           isBatchImport: photos.length > 1,
+          batchPosition: index + 1,
+          batchCount: photos.length,
           deleteAfterRead: false,
           documentGeneration: documentGeneration,
         );
+        if (result == _PhotoIntakeResult.stopped) {
+          _showImportStopped();
+          break;
+        }
         if (result == _PhotoIntakeResult.capacityReached) break;
       }
     } catch (_) {
@@ -674,16 +703,30 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  void _showImportStopped() {
+    if (!mounted) return;
+    _showMessage(
+      'Import stopped. Pages already added were kept; the remaining images '
+      'were not added.',
+    );
+  }
+
   CornerAdjustScreen _buildEditor(
     Uint8List originalBytes, {
     ScannedPage? page,
     PageReviewSource? source,
     bool isBatchImport = false,
+    int? batchPosition,
+    int? batchCount,
+    VoidCallback? onStopImport,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
       source: source,
       isBatchImport: isBatchImport,
+      batchPosition: batchPosition,
+      batchCount: batchCount,
+      onStopImport: onStopImport,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
       initialFilter: page?.filter ?? PageFilter.original,
@@ -702,6 +745,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     XFile photo, {
     required PageReviewSource source,
     bool isBatchImport = false,
+    int? batchPosition,
+    int? batchCount,
     required bool deleteAfterRead,
     required int documentGeneration,
   }) async {
@@ -794,12 +839,20 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
+    var stopRequested = false;
     final result = await Navigator.of(context).push<ScannedPage>(
       MaterialPageRoute(
-        builder: (_) =>
-            _buildEditor(bytes, source: source, isBatchImport: isBatchImport),
+        builder: (_) => _buildEditor(
+          bytes,
+          source: source,
+          isBatchImport: isBatchImport,
+          batchPosition: batchPosition,
+          batchCount: batchCount,
+          onStopImport: () => stopRequested = true,
+        ),
       ),
     );
+    if (stopRequested) return _PhotoIntakeResult.stopped;
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
@@ -1287,10 +1340,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Searchable text'),
-                  subtitle: Text(
-                    _useOcr
-                        ? 'Recognize text so you can search and select it in the PDF.'
-                        : 'Image-only PDF without text recognition.',
+                  subtitle: const Text(
+                    'Recognize text so you can search and select it in the PDF.',
                   ),
                   value: _useOcr,
                   onChanged: (value) {

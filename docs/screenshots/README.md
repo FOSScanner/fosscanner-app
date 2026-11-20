@@ -11,6 +11,9 @@ quality.
 | `ui-home-pages.png` | Three-page document and compact export bar |
 | `ui-home-pages-dark.png` | The same document in the dark theme |
 | `ui-reorder-pages.png` | Visible earlier/later actions in a page's reorder menu |
+| `ui-batch-review-position.png` | Batch position and explicit Stop importing action |
+| `ui-adjustment-preview-failure.png` | Preview error/retry painted inside the preview without moving controls |
+| `ui-open-source-licenses.png` | Registered bundled OCR and package licenses, opened from About |
 | `ui-export-options.png` | Android searchable-text export options |
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
 | `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |

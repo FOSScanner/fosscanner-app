@@ -154,13 +154,24 @@ void main() {
       final preview = find.byKey(const Key('adjusted_page_preview'));
       expect(tester.getSize(preview).width, greaterThanOrEqualTo(280));
       expect(tester.getSize(preview).height, greaterThanOrEqualTo(240));
-      await expectStableRects(tester, [preview], () async {
-        final slider = tester.widget<Slider>(find.byType(Slider).first);
+      final anchors = [
+        preview,
+        find.byType(Slider).first,
+        find.byType(Slider).last,
+        find.widgetWithText(TextButton, 'Reset adjustments'),
+        find.widgetWithText(FilledButton, 'Save changes'),
+      ];
+      final slider = tester.widget<Slider>(find.byType(Slider).first);
+      await expectStableRects(tester, anchors, () async {
         slider.onChanged!(25);
         await capture(tester, 'filter_pending_wide');
+      });
+      await expectStableRects(tester, anchors, () async {
         operations.previewState = PreviewFixtureState.updating;
         slider.onChangeEnd!(25);
         await capture(tester, 'filter_updating_wide');
+      });
+      await expectStableRects(tester, anchors, () async {
         operations.pending.completeError(
           StateError('Synthetic preview failure'),
         );

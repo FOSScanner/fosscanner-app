@@ -1120,7 +1120,7 @@ void main() {
         isFalse,
       );
       expect(
-        find.text('Image-only PDF without text recognition.'),
+        find.text('Recognize text so you can search and select it in the PDF.'),
         findsOneWidget,
       );
       await tester.tap(find.text('Done'));
