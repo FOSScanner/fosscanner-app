@@ -86,7 +86,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Edit page'), findsOneWidget);
-    expect(find.text('Adjust appearance'), findsNothing);
+    expect(find.text('Appearance'), findsNothing);
     expect(find.textContaining('Could not preview this crop'), findsOneWidget);
   });
 

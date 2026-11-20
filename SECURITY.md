@@ -29,6 +29,8 @@ are excluded from Android OS backup.
 - Anything that would expose app-private automatic draft files, retain them
   after an explicit clear, or cause photos/generated PDFs to be persisted or
   leaked outside the retention behavior documented in the README
+- Document content appearing in the Android Recents thumbnail on Android 13
+  or later, where the app disables it
 
 Dependency vulnerabilities are also welcome as reports, though Dependabot
 already opens PRs for those automatically where a fix is available.
