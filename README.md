@@ -26,22 +26,38 @@ No account, no cloud processing, no tracking.
 ## A simple scanning workflow
 
 1. **Add pages** with the camera button or import photos from your gallery.
+   On Android you can also **share** one or more images to FOSScanner from
+   Gallery, Files or a messenger; they are reviewed one by one and appended to
+   the current draft.
 2. **Check the crop.** Drag the corners to the page edges. If detection fails,
    the full image is selected rather than trimmed.
 3. **Preview and adjust.** Choose **Preview page**, then tap the **Filters** icon
    to open filter choices, rotate, or adjust brightness and contrast. **Reset adjustments** restores
    neutral brightness/contrast without changing your crop, filter, or rotation.
-4. **Build your document.** Choose **Add page**, then scan more pages. Tap a
+4. **Build your document.** Choose **Add page**, then scan more pages. After a
+   camera capture, **Add & scan next** adds the page and reopens the camera
+   right away; **Add page** (or canceling the camera) ends the series with every
+   accepted page kept. On the crop step, **Retake** discards a bad shot and
+   reopens the camera. Tap a
    page to zoom in and choose Edit to change its appearance. Use the editor’s
    back arrow to revisit the crop; back again leaves the editor without saving.
    Save an edit with **Save changes**.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
-   On Android, **PDF export options** lets you turn searchable text on or off.
+   On Android, **Save PDF to device** (next to Export) opens the system file
+   picker so you can store the PDF directly, even without Google apps. PDFs are
+   named like `Scan 2026-11-19 14-05.pdf` (` (searchable)` with text
+   recognition); you can rename them in the picker.
+   **PDF export options** sets the page size (Original, A4 or Letter) and
+   quality (High, Balanced or Small); on Android it also turns searchable text
+   on or off. Your choices are remembered.
 
 Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
-**Move later**, or long-press and drag pages to reorder them. Deleting a page
+**Move later**, or long-press and drag pages to reorder them. The page grid
+adds columns on tablets and in landscape. Deleting a page
 offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
-current photo; remaining images are still reviewed. Canceling an unsaved
+current photo; remaining images are still reviewed. The review title shows
+the position (for example *Image 2 of 5*), and **Stop importing** (or Back)
+ends the batch while keeping pages already added. Canceling an unsaved
 capture or single-image review adds no page.
 
 ## Screenshots
@@ -69,19 +85,31 @@ They are not camera captures or demonstrations of OCR/filter quality.
 | Capability | Android | iOS |
 |---|---|---|
 | Camera capture and gallery import | Yes | Yes |
+| Receive images shared from other apps | Yes | Not yet — needs a Share Extension |
 | Edge detection, manual crop, perspective correction | Yes | Yes |
 | Original, Enhance, Grayscale, Black & white filters | Yes | Yes |
 | Rotation, brightness, contrast, and later re-editing | Yes | Yes |
 | Multi-page PDF export through the system share sheet | Yes | Yes |
+| Save the PDF to device storage | Yes — system file picker | Via the share sheet's "Save to Files" |
 | Offline searchable PDFs with selectable text | Yes — Latin-script OCR | Image-only PDFs |
 | Temporary draft restoration after app restart | Yes | Yes |
 | QR/barcode scanning and full-result inspection | Yes | Yes |
 | System light/dark theme | Yes | Yes |
 
+**Page size and quality.** *Original* sizes each page from its pixels, as
+before. *A4* and *Letter* fit each page image inside the page, centered, and
+turn the page to landscape for landscape images. *High* keeps full
+resolution; *Balanced* (up to 200 DPI) and *Small* (up to 150 DPI, stronger
+JPEG compression) make much smaller files for email and upload limits. On
+*Original* pages the DPI limit is measured against an A4-sized page. The
+same settings apply to searchable PDFs; lower resolutions can reduce text
+recognition accuracy on fine print. The app does not predict the file size.
+
 Perspective correction and filters use OpenCV. Searchable PDFs use bundled,
 offline Tesseract data. On Android, searchable text is off by default; enable it
-in **PDF export options**. Your choice stays in effect while the home screen
-remains open. Recognition
+in **PDF export options**. The app remembers your choice in a small private
+settings file, and the export button reads **Export searchable PDF** while it
+is on. Recognition
 quality depends on the document, language, lighting, and image quality.
 
 The editor keeps the last successful preview visible while processing a new
@@ -119,6 +147,18 @@ FOSScanner has no login, telemetry, analytics, or scan-upload service. Imported
 gallery originals are not modified or deleted. App-owned camera temporary files
 are cleaned up after the attempt to read them, including failed reads.
 
+On Android 13 and later, the app's thumbnail in the Recents screen is blank so
+page content is not shown when you switch apps; screenshots still work. Android
+12 and earlier have no way to hide only the thumbnail, so it may show the
+current screen there.
+
+Images shared into the app are read only through the temporary permission that
+comes with the share; FOSScanner keeps no lasting access to them. Each image
+(up to 32 MB, and no more than the document has room for) is copied into the
+app's private cache only when it can be reviewed, and the copy is deleted once
+read. If a saved draft could not be restored, shared images wait until you
+retry or discard it, so they never overwrite it.
+
 ### Drafts are temporary, not a backup
 
 Unfinished documents are saved in the app's private, **OS-managed cache** so they
@@ -140,11 +180,15 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 - Unrelated notifications wait while deletion Undo is available. A new deletion
   replaces the previous Undo; export or confirmed clearing discards it.
 
-### Sharing and external links
+### Sharing, saving and external links
 
 Export opens the OS share sheet; it does not prove that another app saved or
-delivered the PDF. Sharing may leave a PDF copy in an app/OS cache, whose lifetime
-is platform-managed. Receiving apps control their own copies and may upload them.
+delivered the PDF. On Android, **Save PDF to device** writes the PDF to the
+location you pick in the system file picker; it needs no storage permission,
+and canceling the picker changes nothing. FOSScanner writes the PDF to its private cache only for the
+hand-off and deletes it when the share sheet returns; a copy left by an
+interrupted export is removed at the next launch. The share system may keep
+its own copy in an app/OS cache, whose lifetime is platform-managed. Receiving apps control their own copies and may upload them.
 
 FOSScanner does not make its own network requests. Opening a scanned HTTP/HTTPS
 link or the source-code link hands it to an external app, which may use the

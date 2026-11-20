@@ -33,7 +33,8 @@ const _filterLabels = {
 };
 
 /// The original picker source may be unknown after Android activity recovery.
-enum PageReviewSource { camera, gallery, recovered }
+/// [shared] images were sent from another app and copied into app storage.
+enum PageReviewSource { camera, gallery, recovered, shared }
 
 enum _Step { corners, filter }
 
@@ -55,6 +56,11 @@ class CornerAdjustScreen extends StatefulWidget {
     required this.originalBytes,
     this.source,
     this.isBatchImport = false,
+    this.batchPosition,
+    this.batchCount,
+    this.onStopImport,
+    this.onScanNext,
+    this.onRetake,
     this.initialCorners,
     this.startWithAdjustments = false,
     this.initialFilter = PageFilter.original,
@@ -72,6 +78,27 @@ class CornerAdjustScreen extends StatefulWidget {
 
   /// Refers to the original selection, including its final image.
   final bool isBatchImport;
+
+  /// One-based position of this image within a batch import, and the batch
+  /// size. Both are null outside batch review.
+  final int? batchPosition;
+  final int? batchCount;
+
+  /// Called before this route closes when the user stops a batch import.
+  /// The current and remaining images are not added; accepted pages stay.
+  final VoidCallback? onStopImport;
+
+  /// Continuous camera capture. When set for a new camera capture, the
+  /// appearance step offers **Add & scan next** next to **Add page**; this is
+  /// called just before the route pops with the accepted page so the caller
+  /// can relaunch the camera. The route result stays a [ScannedPage], so
+  /// callers that do not opt in are unaffected.
+  final VoidCallback? onScanNext;
+
+  /// When set for a new camera capture, the crop step's **Cancel** becomes
+  /// **Retake**: this is called before the route pops without a page so the
+  /// caller can relaunch the camera. System Back still just leaves.
+  final VoidCallback? onRetake;
   final List<Offset>? initialCorners;
 
   /// Open saved appearance directly; crop remains available.
@@ -93,6 +120,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   bool _showFullImageNotice = false;
   bool _isProcessing = false;
   bool _isLeaving = false;
+  bool _isScanNextRequested = false;
   String? _error;
   late final ImageProcessingQueue _processingQueue;
   int _initializationGeneration = 0;
@@ -339,9 +367,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _previewStatus == _PreviewStatus.ready &&
       _finalPreviewBytes != null;
 
-  Future<void> _confirm() async {
+  Future<void> _confirm({bool scanNext = false}) async {
     final corners = _corners;
     if (corners == null || !_canConfirm) return;
+    if (scanNext && !_canScanNext) return;
     final filter = _selectedFilter;
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
@@ -351,6 +380,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final exportGeneration = ++_exportGeneration;
     setState(() {
       _isProcessing = true;
+      _isScanNextRequested = scanNext;
       _isGeneratingPreviews = false;
     });
     await WidgetsBinding.instance.endOfFrame;
@@ -380,10 +410,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       // Otherwise Navigator.pop would consume the local filter history entry
       // instead of completing this route with the scanned page.
       _filterHistoryEntry?.remove();
-      if (mounted) Navigator.of(context).pop(page);
+      if (!mounted) return;
+      if (scanNext) widget.onScanNext!();
+      Navigator.of(context).pop(page);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _isProcessing = false);
+      setState(() {
+        _isProcessing = false;
+        _isScanNextRequested = false;
+      });
       _showError('Could not process this page. Try another image.');
     }
   }
@@ -396,13 +431,52 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   bool get _isEditingExistingPage => widget.initialCorners != null;
 
+  bool get _isNewCameraCapture =>
+      !_isEditingExistingPage && widget.source == PageReviewSource.camera;
+
+  bool get _canScanNext => _isNewCameraCapture && widget.onScanNext != null;
+
+  bool get _canRetake => _isNewCameraCapture && widget.onRetake != null;
+
   bool get _canSkipImage =>
       !_isEditingExistingPage &&
       widget.isBatchImport &&
       (widget.source == PageReviewSource.gallery ||
-          widget.source == PageReviewSource.recovered);
+          widget.source == PageReviewSource.recovered ||
+          widget.source == PageReviewSource.shared);
 
-  void _cancelReview() {
+  bool get _hasBatchProgress =>
+      _canSkipImage &&
+      widget.batchPosition != null &&
+      widget.batchCount != null;
+
+  /// Stop importing is laid out on every batch image so the app bar does not
+  /// change between images; it is only enabled while images remain.
+  bool get _offersStopImport =>
+      _hasBatchProgress && widget.onStopImport != null;
+
+  bool get _canStopImport =>
+      _offersStopImport && widget.batchPosition! < widget.batchCount!;
+
+  void _stopImport() {
+    if (!_canStopImport ||
+        !mounted ||
+        _isLeaving ||
+        _isProcessing ||
+        _step != _Step.corners ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    widget.onStopImport!();
+    setState(() => _isLeaving = true);
+    Navigator.of(context).pop();
+  }
+
+  void _cancelReview() => _leaveReview(retake: false);
+
+  void _retake() => _leaveReview(retake: true);
+
+  void _leaveReview({required bool retake}) {
     if (!mounted ||
         _isLeaving ||
         _isProcessing ||
@@ -412,6 +486,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
     // The caller advances an import after this route returns. Ignore stale
     // taps during the reverse transition rather than popping another route.
+    if (retake) widget.onRetake!();
     setState(() => _isLeaving = true);
     Navigator.of(context).pop();
   }
@@ -425,12 +500,37 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return PopScope(
       canPop: !_isProcessing,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) _isLeaving = true;
+        if (!didPop) return;
+        // Back during batch review leaves the import instead of silently
+        // skipping to the next image; Skip image remains the explicit skip.
+        if (!_isLeaving &&
+            result == null &&
+            _step == _Step.corners &&
+            _canStopImport) {
+          widget.onStopImport!();
+        }
+        _isLeaving = true;
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_appBarTitle),
+          title: _showsBatchProgressTitle
+              // Scale down rather than ellipsize so the position stays
+              // readable beside Stop importing at large text sizes.
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(_appBarTitle, key: const Key('batch_progress')),
+                )
+              : Text(_appBarTitle),
           actions: [
+            if (_step == _Step.corners && _offersStopImport)
+              IconButton(
+                icon: const Icon(Icons.stop_circle_outlined),
+                tooltip: 'Stop importing',
+                onPressed: !_canStopImport || _isLeaving || _isProcessing
+                    ? null
+                    : _stopImport,
+              ),
             if (_step == _Step.filter) ...[
               IconButton(
                 icon: const Icon(Icons.filter_alt_outlined),
@@ -458,8 +558,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  bool get _showsBatchProgressTitle =>
+      _step == _Step.corners && _hasBatchProgress;
+
   String get _appBarTitle {
     if (_step == _Step.filter) return 'Adjust appearance';
+    if (_showsBatchProgressTitle) {
+      return 'Image ${widget.batchPosition} of ${widget.batchCount}';
+    }
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
@@ -513,8 +619,16 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                   child: OutlinedButton(
                     onPressed: _isLeaving || _isProcessing
                         ? null
+                        : _canRetake
+                        ? _retake
                         : _cancelReview,
-                    child: Text(_canSkipImage ? 'Skip image' : 'Cancel'),
+                    child: Text(
+                      _canSkipImage
+                          ? 'Skip image'
+                          : _canRetake
+                          ? 'Retake'
+                          : 'Cancel',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -837,16 +951,45 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   Widget _filterActions() {
-    final confirm = FilledButton(
-      onPressed: _canConfirm ? _confirm : null,
-      child: _isProcessing
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Text(_isEditingExistingPage ? 'Save changes' : 'Add page'),
-    );
+    Widget label(String text, {required bool busy}) => busy
+        ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : Text(text, textAlign: TextAlign.center);
+    final List<Widget> buttons;
+    if (_canScanNext) {
+      // Stacked full-width buttons keep both labels readable at large text
+      // sizes on narrow phones, and a progress indicator never changes widths.
+      buttons = [
+        FilledButton(
+          onPressed: _canConfirm ? () => _confirm(scanNext: true) : null,
+          child: label(
+            'Add & scan next',
+            busy: _isProcessing && _isScanNextRequested,
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: label(
+            'Add page',
+            busy: _isProcessing && !_isScanNextRequested,
+          ),
+        ),
+      ];
+    } else {
+      buttons = [
+        FilledButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: label(
+            _isEditingExistingPage ? 'Save changes' : 'Add page',
+            busy: _isProcessing,
+          ),
+        ),
+      ];
+    }
     return SafeArea(
       top: false,
       child: Padding(
@@ -856,7 +999,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_previewStatus != _PreviewStatus.ready) _previewFeedback(),
-            confirm,
+            ...buttons,
           ],
         ),
       ),
