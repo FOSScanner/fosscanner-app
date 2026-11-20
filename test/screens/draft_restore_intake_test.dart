@@ -162,13 +162,13 @@ void main() {
         await tester.tap(find.byTooltip(tooltip));
         await tester.pump();
         expect(picker.cameraCalls + picker.galleryCalls, 0);
-        expect(find.text('Restoring draft...'), findsOneWidget);
+        expect(find.text('Restoring draft…'), findsOneWidget);
         expect(find.textContaining('Document memory limit'), findsNothing);
 
         store.loaded.complete([savedPage()]);
         await tester.pumpAndSettle();
         expect(find.text('Export PDF (1 page)'), findsOneWidget);
-        expect(find.text('Restoring draft...'), findsNothing);
+        expect(find.text('Restoring draft…'), findsNothing);
         await tester.tap(find.byTooltip(tooltip));
         await tester.pumpAndSettle();
         expect(picker.cameraCalls + picker.galleryCalls, 1);
@@ -339,7 +339,7 @@ void main() {
       await tester.tap(find.text('Discard draft'));
       await tester.pumpAndSettle();
       expect(store.clearCalls, 2);
-      expect(find.text('Ready to Scan'), findsOneWidget);
+      expect(find.text('Ready to scan'), findsOneWidget);
       expect(find.byTooltip('Import from gallery'), findsOneWidget);
     },
   );
@@ -422,7 +422,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(store.loadCalls, 0);
-      expect(find.text('Restoring draft...'), findsNothing);
+      expect(find.text('Restoring draft…'), findsNothing);
       expect(picker.galleryCalls, 1);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),

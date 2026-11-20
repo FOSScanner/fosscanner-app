@@ -245,7 +245,10 @@ class _CornerOverlayState extends State<CornerOverlay> {
                 ),
                 Positioned.fill(
                   child: CustomPaint(
-                    painter: _QuadPainter(displayCorners, context),
+                    painter: _QuadPainter(
+                      displayCorners,
+                      Theme.of(context).colorScheme.primary,
+                    ),
                   ),
                 ),
                 for (var i = 0; i < 4; i++)
@@ -420,14 +423,13 @@ class _CornerOverlayState extends State<CornerOverlay> {
 }
 
 class _QuadPainter extends CustomPainter {
-  _QuadPainter(this.corners, this.context);
+  _QuadPainter(this.corners, this.primary);
 
   final List<Offset> corners;
-  final BuildContext context;
+  final Color primary;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final primary = Theme.of(context).colorScheme.primary;
     final path = Path()..addPolygon(corners, true);
     canvas.drawPath(path, Paint()..color = primary.withValues(alpha: 0.2));
     canvas.drawPath(
@@ -440,5 +442,7 @@ class _QuadPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _QuadPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _QuadPainter oldDelegate) =>
+      oldDelegate.primary != primary ||
+      !listEquals(oldDelegate.corners, corners);
 }

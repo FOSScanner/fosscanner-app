@@ -1,12 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show Uint8List, defaultTargetPlatform, TargetPlatform;
+    show Uint8List, compute, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart'
     show MethodCall, MethodChannel, PlatformException;
 import 'package:path_provider/path_provider.dart';
 
 import 'image_metadata.dart';
+import 'pdf_export_options.dart';
 
 // Android's Tesseract renderer preserves page images and adds selectable text.
 const _channel = MethodChannel('com.fosscanner.app/ocr');
@@ -54,9 +55,19 @@ void _checkCancellation() {
 
 // Renders a multi-page searchable PDF (each page's image with an invisible,
 // selectable OCR text layer, in the given order) using libtesseract's own
-// native PDF renderer. Returns the finished PDF's bytes.
-Future<Uint8List> createSearchablePdf(
+// native PDF renderer, and moves the finished file to [outputPath]. The PDF is
+// never read into the Dart heap. Whenever this throws, no file is left at
+// [outputPath].
+//
+// [pageSize] and [quality] are applied before OCR: each page is resampled,
+// and for A4/Letter centered on a white page-shaped canvas, on a worker, and
+// its density is sent along because Tesseract sizes pages as pixels / DPI.
+// Original/High sends the pages untouched at the historical 150 DPI.
+Future<void> createSearchablePdf(
   List<Uint8List> pageImages, {
+  required String outputPath,
+  PdfPageSize pageSize = PdfPageSize.original,
+  PdfQuality quality = PdfQuality.high,
   void Function(int completed, int total)? onProgress,
 }) async {
   if (!isSupported) {
@@ -82,8 +93,9 @@ Future<Uint8List> createSearchablePdf(
   _progressCallback = onProgress;
   _channel.setMethodCallHandler(_handleNativeCall);
   Directory? jobDirectory;
+  final output = File(outputPath);
+  var moved = false;
   try {
-    late Uint8List pdfBytes;
     try {
       await _ensureTessdata();
       _checkCancellation();
@@ -91,12 +103,29 @@ Future<Uint8List> createSearchablePdf(
       _checkCancellation();
       jobDirectory = await tempDir.createTemp('fosscanner_ocr_');
       _checkCancellation();
+      final keepsOriginal =
+          pageSize == PdfPageSize.original && quality == PdfQuality.high;
       final imageFiles = <File>[];
+      final pageDpis = <int>[];
       for (var i = 0; i < images.length; i++) {
+        var bytes = images[i];
+        var dpi = originalPageDpi.round();
+        if (!keepsOriginal) {
+          final prepared = await compute(preparePdfPage, (
+            bytes: bytes,
+            pageSize: pageSize,
+            quality: quality,
+            padToPage: true,
+          ));
+          _checkCancellation();
+          bytes = prepared.bytes;
+          dpi = prepared.plan.nativeDpi;
+        }
         final file = File('${jobDirectory.path}/page_$i.jpg');
-        await file.writeAsBytes(images[i]);
+        await file.writeAsBytes(bytes);
         _checkCancellation();
         imageFiles.add(file);
+        pageDpis.add(dpi);
       }
       final outputPathNoExtension = '${jobDirectory.path}/document';
       final pdfFile = File('$outputPathNoExtension.pdf');
@@ -106,6 +135,7 @@ Future<Uint8List> createSearchablePdf(
         pdfPath = await _channel.invokeMethod<String>('createSearchablePdf', {
           'imagePaths': [for (final file in imageFiles) file.path],
           'outputPath': outputPathNoExtension,
+          'pageDpis': pageDpis,
         });
       } finally {
         _nativeRendering = false;
@@ -121,10 +151,8 @@ Future<Uint8List> createSearchablePdf(
       if (length == 0 || length > maxRetainedDocumentBytes) {
         throw StateError('Searchable PDF exceeds the supported output size');
       }
-      pdfBytes = await readBoundedBytes(
-        pdfFile.openRead(),
-        maxBytes: maxRetainedDocumentBytes,
-      );
+      await _move(pdfFile, output);
+      moved = true;
     } finally {
       // Includes partially written inputs and PDFs even when native rendering
       // fails before it returns a path. Native resources are already closed.
@@ -135,8 +163,8 @@ Future<Uint8List> createSearchablePdf(
       }
     }
     _checkCancellation();
-    return pdfBytes;
   } catch (_) {
+    if (moved) await _deleteQuietly(output);
     // Cancellation wins over a late preparation/rendering failure, so the UI
     // does not offer a fallback for an export the user already cancelled.
     _checkCancellation();
@@ -146,5 +174,28 @@ Future<Uint8List> createSearchablePdf(
     _cancellationRequested = false;
     _progressCallback = null;
     _channel.setMethodCallHandler(null);
+  }
+}
+
+// Both paths are in the app cache, so this is normally a rename. The copy only
+// covers a platform that splits the cache across file systems.
+Future<void> _move(File source, File destination) async {
+  try {
+    await source.rename(destination.path);
+  } on FileSystemException {
+    try {
+      await source.copy(destination.path);
+    } catch (_) {
+      await _deleteQuietly(destination);
+      rethrow;
+    }
+  }
+}
+
+Future<void> _deleteQuietly(File file) async {
+  try {
+    await file.delete();
+  } on FileSystemException {
+    // Already gone, or left for the caller's directory cleanup.
   }
 }

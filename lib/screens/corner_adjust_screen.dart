@@ -33,7 +33,8 @@ const _filterLabels = {
 };
 
 /// The original picker source may be unknown after Android activity recovery.
-enum PageReviewSource { camera, gallery, recovered }
+/// [shared] images were sent from another app and copied into app storage.
+enum PageReviewSource { camera, gallery, recovered, shared }
 
 enum _Step { corners, filter }
 
@@ -55,6 +56,11 @@ class CornerAdjustScreen extends StatefulWidget {
     required this.originalBytes,
     this.source,
     this.isBatchImport = false,
+    this.batchPosition,
+    this.batchCount,
+    this.onStopImport,
+    this.onScanNext,
+    this.onRetake,
     this.initialCorners,
     this.startWithAdjustments = false,
     this.initialFilter = PageFilter.original,
@@ -72,6 +78,27 @@ class CornerAdjustScreen extends StatefulWidget {
 
   /// Refers to the original selection, including its final image.
   final bool isBatchImport;
+
+  /// One-based position of this image within a batch import, and the batch
+  /// size. Both are null outside batch review.
+  final int? batchPosition;
+  final int? batchCount;
+
+  /// Called before this route closes when the user stops a batch import.
+  /// The current and remaining images are not added; accepted pages stay.
+  final VoidCallback? onStopImport;
+
+  /// Continuous camera capture. When set for a new camera capture, the
+  /// appearance step offers **Add & scan next** next to **Add page**; this is
+  /// called just before the route pops with the accepted page so the caller
+  /// can relaunch the camera. The route result stays a [ScannedPage], so
+  /// callers that do not opt in are unaffected.
+  final VoidCallback? onScanNext;
+
+  /// When set for a new camera capture, the crop step's **Cancel** becomes
+  /// **Retake**: this is called before the route pops without a page so the
+  /// caller can relaunch the camera. System Back still just leaves.
+  final VoidCallback? onRetake;
   final List<Offset>? initialCorners;
 
   /// Open saved appearance directly; crop remains available.
@@ -91,8 +118,11 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
   bool _showFullImageNotice = false;
+  // Kept in the tree while the notice fades out after the first adjustment.
+  bool _fullImageNoticeMounted = false;
   bool _isProcessing = false;
   bool _isLeaving = false;
+  bool _isScanNextRequested = false;
   String? _error;
   late final ImageProcessingQueue _processingQueue;
   int _initializationGeneration = 0;
@@ -161,6 +191,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         _imageSize = size;
         _corners = corners;
         _showFullImageNotice = !hasCorners;
+        _fullImageNoticeMounted = !hasCorners;
       });
       if (widget.startWithAdjustments && hasCorners) _enterFilterStep();
       unawaited(_updatePreviews());
@@ -339,9 +370,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _previewStatus == _PreviewStatus.ready &&
       _finalPreviewBytes != null;
 
-  Future<void> _confirm() async {
+  Future<void> _confirm({bool scanNext = false}) async {
     final corners = _corners;
     if (corners == null || !_canConfirm) return;
+    if (scanNext && !_canScanNext) return;
     final filter = _selectedFilter;
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
@@ -351,6 +383,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final exportGeneration = ++_exportGeneration;
     setState(() {
       _isProcessing = true;
+      _isScanNextRequested = scanNext;
       _isGeneratingPreviews = false;
     });
     await WidgetsBinding.instance.endOfFrame;
@@ -380,10 +413,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       // Otherwise Navigator.pop would consume the local filter history entry
       // instead of completing this route with the scanned page.
       _filterHistoryEntry?.remove();
-      if (mounted) Navigator.of(context).pop(page);
+      if (!mounted) return;
+      if (scanNext) widget.onScanNext!();
+      Navigator.of(context).pop(page);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _isProcessing = false);
+      setState(() {
+        _isProcessing = false;
+        _isScanNextRequested = false;
+      });
       _showError('Could not process this page. Try another image.');
     }
   }
@@ -396,13 +434,52 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   bool get _isEditingExistingPage => widget.initialCorners != null;
 
+  bool get _isNewCameraCapture =>
+      !_isEditingExistingPage && widget.source == PageReviewSource.camera;
+
+  bool get _canScanNext => _isNewCameraCapture && widget.onScanNext != null;
+
+  bool get _canRetake => _isNewCameraCapture && widget.onRetake != null;
+
   bool get _canSkipImage =>
       !_isEditingExistingPage &&
       widget.isBatchImport &&
       (widget.source == PageReviewSource.gallery ||
-          widget.source == PageReviewSource.recovered);
+          widget.source == PageReviewSource.recovered ||
+          widget.source == PageReviewSource.shared);
 
-  void _cancelReview() {
+  bool get _hasBatchProgress =>
+      _canSkipImage &&
+      widget.batchPosition != null &&
+      widget.batchCount != null;
+
+  /// Stop importing is laid out on every batch image so the app bar never
+  /// changes between images; it is only enabled while images remain.
+  bool get _offersStopImport =>
+      _hasBatchProgress && widget.onStopImport != null;
+
+  bool get _canStopImport =>
+      _offersStopImport && widget.batchPosition! < widget.batchCount!;
+
+  void _stopImport() {
+    if (!_canStopImport ||
+        !mounted ||
+        _isLeaving ||
+        _isProcessing ||
+        _step != _Step.corners ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    widget.onStopImport!();
+    setState(() => _isLeaving = true);
+    Navigator.of(context).pop();
+  }
+
+  void _cancelReview() => _leaveReview(retake: false);
+
+  void _retake() => _leaveReview(retake: true);
+
+  void _leaveReview({required bool retake}) {
     if (!mounted ||
         _isLeaving ||
         _isProcessing ||
@@ -412,6 +489,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
     // The caller advances an import after this route returns. Ignore stale
     // taps during the reverse transition rather than popping another route.
+    if (retake) widget.onRetake!();
     setState(() => _isLeaving = true);
     Navigator.of(context).pop();
   }
@@ -425,17 +503,47 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     return PopScope(
       canPop: !_isProcessing,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) _isLeaving = true;
+        if (!didPop) return;
+        // Back during batch review leaves the import instead of silently
+        // skipping to the next image; Skip image remains the explicit skip.
+        if (!_isLeaving &&
+            result == null &&
+            _step == _Step.corners &&
+            _canStopImport) {
+          widget.onStopImport!();
+        }
+        _isLeaving = true;
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_appBarTitle),
+          title: _showsBatchProgressTitle
+              // Scale down rather than ellipsize so the position stays
+              // readable beside Stop importing at large text sizes.
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(_appBarTitle, key: const Key('batch_progress')),
+                )
+              : Text(_appBarTitle),
           actions: [
+            if (_step == _Step.corners && _offersStopImport)
+              IconButton(
+                icon: const Icon(Icons.stop_circle_outlined),
+                tooltip: 'Stop importing',
+                onPressed: !_canStopImport || _isLeaving || _isProcessing
+                    ? null
+                    : _stopImport,
+              ),
             if (_step == _Step.filter) ...[
               IconButton(
                 icon: const Icon(Icons.filter_alt_outlined),
                 tooltip: 'Filters',
                 onPressed: _isProcessing ? null : _showFilters,
+              ),
+              IconButton(
+                icon: const Icon(Icons.tune),
+                tooltip: 'Adjust',
+                onPressed: _isProcessing ? null : _showAdjustments,
               ),
               IconButton(
                 icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
@@ -458,8 +566,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  bool get _showsBatchProgressTitle =>
+      _step == _Step.corners && _hasBatchProgress;
+
   String get _appBarTitle {
-    if (_step == _Step.filter) return 'Adjust appearance';
+    if (_step == _Step.filter) return 'Appearance';
+    if (_showsBatchProgressTitle) {
+      return 'Image ${widget.batchPosition} of ${widget.batchCount}';
+    }
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
@@ -470,74 +584,60 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   ) {
     final preview = Padding(
       padding: const EdgeInsets.all(8),
-      child: CornerOverlay(
-        imageBytes: widget.originalBytes,
-        imageSize: imageSize,
-        corners: corners,
-        onChanged: _setCrop,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CornerOverlay(
+              imageBytes: widget.originalBytes,
+              imageSize: imageSize,
+              corners: corners,
+              onChanged: _setCrop,
+            ),
+          ),
+          if (_fullImageNoticeMounted) _fullImageNotice(context),
+        ],
       ),
     );
-    final actions = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_showFullImageNotice)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: Text(
-                'No page edges detected. Full image selected.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
+    final actions = SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _isLeaving || _isProcessing
+                    ? null
+                    : _canRetake
+                    ? _retake
+                    : _cancelReview,
+                child: Text(
+                  _canSkipImage
+                      ? 'Skip image'
+                      : _canRetake
+                      ? 'Retake'
+                      : 'Cancel',
+                ),
               ),
             ),
-          ),
-        if (_canSkipImage)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: const Text(
-                'Skip this image only. Any remaining images will still be reviewed.',
+            const SizedBox(width: 16),
+            Expanded(
+              child: FilledButton(
+                onPressed: _isGeneratingPreviews || _isLeaving || _isProcessing
+                    ? null
+                    : _goToFilterStep,
+                child: _isGeneratingPreviews
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Preview page'),
               ),
             ),
-          ),
-
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isLeaving || _isProcessing
-                        ? null
-                        : _cancelReview,
-                    child: Text(_canSkipImage ? 'Skip image' : 'Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: FilledButton(
-                    onPressed:
-                        _isGeneratingPreviews || _isLeaving || _isProcessing
-                        ? null
-                        : _goToFilterStep,
-                    child: _isGeneratingPreviews
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Preview page'),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -574,6 +674,52 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  /// Overlaid on the canvas (never in the column) so the canvas keeps its
+  /// size when the notice fades after the first adjustment. Inset
+  /// horizontally to stay clear of the top corner handles, and ignores
+  /// pointers so a drag that starts beneath it still reaches the canvas.
+  Widget _fullImageNotice(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Positioned(
+      top: 8,
+      left: 56,
+      right: 56,
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: _showFullImageNotice ? 1 : 0,
+          duration: const Duration(milliseconds: 200),
+          onEnd: () {
+            if (mounted && !_showFullImageNotice) {
+              setState(() => _fullImageNoticeMounted = false);
+            }
+          },
+          child: Center(
+            child: Material(
+              key: const Key('full_image_notice'),
+              color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
+              elevation: 1,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    'No page edges detected. Full image selected.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _setCrop(List<Offset> corners) {
     setState(() {
       _corners = corners;
@@ -582,20 +728,22 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     unawaited(_updatePreviews());
   }
 
-  Widget _resetAdjustmentsButton() => TextButton(
-    onPressed: _isProcessing
-        ? null
-        : () {
-            setState(() {
-              _brightness = 0;
-              _contrast = 1;
-              _finalPreviewGeneration++;
-              _previewStatus = _PreviewStatus.pending;
-            });
-            unawaited(_updateFinalPreview());
-          },
-    child: const Text('Reset adjustments'),
-  );
+  Widget _resetAdjustmentsButton({required VoidCallback onSheetChanged}) =>
+      TextButton(
+        onPressed: _isProcessing
+            ? null
+            : () {
+                setState(() {
+                  _brightness = 0;
+                  _contrast = 1;
+                  _finalPreviewGeneration++;
+                  _previewStatus = _PreviewStatus.pending;
+                });
+                onSheetChanged();
+                unawaited(_updateFinalPreview());
+              },
+        child: const Text('Reset adjustments'),
+      );
 
   Widget _boundedPreviewImage(
     Uint8List bytes, {
@@ -615,28 +763,14 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final previewBytes = _finalPreviewBytes;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useScrollableLayout =
-            constraints.maxHeight < 480 ||
-            MediaQuery.textScalerOf(context).scale(16) > 20;
-        if (!useScrollableLayout) {
+        // Filters and brightness/contrast open on demand, so only the
+        // confirm buttons share the screen with the preview. Large text
+        // scales those buttons, which the fixed layout absorbs; only very
+        // short viewports need to scroll.
+        if (constraints.maxHeight >= 480) {
           return Column(
             children: [
               Expanded(child: _filterPreview(previewBytes)),
-              _adjustmentSlider(
-                label: 'Brightness',
-                value: _brightness,
-                min: -100,
-                max: 100,
-                onChanged: (value) => _brightness = value,
-              ),
-              _adjustmentSlider(
-                label: 'Contrast',
-                value: _contrast,
-                min: 0.5,
-                max: 2.0,
-                onChanged: (value) => _contrast = value,
-              ),
-              _resetAdjustmentsButton(),
               _filterActions(),
             ],
           );
@@ -654,21 +788,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 height: previewHeight,
                 child: _filterPreview(previewBytes),
               ),
-              _adjustmentSlider(
-                label: 'Brightness',
-                value: _brightness,
-                min: -100,
-                max: 100,
-                onChanged: (value) => _brightness = value,
-              ),
-              _adjustmentSlider(
-                label: 'Contrast',
-                value: _contrast,
-                min: 0.5,
-                max: 2.0,
-                onChanged: (value) => _contrast = value,
-              ),
-              _resetAdjustmentsButton(),
               _filterActions(),
             ],
           ),
@@ -677,6 +796,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  // Preview status is layered over the preview instead of being inserted
+  // into the column, so the preview, adjustment controls and confirm buttons
+  // never move or resize while a preview is pending, updating or failed.
   Widget _filterPreview(Uint8List? previewBytes) => Padding(
     key: const Key('adjusted_page_preview'),
     padding: const EdgeInsets.all(16),
@@ -689,15 +811,85 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             fit: BoxFit.contain,
             maxDimension: _fullPreviewDecodeSize,
           ),
-        if (previewBytes == null)
-          Center(
-            child: _previewStatus == _PreviewStatus.updating
-                ? const CircularProgressIndicator()
-                : const Icon(Icons.image_not_supported_outlined, size: 48),
-          ),
+        Positioned.fill(child: _previewStatusOverlay(previewBytes != null)),
       ],
     ),
   );
+
+  String? _previewStatusMessage({required bool hasPreview}) =>
+      switch (_previewStatus) {
+        _PreviewStatus.pending || _PreviewStatus.ready => null,
+        _PreviewStatus.updating => 'Updating preview…',
+        _PreviewStatus.failed =>
+          hasPreview
+              ? 'Preview could not be updated. Previous result shown.'
+              : 'Preview unavailable.',
+      };
+
+  Widget _previewStatusOverlay(bool hasPreview) {
+    final message = _previewStatusMessage(hasPreview: hasPreview);
+    final failed = _previewStatus == _PreviewStatus.failed;
+    final scheme = Theme.of(context).colorScheme;
+    final Widget? pill = message == null
+        ? null
+        : Material(
+            key: const Key('preview_status'),
+            color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
+            elevation: 1,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(message, textAlign: TextAlign.center),
+                  ),
+                  if (failed)
+                    TextButton.icon(
+                      onPressed: _isProcessing ? null : _updateFinalPreview,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry preview'),
+                    ),
+                ],
+              ),
+            ),
+          );
+    final Widget? status = pill == null || failed
+        ? pill
+        : IgnorePointer(child: pill);
+    if (!hasPreview) {
+      // Nothing to protect yet: centre the placeholder with the status under
+      // it. Scrolls (instead of overflowing) in very short previews.
+      return Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_previewStatus == _PreviewStatus.updating)
+                const CircularProgressIndicator()
+              else
+                const Icon(Icons.image_not_supported_outlined, size: 48),
+              if (status != null) ...[const SizedBox(height: 8), status],
+            ],
+          ),
+        ),
+      );
+    }
+    if (status == null) return const SizedBox.shrink();
+    // Top-aligned so it stays visible above the Filters/Adjust sheets.
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(8),
+        child: status,
+      ),
+    );
+  }
 
   Widget _adjustmentSlider({
     required String label,
@@ -705,6 +897,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     required double min,
     required double max,
     required ValueChanged<double> onChanged,
+    required VoidCallback onSheetChanged,
   }) {
     final displayValue = label == 'Brightness'
         ? '${value > 0 ? '+' : ''}${value.round()}'
@@ -734,6 +927,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                           _finalPreviewGeneration++;
                           _previewStatus = _PreviewStatus.pending;
                         });
+                        onSheetChanged();
                       },
                 onChangeEnd: _isProcessing
                     ? null
@@ -805,48 +999,128 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Widget _previewFeedback() {
-    final message = switch (_previewStatus) {
-      _PreviewStatus.pending => 'Release the slider to update the preview.',
-      _PreviewStatus.updating =>
-        _finalPreviewBytes == null
-            ? 'Updating preview...'
-            : 'Updating preview. Previous result shown.',
-      _PreviewStatus.failed =>
-        _finalPreviewBytes == null
-            ? 'Preview unavailable. Retry to review this page.'
-            : 'Preview could not be updated. Previous result shown.',
-      _PreviewStatus.ready => '',
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Semantics(liveRegion: true, child: Text(message)),
-        if (_previewStatus == _PreviewStatus.failed)
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: TextButton.icon(
-              onPressed: _isProcessing ? null : _updateFinalPreview,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry preview'),
+  /// Brightness, contrast and Reset open on demand, like Filters, so the
+  /// preview keeps the screen. Values live in this state, so they persist
+  /// across openings; the preview updates when a slider is released. The
+  /// sheet is its own route, so Back closes it before leaving the step.
+  Future<void> _showAdjustments() async {
+    if (_isProcessing || _isLeaving || _step != _Step.filter) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) {
+          void refreshSheet() => updateSheet(() {});
+          return ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.75,
             ),
-          ),
-        const SizedBox(height: 8),
-      ],
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  0,
+                  16,
+                  0,
+                  16 + MediaQuery.viewPaddingOf(context).bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Adjust',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close adjustments',
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(sheetContext).pop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _adjustmentSlider(
+                      label: 'Brightness',
+                      value: _brightness,
+                      min: -100,
+                      max: 100,
+                      onChanged: (value) => _brightness = value,
+                      onSheetChanged: refreshSheet,
+                    ),
+                    _adjustmentSlider(
+                      label: 'Contrast',
+                      value: _contrast,
+                      min: 0.5,
+                      max: 2.0,
+                      onChanged: (value) => _contrast = value,
+                      onSheetChanged: refreshSheet,
+                    ),
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: _resetAdjustmentsButton(
+                          onSheetChanged: refreshSheet,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
   Widget _filterActions() {
-    final confirm = FilledButton(
-      onPressed: _canConfirm ? _confirm : null,
-      child: _isProcessing
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Text(_isEditingExistingPage ? 'Save changes' : 'Add page'),
-    );
+    Widget label(String text, {required bool busy}) => busy
+        ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : Text(text, textAlign: TextAlign.center);
+    final List<Widget> buttons;
+    if (_canScanNext) {
+      // Stacked full-width buttons keep both labels readable at large text
+      // sizes on narrow phones, and a progress indicator never changes widths.
+      buttons = [
+        FilledButton(
+          onPressed: _canConfirm ? () => _confirm(scanNext: true) : null,
+          child: label(
+            'Add & scan next',
+            busy: _isProcessing && _isScanNextRequested,
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: label(
+            'Add page',
+            busy: _isProcessing && !_isScanNextRequested,
+          ),
+        ),
+      ];
+    } else {
+      buttons = [
+        FilledButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: label(
+            _isEditingExistingPage ? 'Save changes' : 'Add page',
+            busy: _isProcessing,
+          ),
+        ),
+      ];
+    }
     return SafeArea(
       top: false,
       child: Padding(
@@ -854,10 +1128,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_previewStatus != _PreviewStatus.ready) _previewFeedback(),
-            confirm,
-          ],
+          children: [...buttons],
         ),
       ),
     );
