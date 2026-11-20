@@ -25,13 +25,17 @@ import 'corner_adjust_screen.dart';
 import 'page_preview_screen.dart';
 
 const _thumbnailCacheWidth = 512;
+
+/// Page cards never grow wider than this: phones keep two columns, while
+/// tablets and landscape windows get more columns instead of oversized cards.
+const _maxPageCardExtent = 240.0;
 const _sourceCodeUrl = 'https://github.com/FOSScanner/fosscanner-app';
 
 class _DocumentCapacityException implements Exception {
   const _DocumentCapacityException();
 }
 
-enum _PhotoIntakeResult { added, skipped, capacityReached }
+enum _PhotoIntakeResult { added, skipped, capacityReached, stopped }
 
 enum _CameraRecovery { retry, gallery }
 
@@ -93,6 +97,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   bool _isClearingDraft = false;
   bool _isOpeningImageRoute = false;
   late bool _cameraSupported;
+  // Session-only: a new page starts with the filter chosen for the previous
+  // new page, so a multi-page scan needs the filter sheet only once. Edits of
+  // existing pages keep their own filter and do not change this.
+  PageFilter _lastNewPageFilter = PageFilter.original;
 
   @override
   void initState() {
@@ -460,6 +468,23 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 icon: const Icon(Icons.code),
                 label: const Text('View source code'),
               ),
+              TextButton.icon(
+                onPressed: () => showLicensePage(
+                  context: dialogContext,
+                  applicationName: 'FOSScanner',
+                  applicationVersion: packageInfo.version,
+                  applicationIcon: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Image.asset(
+                      'assets/icon/icon.png',
+                      width: 48,
+                      height: 48,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('View licenses'),
+              ),
               const SizedBox(height: 4),
               Text('Licensed under the GNU GPL v3.0', style: mutedStyle),
             ],
@@ -506,13 +531,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           files[index],
           source: PageReviewSource.recovered,
           isBatchImport: files.length > 1,
+          batchPosition: index + 1,
+          batchCount: files.length,
           deleteAfterRead: true,
           documentGeneration: documentGeneration,
         );
-        if (result == _PhotoIntakeResult.capacityReached) {
+        if (result == _PhotoIntakeResult.capacityReached ||
+            result == _PhotoIntakeResult.stopped) {
+          // Recovered files are app-owned copies, so the rest of a stopped or
+          // full batch is deleted rather than left in the cache.
           for (final remaining in files.skip(index + 1)) {
             await _deleteFileQuietly(remaining.path);
           }
+          if (result == _PhotoIntakeResult.stopped) _showImportStopped();
           break;
         }
       }
@@ -644,7 +675,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         maxHeight: maxPickerEdge,
         limit: maxDocumentPages - _pages.length,
       );
-      for (final photo in photos) {
+      for (var index = 0; index < photos.length; index++) {
+        final photo = photos[index];
         if (_isClearingDraft) break;
         if (!_canStartImagePick) {
           _showDocumentLimit();
@@ -657,9 +689,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           photo,
           source: PageReviewSource.gallery,
           isBatchImport: photos.length > 1,
+          batchPosition: index + 1,
+          batchCount: photos.length,
           deleteAfterRead: false,
           documentGeneration: documentGeneration,
         );
+        if (result == _PhotoIntakeResult.stopped) {
+          _showImportStopped();
+          break;
+        }
         if (result == _PhotoIntakeResult.capacityReached) break;
       }
     } catch (_) {
@@ -669,19 +707,33 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
+  void _showImportStopped() {
+    if (!mounted) return;
+    _showMessage(
+      'Import stopped. Pages already added were kept; the remaining images '
+      'were not added.',
+    );
+  }
+
   CornerAdjustScreen _buildEditor(
     Uint8List originalBytes, {
     ScannedPage? page,
     PageReviewSource? source,
     bool isBatchImport = false,
+    int? batchPosition,
+    int? batchCount,
+    VoidCallback? onStopImport,
   }) {
     return CornerAdjustScreen(
       originalBytes: originalBytes,
       source: source,
       isBatchImport: isBatchImport,
+      batchPosition: batchPosition,
+      batchCount: batchCount,
+      onStopImport: onStopImport,
       initialCorners: page?.corners,
       startWithAdjustments: page != null,
-      initialFilter: page?.filter ?? PageFilter.original,
+      initialFilter: page?.filter ?? _lastNewPageFilter,
       initialRotationQuarterTurns: page?.rotationQuarterTurns ?? 0,
       initialBrightness: page?.brightness ?? 0,
       initialContrast: page?.contrast ?? 1,
@@ -697,6 +749,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     XFile photo, {
     required PageReviewSource source,
     bool isBatchImport = false,
+    int? batchPosition,
+    int? batchCount,
     required bool deleteAfterRead,
     required int documentGeneration,
   }) async {
@@ -789,21 +843,31 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       return _PhotoIntakeResult.skipped;
     }
 
+    var stopRequested = false;
     final result = await Navigator.of(context).push<ScannedPage>(
       MaterialPageRoute(
-        builder: (_) =>
-            _buildEditor(bytes, source: source, isBatchImport: isBatchImport),
+        builder: (_) => _buildEditor(
+          bytes,
+          source: source,
+          isBatchImport: isBatchImport,
+          batchPosition: batchPosition,
+          batchCount: batchCount,
+          onStopImport: () => stopRequested = true,
+        ),
       ),
     );
+    if (stopRequested) return _PhotoIntakeResult.stopped;
     if (result == null ||
         !mounted ||
         _isClearingDraft ||
         documentGeneration != _documentGeneration) {
       return _PhotoIntakeResult.skipped;
     }
-    return _tryAddPage(result, documentGeneration: documentGeneration)
-        ? _PhotoIntakeResult.added
-        : _PhotoIntakeResult.capacityReached;
+    if (!_tryAddPage(result, documentGeneration: documentGeneration)) {
+      return _PhotoIntakeResult.capacityReached;
+    }
+    _lastNewPageFilter = result.filter;
+    return _PhotoIntakeResult.added;
   }
 
   Future<void> _openBarcodeScanner() async {
@@ -1071,6 +1135,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       if (cleared) {
         _pages.clear();
         _draftRestoreFailed = false;
+        _lastNewPageFilter = PageFilter.original;
         _draftSaveFailed = false;
         _deferredMessage = null;
       }
@@ -1559,8 +1624,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         _cameraSupported ? 96 : 8,
                       ),
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: _maxPageCardExtent,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                             childAspectRatio: 0.7,

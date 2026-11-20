@@ -2,10 +2,12 @@ package com.fosscanner.app
 
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.view.WindowManager
 import com.googlecode.leptonica.android.ReadFile
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.googlecode.tesseract.android.TessPdfRenderer
@@ -26,6 +28,7 @@ class MainActivity : FlutterActivity() {
     private var executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var channel: MethodChannel? = null
+    private var privacyChannel: MethodChannel? = null
     private var detached = AtomicBoolean(false)
     private val rendering = AtomicBoolean(false)
     private val cancellationRequested = AtomicBoolean(false)
@@ -33,6 +36,24 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         orphanCacheCleanup.schedule(applicationContext.cacheDir, executor::execute)
         super.onCreate(savedInstanceState)
+        // Scans are often IDs or bank statements: keep page content out of the
+        // Recents thumbnail without blocking screenshots. Older APIs have no
+        // equivalent short of FLAG_SECURE, which is the opt-in below.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false)
+        }
+        applySecureScreen()
+    }
+
+    // FLAG_SECURE blocks screenshots, screen recording and the Recents
+    // thumbnail on every API level. The choice is process-wide so it survives
+    // activity recreation (rotation, theme change) until Flutter changes it.
+    private fun applySecureScreen() {
+        if (secureScreen) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -48,12 +69,31 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Keep this contract synchronized with lib/services/screen_privacy.dart.
+        privacyChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.fosscanner.app/screen_privacy")
+        privacyChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setSecureScreen" -> {
+                    val enabled = call.argument<Boolean>("enabled")
+                    if (enabled == null) {
+                        result.error("invalid_args", "A boolean 'enabled' argument is required", null)
+                    } else {
+                        secureScreen = enabled
+                        applySecureScreen()
+                        result.success(null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         detached.set(true)
         channel?.setMethodCallHandler(null)
         channel = null
+        privacyChannel?.setMethodCallHandler(null)
+        privacyChannel = null
         // Let the active native call finish and release its resources. Interrupting
         // the Java worker cannot safely interrupt Tesseract's native renderer.
         executor.shutdown()
@@ -219,6 +259,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val OCR_DPI = 150
         private val orphanCacheCleanup = OcrCacheCleanupCoordinator()
+        @Volatile private var secureScreen = false
         private const val MAX_IMAGE_BYTES = 32L * 1024 * 1024
         private const val MAX_DOCUMENT_BYTES = 256L * 1024 * 1024
     }
