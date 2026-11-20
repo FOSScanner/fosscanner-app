@@ -94,6 +94,101 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  for (final size in [const Size(390, 844), const Size(800, 320)]) {
+    testWidgets('crop and filter respect body cutouts at $size', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      tester.view.padding = const FakeViewPadding(
+        left: 38,
+        right: 24,
+        bottom: 20,
+      );
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetPadding);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: CornerAdjustScreen(
+            originalBytes: imageBytes,
+            operations: _Operations(imageBytes),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final crop = tester.getRect(find.byType(CornerOverlay));
+      expect(crop.left, greaterThanOrEqualTo(38));
+      expect(crop.right, lessThanOrEqualTo(size.width - 24));
+      await tester.ensureVisible(find.text('Preview page'));
+      await tester.tap(find.text('Preview page'));
+      await tester.pumpAndSettle();
+      for (final slider in find.byType(Slider).evaluate()) {
+        final finder = find.byWidget(slider.widget);
+        await tester.ensureVisible(finder);
+        final rect = tester.getRect(finder);
+        expect(rect.left, greaterThanOrEqualTo(38));
+        expect(rect.right, lessThanOrEqualTo(size.width - 24));
+      }
+      final save = find.widgetWithText(FilledButton, 'Add page');
+      await tester.ensureVisible(save);
+      await tester.pump();
+      expect(tester.getRect(save).bottom, lessThanOrEqualTo(size.height - 20));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'initialization failure scrolls to recovery on short inset screen',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(600, 220);
+      tester.view.padding = const FakeViewPadding(
+        left: 38,
+        right: 24,
+        bottom: 20,
+      );
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetPadding);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: CornerAdjustScreen(
+            originalBytes: imageBytes,
+            operations: _Operations(
+              imageBytes,
+              decodeError: StateError('private data'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final back = find.widgetWithText(FilledButton, 'Go back');
+      await tester.ensureVisible(back);
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(back);
+      expect(rect.left, greaterThanOrEqualTo(38));
+      expect(rect.right, lessThanOrEqualTo(576));
+      expect(rect.top, greaterThanOrEqualTo(kToolbarHeight));
+      expect(rect.bottom, lessThanOrEqualTo(200));
+      expect(back.hitTestable(), findsOneWidget);
+      expect(find.textContaining('private data'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final configuration in [
     (size: const Size(390, 844), textScale: 1.0),
     (size: const Size(390, 844), textScale: 1.5),

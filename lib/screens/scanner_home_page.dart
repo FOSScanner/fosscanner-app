@@ -184,44 +184,49 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   Widget _buildDraftRestoreFailure() => Scaffold(
     appBar: AppBar(title: const Text('FOSScanner')),
-    body: Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-              liveRegion: true,
-              child: Text(
-                'Could not restore the saved draft',
-                style: Theme.of(context).textTheme.headlineSmall,
+    body: SafeArea(
+      top: false,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  'Could not restore the saved draft',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Your cached draft may still be recoverable. Adding images is '
+                'paused to avoid replacing it. Check storage access and retry, '
+                'or explicitly discard the draft to start again. '
+                'Drafts are temporary app-cache data, not saved PDFs.',
                 textAlign: TextAlign.center,
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Your cached draft may still be recoverable. Adding images is '
-              'paused to avoid replacing it. Check storage access and retry, '
-              'or explicitly discard the draft to start again. '
-              'Drafts are temporary app-cache data, not saved PDFs.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            if (_isRestoringDraft || _isClearingDraft)
-              const CircularProgressIndicator(semanticsLabel: 'Opening draft'),
-            FilledButton(
-              onPressed: _isRestoringDraft || _isClearingDraft
-                  ? null
-                  : _retryDraftRestore,
-              child: const Text('Retry restoration'),
-            ),
-            TextButton(
-              onPressed: _isRestoringDraft || _isClearingDraft
-                  ? null
-                  : _discardFailedDraft,
-              child: const Text('Discard saved draft'),
-            ),
-          ],
+              const SizedBox(height: 24),
+              if (_isRestoringDraft || _isClearingDraft)
+                const CircularProgressIndicator(
+                  semanticsLabel: 'Opening draft',
+                ),
+              FilledButton(
+                onPressed: _isRestoringDraft || _isClearingDraft
+                    ? null
+                    : _retryDraftRestore,
+                child: const Text('Retry restoration'),
+              ),
+              TextButton(
+                onPressed: _isRestoringDraft || _isClearingDraft
+                    ? null
+                    : _discardFailedDraft,
+                child: const Text('Discard saved draft'),
+              ),
+            ],
+          ),
         ),
       ),
     ),
@@ -1442,272 +1447,279 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) => Column(
-          children: [
-            if (_imageIntakeStatus != null || _pages.isNotEmpty)
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: constraints.maxHeight * 0.4,
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_imageIntakeStatus != null)
-                        TextButton.icon(
-                          onPressed: _showImageIntakeStatus,
-                          icon: const Icon(Icons.info_outline),
-                          label: const Text('Image intake help'),
-                        ),
-                      if (_pages.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            'Drafts are temporary. Export a PDF to keep a copy.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                    ],
+      body: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) => Column(
+            children: [
+              if (_imageIntakeStatus != null || _pages.isNotEmpty)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight * 0.4,
                   ),
-                ),
-              ),
-            if (_draftSaveFailed)
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: constraints.maxHeight * 0.6,
-                ),
-                child: SingleChildScrollView(
-                  child: MaterialBanner(
-                    content: Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        'Could not save the latest draft changes. '
-                        'Keep the app open and retry. Drafts are temporary '
-                        'app-cache data, not saved PDFs.',
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: _isDraftSaveScheduled || _isClearingDraft
-                            ? null
-                            : _queueDraftSave,
-                        child: const Text('Retry saving draft'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            Expanded(
-              child: _pages.isEmpty
-                  ? Center(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(32.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            if (_isRestoringDraft)
-                              const CircularProgressIndicator()
-                            else
-                              Icon(
-                                _cameraSupported
-                                    ? Icons.camera_alt
-                                    : Icons.photo_library_outlined,
-                                size: 80,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _isRestoringDraft
-                                  ? 'Restoring draft...'
-                                  : 'Ready to Scan',
-                              style: const TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                              ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_imageIntakeStatus != null)
+                          TextButton.icon(
+                            onPressed: _showImageIntakeStatus,
+                            icon: const Icon(Icons.info_outline),
+                            label: const Text('Image intake help'),
+                          ),
+                        if (_pages.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 4,
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _isRestoringDraft
-                                  ? 'Your saved pages will appear here.'
-                                  : _cameraSupported
-                                  ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
-                                  : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
+                            child: Text(
+                              'Drafts are temporary. Export a PDF to keep a copy.',
+                              style: Theme.of(context).textTheme.bodySmall,
                               textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
                             ),
-                          ],
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (_draftSaveFailed)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight * 0.6,
+                  ),
+                  child: SingleChildScrollView(
+                    child: MaterialBanner(
+                      content: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          'Could not save the latest draft changes. '
+                          'Keep the app open and retry. Drafts are temporary '
+                          'app-cache data, not saved PDFs.',
                         ),
                       ),
-                    )
-                  : GridView.builder(
-                      padding: EdgeInsets.fromLTRB(
-                        8,
-                        8,
-                        8,
-                        _cameraSupported ? 96 : 8,
-                      ),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                            childAspectRatio: 0.7,
-                          ),
-                      itemCount: _pages.length,
-                      itemBuilder: (context, index) {
-                        final page = _pages[index];
-                        final card = Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: InkWell(
-                            onTap: _isDocumentInteractionLocked
-                                ? null
-                                : () => _openPage(index),
-                            child: Column(
-                              children: [
-                                Expanded(
-                                  child: Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      8,
-                                      8,
-                                      8,
-                                      0,
-                                    ),
-                                    child: Image(
-                                      image: ResizeImage(
-                                        MemoryImage(page.processedBytes),
-                                        width: _thumbnailCacheWidth,
-                                        height: _thumbnailCacheWidth,
-                                        policy: ResizeImagePolicy.fit,
-                                      ),
-                                      fit: BoxFit.contain,
-                                    ),
-                                  ),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 12,
-                                    right: 4,
-                                  ),
-                                  child: Wrap(
-                                    alignment: WrapAlignment.spaceBetween,
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    children: [
-                                      ExcludeSemantics(
-                                        child: Text(
-                                          'Page ${index + 1}',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.labelLarge,
-                                        ),
-                                      ),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (_pages.length > 1)
-                                            _pageReorderMenu(index, page),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                            ),
-                                            tooltip: 'Delete page ${index + 1}',
-                                            onPressed:
-                                                _isDocumentInteractionLocked
-                                                ? null
-                                                : () => _removePage(index),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-
-                        // Drag-to-reorder remains available alongside equivalent
-                        // semantic actions for switch and screen-reader users.
-                        final reorderActions =
-                            <CustomSemanticsAction, VoidCallback>{
-                              if (!_isDocumentInteractionLocked && index > 0)
-                                const CustomSemanticsAction(
-                                  label: 'Move earlier',
-                                ): () =>
-                                    _reorderPage(index, index - 1),
-                              if (!_isDocumentInteractionLocked &&
-                                  index < _pages.length - 1)
-                                const CustomSemanticsAction(
-                                  label: 'Move later',
-                                ): () =>
-                                    _reorderPage(index, index + 1),
-                            };
-                        return Semantics(
-                          key: ValueKey('page_semantics_$index'),
-                          label: 'Page ${index + 1} of ${_pages.length}',
-                          sortKey: OrdinalSortKey(index.toDouble()),
-                          container: true,
-                          customSemanticsActions: reorderActions,
-                          child: DragTarget<int>(
-                            onWillAcceptWithDetails: (details) =>
-                                !_isDocumentInteractionLocked &&
-                                details.data != index,
-                            onAcceptWithDetails: (details) =>
-                                _reorderPage(details.data, index),
-                            builder: (context, candidateData, rejectedData) {
-                              final isDropTarget = candidateData.isNotEmpty;
-                              return LongPressDraggable<int>(
-                                data: index,
-                                maxSimultaneousDrags:
-                                    _isDocumentInteractionLocked ? 0 : 1,
-                                feedback: SizedBox(
-                                  width: 140,
-                                  height: 200,
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: Opacity(opacity: 0.85, child: card),
-                                  ),
-                                ),
-                                childWhenDragging: Opacity(
-                                  opacity: 0.3,
-                                  child: card,
-                                ),
-                                child: isDropTarget
-                                    ? Container(
-                                        decoration: BoxDecoration(
-                                          border: Border.all(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.primary,
-                                            width: 3,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            4,
-                                          ),
-                                        ),
-                                        child: card,
-                                      )
-                                    : card,
-                              );
-                            },
-                          ),
-                        );
-                      },
+                      actions: [
+                        TextButton(
+                          onPressed: _isDraftSaveScheduled || _isClearingDraft
+                              ? null
+                              : _queueDraftSave,
+                          child: const Text('Retry saving draft'),
+                        ),
+                      ],
                     ),
-            ),
-          ],
+                  ),
+                ),
+              Expanded(
+                child: _pages.isEmpty
+                    ? Center(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(32.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (_isRestoringDraft)
+                                const CircularProgressIndicator()
+                              else
+                                Icon(
+                                  _cameraSupported
+                                      ? Icons.camera_alt
+                                      : Icons.photo_library_outlined,
+                                  size: 80,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _isRestoringDraft
+                                    ? 'Restoring draft...'
+                                    : 'Ready to Scan',
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _isRestoringDraft
+                                    ? 'Your saved pages will appear here.'
+                                    : _cameraSupported
+                                    ? 'Tap the camera button to add your first document. FOSS & Privacy-first: everything is processed on your device.'
+                                    : 'Import from your gallery to add your first document. FOSS & Privacy-first: everything is processed on your device.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : GridView.builder(
+                        padding: EdgeInsets.fromLTRB(
+                          8,
+                          8,
+                          8,
+                          _cameraSupported ? 96 : 8,
+                        ),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 8,
+                              mainAxisSpacing: 8,
+                              childAspectRatio: 0.7,
+                            ),
+                        itemCount: _pages.length,
+                        itemBuilder: (context, index) {
+                          final page = _pages[index];
+                          final card = Card(
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: _isDocumentInteractionLocked
+                                  ? null
+                                  : () => _openPage(index),
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        8,
+                                        8,
+                                        8,
+                                        0,
+                                      ),
+                                      child: Image(
+                                        image: ResizeImage(
+                                          MemoryImage(page.processedBytes),
+                                          width: _thumbnailCacheWidth,
+                                          height: _thumbnailCacheWidth,
+                                          policy: ResizeImagePolicy.fit,
+                                        ),
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                      left: 12,
+                                      right: 4,
+                                    ),
+                                    child: Wrap(
+                                      alignment: WrapAlignment.spaceBetween,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        ExcludeSemantics(
+                                          child: Text(
+                                            'Page ${index + 1}',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.labelLarge,
+                                          ),
+                                        ),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (_pages.length > 1)
+                                              _pageReorderMenu(index, page),
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                              ),
+                                              tooltip:
+                                                  'Delete page ${index + 1}',
+                                              onPressed:
+                                                  _isDocumentInteractionLocked
+                                                  ? null
+                                                  : () => _removePage(index),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+
+                          // Drag-to-reorder remains available alongside equivalent
+                          // semantic actions for switch and screen-reader users.
+                          final reorderActions =
+                              <CustomSemanticsAction, VoidCallback>{
+                                if (!_isDocumentInteractionLocked && index > 0)
+                                  const CustomSemanticsAction(
+                                    label: 'Move earlier',
+                                  ): () =>
+                                      _reorderPage(index, index - 1),
+                                if (!_isDocumentInteractionLocked &&
+                                    index < _pages.length - 1)
+                                  const CustomSemanticsAction(
+                                    label: 'Move later',
+                                  ): () =>
+                                      _reorderPage(index, index + 1),
+                              };
+                          return Semantics(
+                            key: ValueKey('page_semantics_$index'),
+                            label: 'Page ${index + 1} of ${_pages.length}',
+                            sortKey: OrdinalSortKey(index.toDouble()),
+                            container: true,
+                            customSemanticsActions: reorderActions,
+                            child: DragTarget<int>(
+                              onWillAcceptWithDetails: (details) =>
+                                  !_isDocumentInteractionLocked &&
+                                  details.data != index,
+                              onAcceptWithDetails: (details) =>
+                                  _reorderPage(details.data, index),
+                              builder: (context, candidateData, rejectedData) {
+                                final isDropTarget = candidateData.isNotEmpty;
+                                return LongPressDraggable<int>(
+                                  data: index,
+                                  maxSimultaneousDrags:
+                                      _isDocumentInteractionLocked ? 0 : 1,
+                                  feedback: SizedBox(
+                                    width: 140,
+                                    height: 200,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: Opacity(
+                                        opacity: 0.85,
+                                        child: card,
+                                      ),
+                                    ),
+                                  ),
+                                  childWhenDragging: Opacity(
+                                    opacity: 0.3,
+                                    child: card,
+                                  ),
+                                  child: isDropTarget
+                                      ? Container(
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.primary,
+                                              width: 3,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                          ),
+                                          child: card,
+                                        )
+                                      : card,
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButton: _cameraSupported

@@ -445,15 +445,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
             ],
           ],
         ),
-        body: !ready
-            ? Center(
-                child: _error != null
-                    ? _InitErrorView(message: _error!)
-                    : const CircularProgressIndicator(),
-              )
-            : _step == _Step.corners
-            ? _buildCornersStep(context, imageSize, corners)
-            : _buildFilterStep(context),
+        body: SafeArea(
+          top: false,
+          child: !ready
+              ? Center(
+                  child: _error != null
+                      ? _InitErrorView(message: _error!)
+                      : const CircularProgressIndicator(),
+                )
+              : _step == _Step.corners
+              ? _buildCornersStep(context, imageSize, corners)
+              : _buildFilterStep(context),
+        ),
       ),
     );
   }
@@ -949,7 +952,7 @@ class _InitErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisSize: MainAxisSize.min,

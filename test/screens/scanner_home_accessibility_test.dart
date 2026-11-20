@@ -34,6 +34,11 @@ class _DraftStore implements DraftStore {
   }
 }
 
+class _UnreadableDraftStore extends _DraftStore {
+  @override
+  Future<List<ScannedPage>> load() async => throw const DraftRestoreException();
+}
+
 void main() {
   late ImagePickerPlatform originalPicker;
   late Uint8List imageBytes;
@@ -72,6 +77,85 @@ void main() {
     }
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final size in [const Size(390, 844), const Size(800, 320)]) {
+    testWidgets('home grid respects body cutouts at $size', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      tester.view.padding = const FakeViewPadding(
+        left: 38,
+        right: 24,
+        bottom: 20,
+      );
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetPadding);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: ScannerHomePage(
+            initialPages: [
+              ScannedPage(
+                originalBytes: imageBytes,
+                processedBytes: imageBytes,
+                corners: const [],
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final grid = tester.getRect(find.byType(GridView));
+      expect(grid.left, greaterThanOrEqualTo(38));
+      expect(grid.right, lessThanOrEqualTo(size.width - 24));
+      expect(grid.bottom, lessThanOrEqualTo(size.height - 20));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('draft recovery actions remain reachable with short inset body', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(600, 220);
+    tester.view.padding = const FakeViewPadding(
+      left: 38,
+      right: 24,
+      bottom: 20,
+    );
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetPadding);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: ScannerHomePage(draftStore: _UnreadableDraftStore()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final label in ['Retry restoration', 'Discard saved draft']) {
+      final action = find.text(label);
+      await tester.ensureVisible(action);
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(action);
+      expect(rect.left, greaterThanOrEqualTo(38));
+      expect(rect.right, lessThanOrEqualTo(576));
+      expect(rect.top, greaterThanOrEqualTo(kToolbarHeight));
+      expect(rect.bottom, lessThanOrEqualTo(200));
+      expect(action.hitTestable(), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('semantic reorder actions update and persist page order', (
