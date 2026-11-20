@@ -225,7 +225,7 @@ void main() {
     await show(home(0));
     await save('ui-home-empty');
     await show(home(3));
-    expect(find.text('Export PDF (3 pages)'), findsOneWidget);
+    expect(find.text('Share PDF'), findsOneWidget);
     await save('ui-home-pages');
     await tester.tap(find.byTooltip('Reorder page 2'));
     await tester.pumpAndSettle();
@@ -260,7 +260,8 @@ void main() {
     }
     await tester.pumpAndSettle();
     expect(find.text('Add page'), findsOneWidget);
-    expect(find.text('Brightness: 0'), findsOneWidget);
+    expect(find.byTooltip('Adjust'), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
     await save('ui-adjust-appearance');
     expect(find.text('Adjust crop'), findsNothing);
     expect(find.byKey(const ValueKey('filter_original')), findsNothing);

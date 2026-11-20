@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -10,6 +11,8 @@ import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
+
+import '../support/export_bar.dart';
 
 class _DelayedDraftStore implements DraftStore {
   final loaded = Completer<List<ScannedPage>>();
@@ -150,7 +153,7 @@ void main() {
     ),
   );
 
-  for (final tooltip in ['Capture Image', 'Import from gallery']) {
+  for (final tooltip in ['Scan a page', 'Import from gallery']) {
     testWidgets(
       '$tooltip waits for draft restoration before opening the picker',
       (tester) async {
@@ -162,13 +165,13 @@ void main() {
         await tester.tap(find.byTooltip(tooltip));
         await tester.pump();
         expect(picker.cameraCalls + picker.galleryCalls, 0);
-        expect(find.text('Restoring draft...'), findsOneWidget);
+        expect(find.text('Restoring draft…'), findsOneWidget);
         expect(find.textContaining('Document memory limit'), findsNothing);
 
         store.loaded.complete([savedPage()]);
         await tester.pumpAndSettle();
-        expect(find.text('Export PDF (1 page)'), findsOneWidget);
-        expect(find.text('Restoring draft...'), findsNothing);
+        expect(findShareButton(1), findsOneWidget);
+        expect(find.text('Restoring draft…'), findsNothing);
         await tester.tap(find.byTooltip(tooltip));
         await tester.pumpAndSettle();
         expect(picker.cameraCalls + picker.galleryCalls, 1);
@@ -214,7 +217,7 @@ void main() {
       await tester.tap(find.text('Add page'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+      expect(findShareButton(2), findsOneWidget);
       expect(store.saves.single, hasLength(2));
       expect(store.saves.single.first, same(restored));
       expect(store.saves.single.last.originalBytes, orderedEquals(imageBytes));
@@ -235,7 +238,7 @@ void main() {
       expect(find.text('Could not restore the saved draft'), findsOneWidget);
       expect(find.textContaining('PRIVATE'), findsNothing);
       expect(find.byTooltip('Import from gallery'), findsNothing);
-      expect(find.byTooltip('Capture Image'), findsNothing);
+      expect(find.byTooltip('Scan a page'), findsNothing);
       expect(store.saves, isEmpty);
       expect(
         picker.galleryCalls + picker.cameraCalls + picker.lostDataCalls,
@@ -258,7 +261,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.loadCalls, 2);
       expect(store.clearCalls, 0);
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       await tester.tap(find.byTooltip('Import from gallery'));
       await tester.pumpAndSettle();
       expect(picker.galleryCalls, 1);
@@ -297,10 +300,24 @@ void main() {
         isNull,
       );
       expect(find.byTooltip('Import from gallery'), findsNothing);
+      final semantics = tester.ensureSemantics();
       pending.completeError(StateError('PRIVATE retry error'));
       await tester.pumpAndSettle();
       expect(find.text('Could not restore the saved draft'), findsOneWidget);
       expect(find.textContaining('PRIVATE'), findsNothing);
+      // A retry that fails again says so, and screen readers hear it.
+      const stillFailing = "The saved draft still can't be restored.";
+      expect(find.text(stillFailing), findsOneWidget);
+      var announced = false;
+      for (
+        SemanticsNode? node = tester.getSemantics(find.text(stillFailing));
+        node != null && !announced;
+        node = node.parent
+      ) {
+        announced = node.getSemanticsData().flagsCollection.isLiveRegion;
+      }
+      expect(announced, isTrue, reason: 'not in a live region');
+      semantics.dispose();
       expect(store.saves, isEmpty);
       expect(store.clearCalls, 0);
     },
@@ -339,7 +356,7 @@ void main() {
       await tester.tap(find.text('Discard draft'));
       await tester.pumpAndSettle();
       expect(store.clearCalls, 2);
-      expect(find.text('Ready to Scan'), findsOneWidget);
+      expect(find.text('Ready to scan'), findsOneWidget);
       expect(find.byTooltip('Import from gallery'), findsOneWidget);
     },
   );
@@ -378,7 +395,7 @@ void main() {
       expect(find.byType(CornerAdjustScreen), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(findShareButton(1), findsOneWidget);
       expect(store.saves, isEmpty);
       expect(recovered.existsSync(), isFalse);
     },
@@ -422,7 +439,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(store.loadCalls, 0);
-      expect(find.text('Restoring draft...'), findsNothing);
+      expect(find.text('Restoring draft…'), findsNothing);
       expect(picker.galleryCalls, 1);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),

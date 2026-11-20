@@ -89,7 +89,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Could not read this photo'), findsOneWidget);
+      expect(find.textContaining('Could not read this image'), findsOneWidget);
       expect(find.text('Go back'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
     },

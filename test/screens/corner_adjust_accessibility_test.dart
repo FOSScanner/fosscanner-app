@@ -159,9 +159,8 @@ void main() {
     });
   }
 
-  testWidgets('short landscape with large text scrolls to Save changes', (
-    tester,
-  ) async {
+  testWidgets('short landscape with large text keeps Save changes beside '
+      'the preview', (tester) async {
     tester.view.physicalSize = const Size(800, 300);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -169,17 +168,15 @@ void main() {
 
     await openFilterStep(tester, textScaler: const TextScaler.linear(2));
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const Key('filter_step_scroll_view')), findsOneWidget);
-
-    await tester.ensureVisible(
-      find.widgetWithText(FilledButton, 'Save changes'),
+    expect(find.byKey(const Key('filter_step_controls')), findsOneWidget);
+    expect(
+      find.widgetWithText(FilledButton, 'Save changes').hitTestable(),
+      findsOneWidget,
     );
-    await tester.pump();
-    expect(tester.takeException(), isNull);
     await tester.tap(find.widgetWithText(FilledButton, 'Save changes'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Adjust appearance'), findsNothing);
+    expect(find.text('Appearance'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -199,6 +196,9 @@ void main() {
     final semantics = tester.ensureSemantics();
     await openFilterStep(tester);
     final sliders = find.byType(Slider);
+    expect(sliders, findsNothing);
+    await tester.tap(find.byTooltip('Adjust'));
+    await tester.pumpAndSettle();
     expect(tester.getSemantics(sliders.first).label, 'Brightness');
     expect(
       tester.getSemantics(sliders.first).getSemanticsData().value,
@@ -207,17 +207,29 @@ void main() {
     expect(tester.getSemantics(sliders.last).label, 'Contrast');
     expect(
       tester.getSemantics(sliders.last).getSemanticsData().value,
-      contains('neutral 1'),
+      contains('neutral 0'),
     );
+    // Nothing to reset at neutral.
+    TextButton reset() =>
+        tester.widget<TextButton>(find.byKey(const Key('reset_adjustments')));
+    expect(reset().onPressed, isNull);
     tester.widget<Slider>(sliders.first).onChanged!(100);
-    tester.widget<Slider>(sliders.last).onChanged!(2);
+    // The contrast slider's end (log scale) is 2.00×.
+    tester.widget<Slider>(sliders.last).onChanged!(1);
     await tester.pump();
     expect(find.text('Brightness: +100'), findsOneWidget);
-    expect(find.text('Contrast: 2.00×'), findsOneWidget);
+    // Both on the same -100 to +100 scale.
+    expect(find.text('Contrast: +100'), findsOneWidget);
+    expect(reset().onPressed, isNotNull);
     await tester.tap(find.text('Reset adjustments'));
     await tester.pumpAndSettle();
     expect(tester.widget<Slider>(sliders.first).value, 0);
-    expect(tester.widget<Slider>(sliders.last).value, 1);
+    // Neutral contrast sits in the middle of the track.
+    expect(tester.widget<Slider>(sliders.last).value, 0);
+    expect(find.text('Contrast: 0'), findsOneWidget);
+    expect(reset().onPressed, isNull);
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
     expect(
@@ -280,10 +292,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Grayscale'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Close filters'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
-    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     expect(
       tester.getRect(find.byKey(const Key('adjusted_page_preview'))),
       preview,
@@ -301,7 +313,7 @@ void main() {
     );
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(find.text('Adjust appearance'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     expect(find.byKey(const ValueKey('filter_grayscale')), findsNothing);
     semantics.dispose();
   });
@@ -322,7 +334,69 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.text('Adjust appearance'), findsOneWidget);
+      expect(find.text('Appearance'), findsOneWidget);
+    });
+  }
+
+  testWidgets('adjustments open on demand, persist, and Back closes first', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await openFilterStep(tester);
+    expect(find.byType(Slider), findsNothing);
+    expect(find.text('Reset adjustments'), findsNothing);
+    final adjust = tester.getSemantics(find.byTooltip('Adjust'));
+    expect(adjust.getSemanticsData().flagsCollection.isButton, isTrue);
+
+    await tester.tap(find.byTooltip('Adjust'));
+    await tester.pumpAndSettle();
+    final brightness = tester.widget<Slider>(find.byType(Slider).first);
+    brightness.onChanged!(40);
+    brightness.onChangeEnd!(40);
+    await tester.pumpAndSettle();
+    expect(find.text('Brightness: +40'), findsOneWidget);
+
+    // System Back dismisses the sheet before it can leave the step.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(Slider), findsNothing);
+    expect(find.text('Appearance'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Adjust'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(find.byType(Slider).first).value, 40);
+    expect(find.text('Brightness: +40'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Slider), findsNothing);
+    expect(find.text('Appearance'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  for (final size in [const Size(320, 568), const Size(640, 300)]) {
+    testWidgets('on-demand adjustments fit $size with large text', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await openFilterStep(tester, textScaler: const TextScaler.linear(2));
+      await tester.tap(find.byTooltip('Adjust'));
+      await tester.pumpAndSettle();
+      for (final target in [
+        find.byType(Slider).first,
+        find.byType(Slider).last,
+        find.text('Reset adjustments'),
+      ]) {
+        await tester.ensureVisible(target);
+        await tester.pumpAndSettle();
+        expect(target.hitTestable(), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Appearance'), findsOneWidget);
     });
   }
 
@@ -342,7 +416,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Could not read this photo.'), findsOneWidget);
+    expect(find.text('Could not read this image.'), findsOneWidget);
     expect(find.textContaining('private file path'), findsNothing);
   });
 

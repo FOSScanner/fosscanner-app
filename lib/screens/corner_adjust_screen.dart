@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, listEquals;
 import 'package:flutter/material.dart';
 
 import '../models/scanned_page.dart';
+import '../services/adjustment_scale.dart';
 import '../services/corner_adjust_operations.dart';
 import '../services/corner_geometry.dart';
+import '../services/gesture_exclusion.dart';
 import '../services/image_processing_queue.dart';
 import '../widgets/corner_overlay.dart';
 import '../widgets/transient_message.dart';
@@ -33,9 +37,61 @@ const _filterLabels = {
 };
 
 /// The original picker source may be unknown after Android activity recovery.
-enum PageReviewSource { camera, gallery, recovered }
+/// [shared] images were sent from another app and copied into app storage.
+enum PageReviewSource {
+  camera,
+  gallery,
+  recovered,
+
+  /// A camera capture continued after the app was killed during its review.
+  /// It is reviewed on its own, without the camera loop, and its only copy
+  /// is deleted when the review ends.
+  resumedCapture,
+  shared,
+
+  /// A page rendered from an imported PDF.
+  pdf,
+}
+
+/// A review's crop and appearance, handed to [CornerAdjustScreen.onRetake]
+/// so that cancelling the camera can reopen the review exactly as it was.
+class PageReviewState {
+  const PageReviewState({
+    required this.corners,
+    required this.startCorners,
+    required this.filter,
+    required this.rotationQuarterTurns,
+    required this.brightness,
+    required this.contrast,
+  });
+
+  final List<Offset> corners;
+
+  /// The detected (or full-image) corners a double-tap restores.
+  final List<Offset> startCorners;
+  final PageFilter filter;
+  final int rotationQuarterTurns;
+  final double brightness;
+  final double contrast;
+}
 
 enum _Step { corners, filter }
+
+/// What leaving the review from the crop step would lose, and so which
+/// question Back and Cancel ask first.
+enum _LeaveConfirmation {
+  /// Edits to a page that is kept as it was.
+  discardChanges,
+
+  /// A new camera capture, edited or not.
+  discardScan,
+
+  /// The rest of a batch import, and any edits to this image.
+  stopImport,
+}
+
+/// Appearance controls shown in the landscape side column.
+enum _Panel { filters, adjust }
 
 enum _PreviewStatus { pending, updating, ready, failed }
 
@@ -55,8 +111,16 @@ class CornerAdjustScreen extends StatefulWidget {
     required this.originalBytes,
     this.source,
     this.isBatchImport = false,
+    this.batchPosition,
+    this.batchCount,
+    this.onStopImport,
+    this.onScanNext,
+    this.onRetake,
+    this.onUnreadable,
+    this.restoredReview,
     this.initialCorners,
     this.startWithAdjustments = false,
+    this.detectPageEdges = true,
     this.initialFilter = PageFilter.original,
     this.initialRotationQuarterTurns = 0,
     this.initialBrightness = 0.0,
@@ -72,10 +136,46 @@ class CornerAdjustScreen extends StatefulWidget {
 
   /// Refers to the original selection, including its final image.
   final bool isBatchImport;
+
+  /// One-based position of this image within a batch import, and the batch
+  /// size. Both are null outside batch review.
+  final int? batchPosition;
+  final int? batchCount;
+
+  /// Called before this route closes when the user stops a batch import.
+  /// The current and remaining images are not added; accepted pages stay.
+  final VoidCallback? onStopImport;
+
+  /// Continuous camera capture. When set for a new camera capture, the
+  /// appearance step offers **Add & scan next** next to **Add page**; this is
+  /// called just before the route pops with the accepted page so the caller
+  /// can relaunch the camera. The route result stays a [ScannedPage], so
+  /// callers that do not opt in are unaffected.
+  final VoidCallback? onScanNext;
+
+  /// When set for a new camera capture, the crop step's **Cancel** becomes
+  /// **Retake**: this is called with the review's current crop and settings
+  /// before the route pops without a page, so the caller can relaunch the
+  /// camera and, if it is cancelled, reopen this review via
+  /// [restoredReview].
+  final ValueChanged<PageReviewState>? onRetake;
+
+  /// Called when [originalBytes] cannot be decoded. The review then only
+  /// offers Go back and closes without a page, so callers can report the
+  /// image as unreadable instead of skipped. Leaving it never stops a batch.
+  final VoidCallback? onUnreadable;
+
+  /// Reopens a review left with Retake: its corners and settings replace
+  /// edge detection and the initial settings. Still a new page.
+  final PageReviewState? restoredReview;
   final List<Offset>? initialCorners;
 
   /// Open saved appearance directly; crop remains available.
   final bool startWithAdjustments;
+
+  /// When false, a new page starts as a full-image crop without running
+  /// edge detection, for sources that are already flat pages (PDF imports).
+  final bool detectPageEdges;
   final PageFilter initialFilter;
   final int initialRotationQuarterTurns;
   final double initialBrightness;
@@ -90,9 +190,15 @@ class CornerAdjustScreen extends StatefulWidget {
 class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   Size? _imageSize;
   List<Offset>? _corners;
+  // Detected, saved or full-image corners: what a double-tap restores.
+  List<Offset>? _startCorners;
+  CropProblem? _cropProblem;
   bool _showFullImageNotice = false;
+  // Kept in the tree while the notice fades out after the first adjustment.
+  bool _fullImageNoticeMounted = false;
   bool _isProcessing = false;
   bool _isLeaving = false;
+  bool _isScanNextRequested = false;
   String? _error;
   late final ImageProcessingQueue _processingQueue;
   int _initializationGeneration = 0;
@@ -100,10 +206,33 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   _Step _step = _Step.corners;
   LocalHistoryEntry? _filterHistoryEntry;
-  late PageFilter _selectedFilter = widget.initialFilter;
-  late int _rotationQuarterTurns = widget.initialRotationQuarterTurns;
-  late double _brightness = widget.initialBrightness;
-  late double _contrast = widget.initialContrast;
+  // Side by side (landscape), Filters and Adjust open in the control column
+  // rather than as bottom sheets, so the preview stays fully visible. Back
+  // closes the panel first, like a sheet.
+  _Panel? _sidePanel;
+  // The panel open as a bottom sheet (top to bottom), and its route. When
+  // the layout turns side by side it moves into the control column, and
+  // back again, keeping every setting.
+  _Panel? _sheetPanel;
+  ModalRoute<void>? _sheetRoute;
+  int _sheetGeneration = 0;
+  LocalHistoryEntry? _panelHistoryEntry;
+  // One scroll position per panel, never restored: each panel opens at its
+  // top, whatever the other was scrolled to.
+  final _panelScrollControllers = {
+    for (final panel in _Panel.values)
+      panel: ScrollController(keepScrollOffset: false),
+  };
+  bool _isSideBySide = false;
+  late PageFilter _selectedFilter =
+      widget.restoredReview?.filter ?? widget.initialFilter;
+  late int _rotationQuarterTurns =
+      widget.restoredReview?.rotationQuarterTurns ??
+      widget.initialRotationQuarterTurns;
+  late double _brightness =
+      widget.restoredReview?.brightness ?? widget.initialBrightness;
+  late double _contrast =
+      widget.restoredReview?.contrast ?? widget.initialContrast;
   // Cache reduced-resolution filter previews so dragging only reprocesses on
   // drag-end. Confirm deliberately recomputes the selected filter at the full
   // bounded export resolution.
@@ -142,8 +271,22 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     try {
       final size = await widget.operations.decodeSize(widget.originalBytes);
 
+      final restored = widget.restoredReview;
+      if (restored != null) {
+        // Exactly as it was left, problems included: nothing to detect.
+        if (!mounted) return;
+        setState(() {
+          _imageSize = size;
+          _corners = List.of(restored.corners);
+          _startCorners = List.of(restored.startCorners);
+          _cropProblem = cropProblem(_corners!, imageSize: size);
+        });
+        unawaited(_updatePreviews());
+        return;
+      }
+
       List<Offset>? candidateCorners = widget.initialCorners;
-      if (candidateCorners == null) {
+      if (candidateCorners == null && widget.detectPageEdges) {
         await WidgetsBinding.instance.endOfFrame;
         if (!mounted || generation != _initializationGeneration) return;
         final detection = await _enqueueWork<List<Offset>?>(
@@ -154,13 +297,27 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         candidateCorners = detection.value;
       }
       final hasCorners = _hasRenderableCorners(candidateCorners);
-      final corners = hasCorners ? candidateCorners! : _fullBoundsCorners(size);
+      final corners = hasCorners
+          ? sortCornersIfConvex([
+              // Match the overlay's clamping so that it never reports a
+              // change the user did not make.
+              for (final corner in candidateCorners!)
+                Offset(
+                  corner.dx.clamp(0.0, size.width - 1),
+                  corner.dy.clamp(0.0, size.height - 1),
+                ),
+            ])
+          : _fullBoundsCorners(size);
 
       if (!mounted) return;
       setState(() {
         _imageSize = size;
         _corners = corners;
-        _showFullImageNotice = !hasCorners;
+        _startCorners = corners;
+        _cropProblem = cropProblem(corners, imageSize: size);
+        // Only a failed detection needs explaining.
+        _showFullImageNotice = !hasCorners && widget.detectPageEdges;
+        _fullImageNoticeMounted = _showFullImageNotice;
       });
       if (widget.startWithAdjustments && hasCorners) _enterFilterStep();
       unawaited(_updatePreviews());
@@ -170,8 +327,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       }
       if (!mounted) return;
       setState(() {
-        _error = 'Could not read this photo.';
+        _error = 'Could not read this image.';
       });
+      widget.onUnreadable?.call();
     }
   }
 
@@ -181,6 +339,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     _previewGeneration++;
     _finalPreviewGeneration++;
     _exportGeneration++;
+    for (final controller in _panelScrollControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -205,7 +366,8 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   Future<void> _updatePreviews() async {
     final currentCorners = _corners;
-    if (currentCorners == null || !mounted) return;
+    final imageSize = _imageSize;
+    if (currentCorners == null || imageSize == null || !mounted) return;
     final corners = List<Offset>.of(currentCorners);
     final generation = ++_previewGeneration;
     _finalPreviewGeneration++;
@@ -220,20 +382,15 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || generation != _previewGeneration) return;
 
-    // Keep geometry failures separate from decoder/backend failures so the
-    // recovery guidance matches what the user can actually fix.
-    try {
-      calculateWarpSize(
-        corners,
-        maxPixels: maxPreviewWarpPixels,
-        maxEdge: maxPreviewWarpEdge,
-      );
-    } on ArgumentError {
+    // Geometry problems are explained in place on the canvas, where the
+    // user can fix them; only decoder/backend failures need a message.
+    final problem = cropProblem(corners, imageSize: imageSize);
+    if (problem != null) {
       if (!mounted || generation != _previewGeneration) return;
-      setState(() => _isGeneratingPreviews = false);
-      _showError(
-        'Could not preview this crop. Adjust the corners and try again.',
-      );
+      setState(() {
+        _isGeneratingPreviews = false;
+        _cropProblem = problem;
+      });
       return;
     }
 
@@ -256,7 +413,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     } catch (_) {
       if (!mounted || generation != _previewGeneration) return;
       setState(() => _isGeneratingPreviews = false);
-      _showError('Could not process this photo. Try another image.');
+      _showError('Could not process this image. Try another one.');
     }
   }
 
@@ -306,7 +463,9 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
   }
 
   Future<void> _goToFilterStep() async {
-    if (!mounted || _isLeaving || _isProcessing) return;
+    if (!mounted || _isLeaving || _isProcessing || _cropProblem != null) {
+      return;
+    }
     if (_filterPreviews == null) {
       await _updatePreviews();
       if (!mounted || _isLeaving || _filterPreviews == null) return;
@@ -339,9 +498,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       _previewStatus == _PreviewStatus.ready &&
       _finalPreviewBytes != null;
 
-  Future<void> _confirm() async {
+  Future<void> _confirm({bool scanNext = false}) async {
     final corners = _corners;
     if (corners == null || !_canConfirm) return;
+    if (scanNext && !_canScanNext) return;
     final filter = _selectedFilter;
     final rotationQuarterTurns = _rotationQuarterTurns;
     final brightness = _brightness;
@@ -351,6 +511,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final exportGeneration = ++_exportGeneration;
     setState(() {
       _isProcessing = true;
+      _isScanNextRequested = scanNext;
       _isGeneratingPreviews = false;
     });
     await WidgetsBinding.instance.endOfFrame;
@@ -379,12 +540,18 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       );
       // Otherwise Navigator.pop would consume the local filter history entry
       // instead of completing this route with the scanned page.
+      _panelHistoryEntry?.remove();
       _filterHistoryEntry?.remove();
-      if (mounted) Navigator.of(context).pop(page);
+      if (!mounted) return;
+      if (scanNext) widget.onScanNext!();
+      Navigator.of(context).pop(page);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _isProcessing = false);
-      _showError('Could not process this page. Try another image.');
+      setState(() {
+        _isProcessing = false;
+        _isScanNextRequested = false;
+      });
+      _showError('Could not process this page. Try again.');
     }
   }
 
@@ -396,13 +563,166 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
 
   bool get _isEditingExistingPage => widget.initialCorners != null;
 
+  /// Whether leaving now would lose anything the user changed: the crop or
+  /// any appearance setting, relative to how this review opened.
+  bool get _hasUnsavedChanges {
+    final corners = _corners;
+    final start = _startCorners;
+    return (corners != null && start != null && !listEquals(corners, start)) ||
+        _selectedFilter != widget.initialFilter ||
+        _rotationQuarterTurns != widget.initialRotationQuarterTurns ||
+        _brightness != widget.initialBrightness ||
+        _contrast != widget.initialContrast;
+  }
+
+  /// One rule for Back and Cancel on the crop step. (Back from the
+  /// appearance step only returns here, keeping every setting.) Explicit
+  /// Skip and Retake never ask; Stop importing asks exactly as Back does.
+  _LeaveConfirmation? get _leaveConfirmation {
+    // An unreadable image has nothing to lose, and leaving it moves on.
+    if (_error != null) return null;
+    if (_canStopImport) return _LeaveConfirmation.stopImport;
+    if (_isUnrepeatableCapture) return _LeaveConfirmation.discardScan;
+    if (_hasUnsavedChanges) return _LeaveConfirmation.discardChanges;
+    return null;
+  }
+
+  bool _isConfirmingDiscard = false;
+
+  Future<void> _confirmLeave() async {
+    final confirmation = _leaveConfirmation;
+    if (confirmation == null || !await _askToLeave(confirmation)) return;
+    if (!mounted) return;
+    // Navigator.pop bypasses canPop; onPopInvokedWithResult still runs and
+    // stops a batch import.
+    Navigator.of(context).pop();
+  }
+
+  /// Shows the dialog for [confirmation] and returns whether the user chose
+  /// to leave while the review can still be left.
+  Future<bool> _askToLeave(_LeaveConfirmation confirmation) async {
+    if (!mounted ||
+        _isConfirmingDiscard ||
+        _isLeaving ||
+        _isProcessing ||
+        _step != _Step.corners) {
+      return false;
+    }
+    _isConfirmingDiscard = true;
+    final item = _batchItem.toLowerCase();
+    final (title, body, keep, leave) = switch (confirmation) {
+      _LeaveConfirmation.discardChanges => (
+        'Discard changes?',
+        null,
+        'Keep editing',
+        'Discard',
+      ),
+      _LeaveConfirmation.discardScan => (
+        'Discard this scan?',
+        null,
+        'Keep editing',
+        'Discard',
+      ),
+      _LeaveConfirmation.stopImport => (
+        'Stop importing?',
+        '${_hasUnsavedChanges ? 'Your changes will be discarded. ' : ''}'
+            'This $item and the remaining ones will not be added. '
+            'Pages already added are kept.',
+        'Keep reviewing',
+        'Stop',
+      ),
+    };
+    final bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: body == null ? null : Text(body),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(keep),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(leave),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _isConfirmingDiscard = false;
+    }
+    return confirmed == true &&
+        mounted &&
+        !_isLeaving &&
+        !_isProcessing &&
+        ModalRoute.of(context)?.isCurrent == true;
+  }
+
+  bool get _isNewCameraCapture =>
+      !_isEditingExistingPage && widget.source == PageReviewSource.camera;
+
+  /// A new capture that exists nowhere else once this review is left,
+  /// including one resumed after the app was killed. Leaving asks first.
+  bool get _isUnrepeatableCapture =>
+      _isNewCameraCapture ||
+      (!_isEditingExistingPage &&
+          widget.source == PageReviewSource.resumedCapture);
+
+  bool get _canScanNext => _isNewCameraCapture && widget.onScanNext != null;
+
+  bool get _canRetake => _isNewCameraCapture && widget.onRetake != null;
+
   bool get _canSkipImage =>
       !_isEditingExistingPage &&
       widget.isBatchImport &&
       (widget.source == PageReviewSource.gallery ||
-          widget.source == PageReviewSource.recovered);
+          widget.source == PageReviewSource.recovered ||
+          widget.source == PageReviewSource.shared ||
+          widget.source == PageReviewSource.pdf);
 
+  bool get _hasBatchProgress =>
+      _canSkipImage &&
+      widget.batchPosition != null &&
+      widget.batchCount != null;
+
+  /// Stop importing is laid out on every batch image so the app bar never
+  /// changes between images; it is only enabled while images remain.
+  bool get _offersStopImport =>
+      _hasBatchProgress && widget.onStopImport != null;
+
+  bool get _canStopImport =>
+      _offersStopImport && widget.batchPosition! < widget.batchCount!;
+
+  /// Asks with the same dialog as Back, even for an unreadable image: the
+  /// remaining images are lost either way.
+  Future<void> _stopImport() async {
+    if (!_canStopImport ||
+        !await _askToLeave(_LeaveConfirmation.stopImport) ||
+        !mounted ||
+        !_canStopImport ||
+        _step != _Step.corners) {
+      return;
+    }
+    widget.onStopImport!();
+    setState(() => _isLeaving = true);
+    Navigator.of(context).pop();
+  }
+
+  /// Skip leaves at once; Cancel asks first, exactly as Back does.
   void _cancelReview() {
+    if (!_canSkipImage && _leaveConfirmation != null) {
+      unawaited(_confirmLeave());
+      return;
+    }
+    _leaveReview(retake: false);
+  }
+
+  void _retake() => _leaveReview(retake: true);
+
+  void _leaveReview({required bool retake}) {
     if (!mounted ||
         _isLeaving ||
         _isProcessing ||
@@ -412,6 +732,21 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     }
     // The caller advances an import after this route returns. Ignore stale
     // taps during the reverse transition rather than popping another route.
+    if (retake) {
+      // The crop step's actions only show once the image is ready.
+      final corners = _corners;
+      if (corners == null) return;
+      widget.onRetake!(
+        PageReviewState(
+          corners: List.of(corners),
+          startCorners: List.of(_startCorners ?? corners),
+          filter: _selectedFilter,
+          rotationQuarterTurns: _rotationQuarterTurns,
+          brightness: _brightness,
+          contrast: _contrast,
+        ),
+      );
+    }
     setState(() => _isLeaving = true);
     Navigator.of(context).pop();
   }
@@ -423,23 +758,73 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final ready = imageSize != null && corners != null;
 
     return PopScope(
-      canPop: !_isProcessing,
+      // Back from the appearance step only returns to the crop step, which
+      // keeps every setting; leaving the review asks first whenever it
+      // would lose something (see _leaveConfirmation).
+      canPop:
+          !_isProcessing &&
+          (_step != _Step.corners || _isLeaving || _leaveConfirmation == null),
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) _isLeaving = true;
+        if (!didPop) {
+          unawaited(_confirmLeave());
+          return;
+        }
+        // Back during batch review leaves the import instead of silently
+        // skipping to the next image; Skip image remains the explicit skip.
+        // An unreadable image has nothing to review: leaving it moves on.
+        if (!_isLeaving &&
+            result == null &&
+            _error == null &&
+            _step == _Step.corners &&
+            _canStopImport) {
+          widget.onStopImport!();
+        }
+        _isLeaving = true;
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_appBarTitle),
+          // Scrolling the side panel is not scrolling the page: the app bar
+          // keeps its tint.
+          notificationPredicate: (notification) =>
+              defaultScrollNotificationPredicate(notification) &&
+              notification.context
+                      ?.findAncestorWidgetOfExactType<_SidePanelScrollArea>() ==
+                  null,
+          title: _showsBatchProgressTitle
+              // Scale down rather than ellipsize so the position stays
+              // readable beside Stop importing at large text sizes.
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(_appBarTitle, key: const Key('batch_progress')),
+                )
+              : Text(_appBarTitle),
           actions: [
+            if (_step == _Step.corners && _offersStopImport)
+              IconButton(
+                icon: const Icon(Icons.stop_circle_outlined),
+                tooltip: 'Stop importing',
+                onPressed: !_canStopImport || _isLeaving || _isProcessing
+                    ? null
+                    : () => unawaited(_stopImport()),
+              ),
             if (_step == _Step.filter) ...[
               IconButton(
-                icon: const Icon(Icons.filter_alt_outlined),
+                icon: const Icon(Icons.photo_filter_outlined),
                 tooltip: 'Filters',
+                // Marks the open side panel; never changes the button's size.
+                isSelected: _sidePanel == _Panel.filters,
                 onPressed: _isProcessing ? null : _showFilters,
               ),
               IconButton(
+                icon: const Icon(Icons.tune_outlined),
+                tooltip: 'Adjust',
+                isSelected: _sidePanel == _Panel.adjust,
+                onPressed: _isProcessing ? null : _showAdjustments,
+              ),
+              IconButton(
                 icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
-                tooltip: 'Rotate',
+                tooltip: 'Rotate clockwise',
                 onPressed: _isProcessing ? null : _rotate,
               ),
             ],
@@ -458,8 +843,19 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  /// What one batch item is called: PDF imports are reviewed page by page.
+  String get _batchItem =>
+      widget.source == PageReviewSource.pdf ? 'Page' : 'Image';
+
+  /// Batch position stays in the title on both steps, so the context and
+  /// the title's place never change while reviewing an image.
+  bool get _showsBatchProgressTitle => _hasBatchProgress;
+
   String get _appBarTitle {
-    if (_step == _Step.filter) return 'Adjust appearance';
+    if (_showsBatchProgressTitle) {
+      return '$_batchItem ${widget.batchPosition} of ${widget.batchCount}';
+    }
+    if (_step == _Step.filter) return 'Appearance';
     return _isEditingExistingPage ? 'Edit page' : 'Adjust corners';
   }
 
@@ -468,105 +864,125 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     Size imageSize,
     List<Offset> corners,
   ) {
-    final preview = Padding(
-      padding: const EdgeInsets.all(8),
-      child: CornerOverlay(
-        imageBytes: widget.originalBytes,
-        imageSize: imageSize,
-        corners: corners,
-        onChanged: _setCrop,
+    // Keep handles out of the system gesture zones along the screen edges
+    // the canvas touches, so a drag that starts on one never becomes Back
+    // or Home. Edge handles are also excluded from the Back gesture.
+    final gestureInsets = MediaQuery.systemGestureInsetsOf(context);
+    EdgeInsets canvasPadding({required bool landscape}) => EdgeInsets.fromLTRB(
+      math.max(8, gestureInsets.left),
+      8,
+      landscape ? 8 : math.max(8, gestureInsets.right),
+      landscape ? math.max(8, gestureInsets.bottom) : 8,
+    );
+    Widget preview({required bool landscape}) => Padding(
+      padding: canvasPadding(landscape: landscape),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CornerOverlay(
+              imageBytes: widget.originalBytes,
+              imageSize: imageSize,
+              corners: corners,
+              onChanged: _setCrop,
+              onReset: _resetCrop,
+            ),
+          ),
+          if (_cropProblem != null)
+            _canvasNotice(
+              context,
+              key: const Key('crop_problem'),
+              message: _cropProblemMessage(_cropProblem!),
+            )
+          else if (_fullImageNoticeMounted)
+            _fullImageNotice(context),
+        ],
       ),
     );
-    final actions = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_showFullImageNotice)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: Text(
-                'No page edges detected. Full image selected.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-          ),
-        if (_canSkipImage)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: const Text(
-                'Skip this image only. Any remaining images will still be reviewed.',
-              ),
-            ),
-          ),
-
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isLeaving || _isProcessing
-                        ? null
-                        : _cancelReview,
-                    child: Text(_canSkipImage ? 'Skip image' : 'Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: FilledButton(
-                    onPressed:
-                        _isGeneratingPreviews || _isLeaving || _isProcessing
-                        ? null
-                        : _goToFilterStep,
-                    child: _isGeneratingPreviews
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Preview page'),
-                  ),
-                ),
-              ],
-            ),
-          ),
+    Widget actions({required bool landscape}) {
+      final secondary = OutlinedButton(
+        onPressed: _isLeaving || _isProcessing
+            ? null
+            : _canRetake
+            ? _retake
+            : _cancelReview,
+        child: _actionLabel(
+          _canSkipImage
+              ? 'Skip ${_batchItem.toLowerCase()}'
+              : _canRetake
+              ? 'Retake'
+              : 'Cancel',
+          // One line in every layout, so both buttons keep one height even
+          // when large text would wrap only the longer label.
+          singleLine: true,
         ),
-      ],
-    );
+      );
+      final primary = FilledButton(
+        onPressed:
+            _isGeneratingPreviews ||
+                _isLeaving ||
+                _isProcessing ||
+                _cropProblem != null
+            ? null
+            : _goToFilterStep,
+        child: _isGeneratingPreviews
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : _actionLabel('Preview page', singleLine: true),
+      );
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          // The landscape side column is narrow: stack full-width buttons,
+          // primary first, as on the appearance step.
+          child: landscape
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [primary, const SizedBox(height: 8), secondary],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: secondary),
+                    const SizedBox(width: 16),
+                    Expanded(child: primary),
+                  ],
+                ),
+        ),
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final controls = SingleChildScrollView(
-          key: const Key('batch_review_scroll_view'),
-          child: actions,
-        );
         // Keep the crop canvas stable while guidance and large-text controls
         // scroll independently. A height cap on the canvas made it tiny on
         // short screens and whenever accessibility text scaling was enabled.
         if (constraints.maxWidth > constraints.maxHeight) {
           return Row(
             children: [
-              Expanded(child: preview),
-              SizedBox(
-                width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
-                child: controls,
+              Expanded(child: preview(landscape: true)),
+              _sideColumn(
+                constraints,
+                scrollKey: const Key('batch_review_scroll_view'),
+                child: actions(landscape: true),
               ),
             ],
           );
         }
         return Column(
           children: [
-            Expanded(child: preview),
+            Expanded(child: preview(landscape: false)),
             ConstrainedBox(
               constraints: BoxConstraints(
                 maxHeight: constraints.maxHeight * 0.35,
               ),
-              child: controls,
+              child: SingleChildScrollView(
+                key: const Key('batch_review_scroll_view'),
+                child: actions(landscape: false),
+              ),
             ),
           ],
         );
@@ -574,69 +990,246 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  /// Landscape control column, shared by both steps so the canvas, preview
+  /// and actions keep the same places when switching steps. Actions sit at
+  /// the bottom, within thumb reach, and scroll only if they cannot fit.
+  /// [panel] fills the space above them without moving them.
+  Widget _sideColumn(
+    BoxConstraints constraints, {
+    required Key scrollKey,
+    required Widget child,
+    Widget? panel,
+  }) => SizedBox(
+    width: (constraints.maxWidth * 0.35).clamp(240.0, 320.0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: panel ?? const SizedBox.shrink()),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: constraints.maxHeight),
+          child: SingleChildScrollView(key: scrollKey, child: child),
+        ),
+      ],
+    ),
+  );
+
+  /// A button label that never wraps: it scales down instead, so narrow
+  /// columns keep one-line buttons of a fixed height.
+  Widget _actionLabel(String text, {required bool singleLine}) => singleLine
+      ? FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(text, maxLines: 1, softWrap: false),
+        )
+      : Text(text, textAlign: TextAlign.center);
+
+  /// Overlaid on the canvas (never in the column) so the canvas keeps its
+  /// size when the notice fades after the first adjustment. Placed clear of
+  /// the corner handles, and ignores pointers so a drag that starts beneath
+  /// it still reaches the canvas.
+  Widget _fullImageNotice(BuildContext context) => _canvasNotice(
+    context,
+    key: const Key('full_image_notice'),
+    message: 'No page edges detected. Full image selected.',
+    visible: _showFullImageNotice,
+    onHidden: () {
+      if (mounted && !_showFullImageNotice) {
+        setState(() => _fullImageNoticeMounted = false);
+      }
+    },
+  );
+
+  static String _cropProblemMessage(CropProblem problem) =>
+      '${switch (problem) {
+        CropProblem.cornersCross => 'Corners cross each other.',
+        CropProblem.cornerInside => 'A corner is inside the crop.',
+        CropProblem.areaTooSmall => 'Crop is too small.',
+        CropProblem.cornersInLine => 'Move the corners apart.',
+      }} Double-tap the image to reset.';
+
+  /// A pill over the canvas that never covers a corner handle of the full
+  /// image: above the image when there is room (as side by side, beside a
+  /// short canvas, there rarely is), below it otherwise, and else over the
+  /// image just below its top handles. It never takes layout space and
+  /// ignores pointers, so drags beneath it still reach the handles.
+  Widget _canvasNotice(
+    BuildContext context, {
+    required Key key,
+    required String message,
+    bool visible = true,
+    VoidCallback? onHidden,
+  }) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodyMedium;
+    const padding = EdgeInsets.symmetric(horizontal: 12, vertical: 6);
+    const margin = 8.0;
+    const gap = 4.0;
+    final pill = Material(
+      key: key,
+      color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.94),
+      elevation: 1,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: padding,
+        child: Semantics(
+          liveRegion: true,
+          child: Text(message, textAlign: TextAlign.center, style: style),
+        ),
+      ),
+    );
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: const Duration(milliseconds: 200),
+          onEnd: onHidden,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final canvas = constraints.biggest;
+              final width = math.max(0.0, canvas.width - 2 * margin);
+              final text = TextPainter(
+                text: TextSpan(text: message, style: style),
+                textAlign: TextAlign.center,
+                textDirection: Directionality.of(context),
+                textScaler: MediaQuery.textScalerOf(context),
+              )..layout(maxWidth: math.max(0.0, width - padding.horizontal));
+              final height = text.height + padding.vertical;
+              text.dispose();
+              final image = CornerOverlay.imageRectFor(_imageSize!, canvas);
+              const reach = CornerOverlay.handleReach;
+              final aboveHandles = image.top - reach - gap;
+              final belowHandles = image.bottom + reach + gap;
+              final double top;
+              if (aboveHandles >= height) {
+                top = aboveHandles - height;
+              } else if (canvas.height - belowHandles >= height) {
+                top = belowHandles;
+              } else {
+                // Between the top and bottom handle rows, clear of both
+                // whenever the image is taller than the two rows and the
+                // notice.
+                top = image.top + reach + gap;
+              }
+              return Stack(
+                children: [
+                  Positioned(
+                    left: margin,
+                    width: width,
+                    top: top,
+                    child: Center(child: pill),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   void _setCrop(List<Offset> corners) {
     setState(() {
       _corners = corners;
+      _cropProblem = cropProblem(corners, imageSize: _imageSize!);
       _showFullImageNotice = false;
     });
     unawaited(_updatePreviews());
   }
 
-  Widget _resetAdjustmentsButton() => TextButton(
-    onPressed: _isProcessing
-        ? null
-        : () {
-            setState(() {
-              _brightness = 0;
-              _contrast = 1;
-              _finalPreviewGeneration++;
-              _previewStatus = _PreviewStatus.pending;
-            });
-            unawaited(_updateFinalPreview());
-          },
-    child: const Text('Reset adjustments'),
-  );
+  void _resetCrop() {
+    final start = _startCorners;
+    if (start == null || _isProcessing || _isLeaving) return;
+    // A fresh list so the overlay resyncs its live corners.
+    _setCrop([...start]);
+  }
 
+  /// Off at neutral, where it would change nothing.
+  Widget _resetAdjustmentsButton({required VoidCallback onSheetChanged}) =>
+      TextButton(
+        key: const Key('reset_adjustments'),
+        onPressed: _isProcessing || (_brightness == 0 && _contrast == 1)
+            ? null
+            : () {
+                setState(() {
+                  _brightness = 0;
+                  _contrast = 1;
+                  _finalPreviewGeneration++;
+                  _previewStatus = _PreviewStatus.pending;
+                });
+                onSheetChanged();
+                unawaited(_updateFinalPreview());
+              },
+        child: const Text('Reset adjustments'),
+      );
+
+  /// Gapless: new bytes (a rotation, a filter, an adjustment) replace the
+  /// previous image only once decoded, so the preview never blanks between
+  /// the two. The image is fitted inside its slot, so a rotation that flips
+  /// the aspect ratio never resizes the slot.
   Widget _boundedPreviewImage(
     Uint8List bytes, {
+    Key? key,
     required BoxFit fit,
     required int maxDimension,
   }) => Image(
-    image: ResizeImage(
-      MemoryImage(bytes),
-      width: maxDimension,
-      height: maxDimension,
-      policy: ResizeImagePolicy.fit,
-    ),
+    key: key,
+    gaplessPlayback: true,
+    image: _boundedImage(bytes, maxDimension: maxDimension),
     fit: fit,
+  );
+
+  static ImageProvider _boundedImage(
+    Uint8List bytes, {
+    required int maxDimension,
+  }) => ResizeImage(
+    MemoryImage(bytes),
+    width: maxDimension,
+    height: maxDimension,
+    policy: ResizeImagePolicy.fit,
   );
 
   Widget _buildFilterStep(BuildContext context) {
     final previewBytes = _finalPreviewBytes;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useScrollableLayout =
-            constraints.maxHeight < 480 ||
-            MediaQuery.textScalerOf(context).scale(16) > 20;
-        if (!useScrollableLayout) {
+        // Filters and brightness/contrast open on demand, so only the
+        // confirm buttons share the screen with the preview. Large text
+        // scales those buttons, which the fixed layout absorbs; only very
+        // short viewports need to scroll.
+        _isSideBySide = constraints.maxWidth > constraints.maxHeight;
+        if (_isSideBySide) {
+          // A sheet opened top to bottom would cover the preview and the
+          // confirm buttons: it moves into the control column.
+          if (_sheetPanel != null) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _moveSheetToSide(),
+            );
+          }
+          // Side by side: the preview keeps the full height and the confirm
+          // buttons stay visible, without scrolling, in the side column.
+          // Filters and Adjust open above them, never over the preview.
+          return Row(
+            children: [
+              Expanded(child: _filterPreview(previewBytes)),
+              _sideColumn(
+                constraints,
+                scrollKey: const Key('filter_step_controls'),
+                child: _filterActions(singleLine: true),
+                panel: _sidePanelView(context),
+              ),
+            ],
+          );
+        }
+        // A panel opened side by side has no place in this layout: it
+        // reopens as a bottom sheet.
+        if (_sidePanel != null) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _moveSideToSheet(),
+          );
+        }
+        if (constraints.maxHeight >= 480) {
           return Column(
             children: [
               Expanded(child: _filterPreview(previewBytes)),
-              _adjustmentSlider(
-                label: 'Brightness',
-                value: _brightness,
-                min: -100,
-                max: 100,
-                onChanged: (value) => _brightness = value,
-              ),
-              _adjustmentSlider(
-                label: 'Contrast',
-                value: _contrast,
-                min: 0.5,
-                max: 2.0,
-                onChanged: (value) => _contrast = value,
-              ),
-              _resetAdjustmentsButton(),
               _filterActions(),
             ],
           );
@@ -654,21 +1247,6 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
                 height: previewHeight,
                 child: _filterPreview(previewBytes),
               ),
-              _adjustmentSlider(
-                label: 'Brightness',
-                value: _brightness,
-                min: -100,
-                max: 100,
-                onChanged: (value) => _brightness = value,
-              ),
-              _adjustmentSlider(
-                label: 'Contrast',
-                value: _contrast,
-                min: 0.5,
-                max: 2.0,
-                onChanged: (value) => _contrast = value,
-              ),
-              _resetAdjustmentsButton(),
               _filterActions(),
             ],
           ),
@@ -677,67 +1255,162 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
+  // Preview status is layered over the preview instead of being inserted
+  // into the column, so the preview, adjustment controls and confirm buttons
+  // never move or resize while a preview is pending, updating or failed.
   Widget _filterPreview(Uint8List? previewBytes) => Padding(
     key: const Key('adjusted_page_preview'),
     padding: const EdgeInsets.all(16),
     child: Stack(
       fit: StackFit.expand,
       children: [
-        if (previewBytes != null)
+        if (previewBytes != null) ...[
           _boundedPreviewImage(
             previewBytes,
+            key: const Key('adjusted_page_image'),
             fit: BoxFit.contain,
             maxDimension: _fullPreviewDecodeSize,
           ),
-        if (previewBytes == null)
-          Center(
-            child: _previewStatus == _PreviewStatus.updating
-                ? const CircularProgressIndicator()
-                : const Icon(Icons.image_not_supported_outlined, size: 48),
+          _ImageBorder(
+            key: const Key('adjusted_page_border'),
+            image: _boundedImage(
+              previewBytes,
+              maxDimension: _fullPreviewDecodeSize,
+            ),
           ),
+        ],
+        Positioned.fill(child: _previewStatusOverlay(previewBytes != null)),
       ],
     ),
   );
 
+  String? _previewStatusMessage({required bool hasPreview}) =>
+      switch (_previewStatus) {
+        _PreviewStatus.pending || _PreviewStatus.ready => null,
+        _PreviewStatus.updating => 'Updating preview…',
+        _PreviewStatus.failed =>
+          hasPreview
+              ? 'Could not update the preview. Showing the previous one.'
+              : 'Preview unavailable',
+      };
+
+  Widget _previewStatusOverlay(bool hasPreview) {
+    final message = _previewStatusMessage(hasPreview: hasPreview);
+    final failed = _previewStatus == _PreviewStatus.failed;
+    final scheme = Theme.of(context).colorScheme;
+    final Widget? pill = message == null
+        ? null
+        : Material(
+            key: const Key('preview_status'),
+            color: scheme.surfaceContainerHigh.withValues(alpha: 0.94),
+            elevation: 1,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(message, textAlign: TextAlign.center),
+                  ),
+                  if (failed)
+                    TextButton.icon(
+                      onPressed: _isProcessing ? null : _updateFinalPreview,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry preview'),
+                    ),
+                ],
+              ),
+            ),
+          );
+    final Widget? status = pill == null || failed
+        ? pill
+        : IgnorePointer(child: pill);
+    if (!hasPreview) {
+      // Nothing to protect yet: centre the placeholder with the status under
+      // it. Scrolls (instead of overflowing) in very short previews.
+      return Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_previewStatus == _PreviewStatus.updating)
+                const CircularProgressIndicator()
+              else
+                const Icon(Icons.image_not_supported_outlined, size: 48),
+              if (status != null) ...[const SizedBox(height: 8), status],
+            ],
+          ),
+        ),
+      );
+    }
+    if (status == null) return const SizedBox.shrink();
+    // Top-aligned so it stays visible above the Filters/Adjust sheets.
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(8),
+        child: status,
+      ),
+    );
+  }
+
+  /// [value], [min] and [max] are slider positions; [describe] turns a
+  /// position into the value shown, [announce] into the value read aloud.
   Widget _adjustmentSlider({
     required String label,
     required double value,
     required double min,
     required double max,
+    required String Function(double position) describe,
+    required String Function(double position) announce,
     required ValueChanged<double> onChanged,
+    required VoidCallback onSheetChanged,
   }) {
-    final displayValue = label == 'Brightness'
-        ? '${value > 0 ? '+' : ''}${value.round()}'
-        : '${value.toStringAsFixed(2)}×';
+    final displayValue = describe(value);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$label: $displayValue'),
+          // The slider announces its own label and value.
+          ExcludeSemantics(child: Text('$label: $displayValue')),
           MergeSemantics(
             child: Semantics(
               label: label,
-              child: Slider(
-                value: value,
-                min: min,
-                max: max,
-                semanticFormatterCallback: (v) => label == 'Brightness'
-                    ? '${v.round()}, neutral 0'
-                    : '${v.toStringAsFixed(2)} times, neutral 1',
-                onChanged: _isProcessing
-                    ? null
-                    : (newValue) {
-                        if (!mounted || _isProcessing) return;
-                        setState(() {
-                          onChanged(newValue);
-                          _finalPreviewGeneration++;
-                          _previewStatus = _PreviewStatus.pending;
-                        });
-                      },
-                onChangeEnd: _isProcessing
-                    ? null
-                    : (_) => unawaited(_updateFinalPreview()),
+              // Dragging from the track's ends must not trigger system Back.
+              child: GestureExclusionRegion(
+                // Both adjustments are neutral in the middle, so the fill
+                // runs from there to the thumb, showing direction and amount.
+                child: SliderTheme(
+                  data: SliderTheme.of(
+                    context,
+                  ).copyWith(trackShape: const _CenteredSliderTrackShape()),
+                  child: Slider(
+                    value: value,
+                    min: min,
+                    max: max,
+                    semanticFormatterCallback: announce,
+                    onChanged: _isProcessing
+                        ? null
+                        : (newValue) {
+                            if (!mounted || _isProcessing) return;
+                            setState(() {
+                              onChanged(newValue);
+                              _finalPreviewGeneration++;
+                              _previewStatus = _PreviewStatus.pending;
+                            });
+                            onSheetChanged();
+                          },
+                    onChangeEnd: _isProcessing
+                        ? null
+                        : (_) => unawaited(_updateFinalPreview()),
+                  ),
+                ),
               ),
             ),
           ),
@@ -746,107 +1419,302 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     );
   }
 
-  Future<void> _showFilters() async {
+  /// An adjustment on its -100 to +100 scale: "+37", "0", "-12".
+  static String _signedAdjustment(double value) {
+    final rounded = value.round();
+    return rounded > 0 ? '+$rounded' : '$rounded';
+  }
+
+  /// Header shared by the Filters and Adjust sheets and side panels.
+  Widget _panelHeader(
+    BuildContext context,
+    String title, {
+    required VoidCallback onClose,
+  }) => Row(
+    children: [
+      Expanded(
+        child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+      ),
+      IconButton(
+        tooltip: 'Close',
+        icon: const Icon(Icons.close),
+        onPressed: onClose,
+      ),
+    ],
+  );
+
+  /// [refresh] rebuilds the sheet route, whose content does not rebuild
+  /// with this state.
+  Widget _filtersContent(
+    BuildContext context, {
+    required VoidCallback onClose,
+    required VoidCallback refresh,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _panelHeader(context, 'Filters', onClose: onClose),
+        Wrap(
+          spacing: 12,
+          runSpacing: 16,
+          children: [
+            for (final filter in PageFilter.values)
+              _filterChip(context, filter, onSelected: refresh),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  /// Brightness, contrast and Reset. Values live in this state, so they
+  /// persist across openings; the preview updates when a slider is released.
+  Widget _adjustContent(
+    BuildContext context, {
+    required VoidCallback onClose,
+    required VoidCallback refresh,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _panelHeader(context, 'Adjust', onClose: onClose),
+      ),
+      _adjustmentSlider(
+        label: 'Brightness',
+        value: _brightness,
+        min: -100,
+        max: 100,
+        describe: _signedAdjustment,
+        announce: (v) => '${v.round()}, neutral 0',
+        onChanged: (value) => _brightness = value,
+        onSheetChanged: refresh,
+      ),
+      _adjustmentSlider(
+        label: 'Contrast',
+        // Log scale: neutral 1.0× sits in the middle. Shown on the same
+        // -100 to +100 scale as brightness, so both read alike.
+        value: contrastToSliderPosition(_contrast),
+        min: -1,
+        max: 1,
+        describe: (position) => _signedAdjustment(position * 100),
+        announce: (position) => '${(position * 100).round()}, neutral 0',
+        onChanged: (position) => _contrast = sliderPositionToContrast(position),
+        onSheetChanged: refresh,
+      ),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: _resetAdjustmentsButton(onSheetChanged: refresh),
+        ),
+      ),
+    ],
+  );
+
+  Future<void> _showFilters() => _showPanel(_Panel.filters);
+
+  Future<void> _showAdjustments() => _showPanel(_Panel.adjust);
+
+  /// Side by side, toggles [panel] in the control column; otherwise opens
+  /// it as a bottom sheet. Either way Back closes it before leaving the
+  /// step.
+  Future<void> _showPanel(_Panel panel) async {
     if (_isProcessing || _isLeaving || _step != _Step.filter) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, updateSheet) => ConstrainedBox(
+    if (_isSideBySide) {
+      _toggleSidePanel(panel);
+      return;
+    }
+    await _showPanelSheet(panel);
+  }
+
+  /// After a rotation to side by side: the open sheet closes and its panel
+  /// opens in the control column.
+  void _moveSheetToSide() {
+    final panel = _sheetPanel;
+    final route = _sheetRoute;
+    if (!mounted || panel == null || !_isSideBySide) return;
+    _sheetPanel = null;
+    _sheetRoute = null;
+    if (route != null && route.isActive) {
+      Navigator.of(context).removeRoute(route);
+    }
+    if (_step == _Step.filter && !_isLeaving && _sidePanel != panel) {
+      _toggleSidePanel(panel);
+    }
+  }
+
+  /// After a rotation to top to bottom: the side panel closes and opens
+  /// again as a bottom sheet.
+  void _moveSideToSheet() {
+    final panel = _sidePanel;
+    if (!mounted || panel == null || _isSideBySide) return;
+    _closeSidePanel();
+    if (_step == _Step.filter && !_isLeaving) {
+      unawaited(_showPanelSheet(panel));
+    }
+  }
+
+  Future<void> _showPanelSheet(_Panel panel) async {
+    final sheet = ++_sheetGeneration;
+    _sheetPanel = panel;
+    _sheetRoute = null;
+    try {
+      await _openPanelSheet(panel);
+    } finally {
+      if (sheet == _sheetGeneration) {
+        _sheetPanel = null;
+        _sheetRoute = null;
+      }
+    }
+  }
+
+  Future<void> _openPanelSheet(_Panel panel) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    // No scrim: the preview behind shows the effect while choosing.
+    barrierColor: Colors.transparent,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (context, updateSheet) {
+        if (_sheetPanel == panel) _sheetRoute ??= ModalRoute.of(sheetContext);
+        void refresh() => updateSheet(() {});
+        void close() => Navigator.of(sheetContext).pop();
+        return ConstrainedBox(
           constraints: BoxConstraints(
             maxHeight: MediaQuery.sizeOf(context).height * 0.75,
           ),
           child: SingleChildScrollView(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                16 + MediaQuery.viewPaddingOf(context).bottom,
+              padding: EdgeInsets.only(
+                top: 16,
+                bottom: 16 + MediaQuery.viewPaddingOf(context).bottom,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Filters',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close filters',
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                      ),
-                    ],
-                  ),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 16,
-                    children: [
-                      for (final filter in PageFilter.values)
-                        _filterChip(
-                          context,
-                          filter,
-                          onSelected: () => updateSheet(() {}),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
+              child: switch (panel) {
+                _Panel.filters => _filtersContent(
+                  context,
+                  onClose: close,
+                  refresh: refresh,
+                ),
+                _Panel.adjust => _adjustContent(
+                  context,
+                  onClose: close,
+                  refresh: refresh,
+                ),
+              },
             ),
+          ),
+        );
+      },
+    ),
+  );
+
+  void _toggleSidePanel(_Panel panel) {
+    if (_sidePanel == panel) {
+      _closeSidePanel();
+      return;
+    }
+    setState(() => _sidePanel = panel);
+    if (_panelHistoryEntry != null) return;
+    late final LocalHistoryEntry entry;
+    entry = LocalHistoryEntry(
+      onRemove: () {
+        if (identical(_panelHistoryEntry, entry)) _panelHistoryEntry = null;
+        if (mounted && _sidePanel != null) {
+          setState(() => _sidePanel = null);
+        }
+      },
+    );
+    _panelHistoryEntry = entry;
+    ModalRoute.of(context)?.addLocalHistoryEntry(entry);
+  }
+
+  void _closeSidePanel() {
+    final entry = _panelHistoryEntry;
+    if (entry != null) {
+      entry.remove();
+    } else if (mounted && _sidePanel != null) {
+      setState(() => _sidePanel = null);
+    }
+  }
+
+  Widget? _sidePanelView(BuildContext context) {
+    final panel = _sidePanel;
+    if (panel == null) return null;
+    void refresh() {}
+    final controller = _panelScrollControllers[panel]!;
+    return Material(
+      key: const Key('appearance_side_panel'),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: _SidePanelScrollArea(
+        // A scrollbar shows that more controls lie below.
+        child: Scrollbar(
+          controller: controller,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            key: ValueKey('side_panel_scroll_${panel.name}'),
+            controller: controller,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: switch (panel) {
+              _Panel.filters => _filtersContent(
+                context,
+                onClose: _closeSidePanel,
+                refresh: refresh,
+              ),
+              _Panel.adjust => _adjustContent(
+                context,
+                onClose: _closeSidePanel,
+                refresh: refresh,
+              ),
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _previewFeedback() {
-    final message = switch (_previewStatus) {
-      _PreviewStatus.pending => 'Release the slider to update the preview.',
-      _PreviewStatus.updating =>
-        _finalPreviewBytes == null
-            ? 'Updating preview...'
-            : 'Updating preview. Previous result shown.',
-      _PreviewStatus.failed =>
-        _finalPreviewBytes == null
-            ? 'Preview unavailable. Retry to review this page.'
-            : 'Preview could not be updated. Previous result shown.',
-      _PreviewStatus.ready => '',
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Semantics(liveRegion: true, child: Text(message)),
-        if (_previewStatus == _PreviewStatus.failed)
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: TextButton.icon(
-              onPressed: _isProcessing ? null : _updateFinalPreview,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry preview'),
-            ),
+  Widget _filterActions({bool singleLine = false}) {
+    Widget label(String text, {required bool busy}) => busy
+        ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : _actionLabel(text, singleLine: singleLine);
+    final List<Widget> buttons;
+    if (_canScanNext) {
+      // Stacked full-width buttons keep both labels readable at large text
+      // sizes on narrow phones, and a progress indicator never changes widths.
+      buttons = [
+        FilledButton(
+          onPressed: _canConfirm ? () => _confirm(scanNext: true) : null,
+          child: label(
+            'Add & scan next',
+            busy: _isProcessing && _isScanNextRequested,
           ),
+        ),
         const SizedBox(height: 8),
-      ],
-    );
-  }
-
-  Widget _filterActions() {
-    final confirm = FilledButton(
-      onPressed: _canConfirm ? _confirm : null,
-      child: _isProcessing
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Text(_isEditingExistingPage ? 'Save changes' : 'Add page'),
-    );
+        OutlinedButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: label(
+            'Add page',
+            busy: _isProcessing && !_isScanNextRequested,
+          ),
+        ),
+      ];
+    } else {
+      buttons = [
+        FilledButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: label(
+            _isEditingExistingPage ? 'Save changes' : 'Add page',
+            busy: _isProcessing,
+          ),
+        ),
+      ];
+    }
     return SafeArea(
       top: false,
       child: Padding(
@@ -854,10 +1722,7 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_previewStatus != _PreviewStatus.ready) _previewFeedback(),
-            confirm,
-          ],
+          children: [...buttons],
         ),
       ),
     );
@@ -871,24 +1736,28 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
     final selected = _selectedFilter == filter;
     final previewBytes = _filterPreviews?[filter];
     final primary = Theme.of(context).colorScheme.primary;
+    final VoidCallback? select = _isProcessing
+        ? null
+        : () {
+            if (!mounted || _isProcessing) return;
+            setState(() => _selectedFilter = filter);
+            onSelected();
+            unawaited(_updateFinalPreview());
+          };
+    // One node per tile: the visible label is not read a second time.
     return Semantics(
       key: ValueKey('filter_${filter.name}'),
       button: true,
       enabled: !_isProcessing,
       selected: selected,
       label: '${_filterLabels[filter]} filter',
+      onTap: select,
+      excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.only(right: 12),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: _isProcessing
-              ? null
-              : () {
-                  if (!mounted || _isProcessing) return;
-                  setState(() => _selectedFilter = filter);
-                  onSelected();
-                  unawaited(_updateFinalPreview());
-                },
+          onTap: select,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -929,9 +1798,10 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
               const SizedBox(height: 4),
               Text(
                 _filterLabels[filter]!,
+                // Selection changes the colour only: a bolder label would
+                // widen the tile and shift the tiles after it.
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: selected ? primary : null,
-                  fontWeight: selected ? FontWeight.bold : null,
                 ),
               ),
             ],
@@ -940,6 +1810,111 @@ class _CornerAdjustScreenState extends State<CornerAdjustScreen> {
       ),
     );
   }
+}
+
+/// The crop canvas's hairline around a contained [image], so a white page
+/// stays distinct from a light background. Keeps the previous outline until
+/// a new image has decoded, as the gapless image does.
+class _ImageBorder extends StatefulWidget {
+  const _ImageBorder({super.key, required this.image});
+
+  final ImageProvider image;
+
+  @override
+  State<_ImageBorder> createState() => _ImageBorderState();
+}
+
+class _ImageBorderState extends State<_ImageBorder> {
+  ImageStream? _stream;
+  late final _listener = ImageStreamListener(_onImage);
+  Size? _imageSize;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(_ImageBorder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image) _resolve();
+  }
+
+  void _resolve() {
+    final stream = widget.image.resolve(createLocalImageConfiguration(context));
+    final previous = _stream;
+    if (previous != null && previous.key == stream.key) return;
+    previous?.removeListener(_listener);
+    _stream = stream..addListener(_listener);
+  }
+
+  void _onImage(ImageInfo info, bool synchronousCall) {
+    final size = Size(
+      info.image.width.toDouble(),
+      info.image.height.toDouble(),
+    );
+    info.dispose();
+    if (!mounted || size == _imageSize) return;
+    setState(() => _imageSize = size);
+  }
+
+  @override
+  void dispose() {
+    _stream?.removeListener(_listener);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageSize = _imageSize;
+    if (imageSize == null || imageSize.isEmpty) return const SizedBox.expand();
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _ImageBorderPainter(
+        imageSize,
+        Theme.of(context).colorScheme.outlineVariant,
+      ),
+    );
+  }
+}
+
+class _ImageBorderPainter extends CustomPainter {
+  _ImageBorderPainter(this.imageSize, this.color);
+
+  final Size imageSize;
+  final Color color;
+
+  /// Where a [BoxFit.contain], centred image is drawn in [size].
+  static Rect imageRect(Size imageSize, Size size) => Alignment.center.inscribe(
+    applyBoxFit(BoxFit.contain, imageSize, size).destination,
+    Offset.zero & size,
+  );
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      imageRect(imageSize, size).deflate(0.5),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ImageBorderPainter oldDelegate) =>
+      oldDelegate.imageSize != imageSize || oldDelegate.color != color;
+}
+
+/// Marks the landscape side panel's scroll view, which the app bar ignores.
+class _SidePanelScrollArea extends StatelessWidget {
+  const _SidePanelScrollArea({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 class _InitErrorView extends StatelessWidget {
@@ -968,6 +1943,66 @@ class _InitErrorView extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A slider track filled from its centre to the thumb, for values that are
+/// neutral in the middle of their range.
+class _CenteredSliderTrackShape extends RoundedRectSliderTrackShape {
+  const _CenteredSliderTrackShape();
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 2,
+  }) {
+    final track = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+    );
+    if (track.isEmpty) return;
+    final activeColor = ColorTween(
+      begin: sliderTheme.disabledActiveTrackColor,
+      end: sliderTheme.activeTrackColor,
+    ).evaluate(enableAnimation);
+    final inactiveColor = ColorTween(
+      begin: sliderTheme.disabledInactiveTrackColor,
+      end: sliderTheme.inactiveTrackColor,
+    ).evaluate(enableAnimation);
+    final radius = Radius.circular(track.height / 2);
+    final canvas = context.canvas;
+    if (inactiveColor != null) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(track, radius),
+        Paint()..color = inactiveColor,
+      );
+    }
+    final centre = track.center.dx;
+    final start = math.min(centre, thumbCenter.dx);
+    final end = math.max(centre, thumbCenter.dx);
+    if (activeColor == null || end - start < 0.5) return;
+    canvas.drawRRect(
+      RRect.fromLTRBR(
+        start,
+        track.top - additionalActiveTrackHeight / 2,
+        end,
+        track.bottom + additionalActiveTrackHeight / 2,
+        radius,
+      ),
+      Paint()..color = activeColor,
     );
   }
 }

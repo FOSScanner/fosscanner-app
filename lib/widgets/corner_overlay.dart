@@ -3,9 +3,16 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart'
-    show computeHitSlop, kPrimaryButton, EagerGestureRecognizer;
+    show
+        computeHitSlop,
+        kPrimaryButton,
+        DoubleTapGestureRecognizer,
+        EagerGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
+
+import '../services/corner_geometry.dart';
+import '../services/gesture_exclusion.dart';
 
 const _cornerLabels = [
   'Top-left corner',
@@ -24,6 +31,10 @@ const _previewDecodeSize = 2048;
 /// caller never has to think about how the image happens to be scaled on
 /// screen.
 ///
+/// A drag that leaves the four points convex but mis-ordered (one handle
+/// pulled past its neighbour) is re-sorted clockwise from top-left when it
+/// ends, so corner labels always follow positions.
+///
 /// Live visual feedback while dragging is handled entirely inside this
 /// widget via local state — [onChanged] fires once, when a drag ends, not
 /// on every pointer move. Firing it every frame used to make the caller
@@ -36,12 +47,44 @@ class CornerOverlay extends StatefulWidget {
     required this.imageSize,
     required this.corners,
     required this.onChanged,
+    this.onReset,
   });
 
   final Uint8List imageBytes;
   final Size imageSize;
   final List<Offset> corners;
   final ValueChanged<List<Offset>> onChanged;
+
+  /// Called on a double-tap away from the handles (and by the matching
+  /// accessibility action) to restore the starting corners.
+  final VoidCallback? onReset;
+
+  /// How far a handle reaches from its corner, in every direction: half its
+  /// touch target, which also covers the enlarged handle shown while it is
+  /// dragged.
+  static const handleReach = 24.0;
+
+  /// Where an image of [imageSize] is shown in an overlay of [size]: fitted
+  /// and centred, leaving room around it for whole handles at its edges.
+  static Rect imageRectFor(Size imageSize, Size size) {
+    // Reserve space for the entire handle, including its hit region, at
+    // image boundaries. Otherwise its visible outer half cannot be touched.
+    final gutter = math.min(
+      handleReach,
+      math.max(0.0, (size.shortestSide - 2 * handleReach) / 2),
+    );
+    final displaySize = applyBoxFit(
+      BoxFit.contain,
+      imageSize,
+      Size(size.width - 2 * gutter, size.height - 2 * gutter),
+    ).destination;
+    return Rect.fromLTWH(
+      (size.width - displaySize.width) / 2,
+      (size.height - displaySize.height) / 2,
+      displaySize.width,
+      displaySize.height,
+    );
+  }
 
   @override
   State<CornerOverlay> createState() => _CornerOverlayState();
@@ -116,24 +159,14 @@ class _CornerOverlayState extends State<CornerOverlay> {
     assert(_liveCorners.length == 4);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Reserve space for the entire handle, including its hit region, at
-        // image boundaries. Otherwise its visible outer half cannot be touched.
-        final gutter = math.min(
-          24.0,
-          math.max(0.0, (constraints.biggest.shortestSide - 48) / 2),
-        );
-        final fitted = applyBoxFit(
-          BoxFit.contain,
+        final imageRect = CornerOverlay.imageRectFor(
           widget.imageSize,
-          Size(
-            constraints.maxWidth - 2 * gutter,
-            constraints.maxHeight - 2 * gutter,
-          ),
+          constraints.biggest,
         );
-        final displaySize = fitted.destination;
+        final displaySize = imageRect.size;
         final scale = displaySize.width / widget.imageSize.width;
-        final offsetX = (constraints.maxWidth - displaySize.width) / 2;
-        final offsetY = (constraints.maxHeight - displaySize.height) / 2;
+        final offsetX = imageRect.left;
+        final offsetY = imageRect.top;
 
         Offset toDisplay(Offset p) =>
             Offset(p.dx * scale + offsetX, p.dy * scale + offsetY);
@@ -163,8 +196,16 @@ class _CornerOverlayState extends State<CornerOverlay> {
           return nearestIndex;
         }
 
-        return RawGestureDetector(
+        final onReset = widget.onReset;
+        final detector = RawGestureDetector(
           gestures: <Type, GestureRecognizerFactory>{
+            if (widget.onReset != null)
+              DoubleTapGestureRecognizer:
+                  GestureRecognizerFactoryWithHandlers<
+                    DoubleTapGestureRecognizer
+                  >(DoubleTapGestureRecognizer.new, (recognizer) {
+                    recognizer.onDoubleTap = widget.onReset;
+                  }),
             _CornerEagerGestureRecognizer:
                 GestureRecognizerFactoryWithHandlers<
                   _CornerEagerGestureRecognizer
@@ -215,8 +256,8 @@ class _CornerOverlayState extends State<CornerOverlay> {
               final shouldCommit = _draggingIndex != null;
               _clearPointerState();
               if (shouldCommit) {
-                setState(() => _draggingIndex = null);
-                widget.onChanged([..._liveCorners]);
+                _draggingIndex = null;
+                _commit(_liveCorners);
               }
             },
             onPointerCancel: (event) {
@@ -245,7 +286,17 @@ class _CornerOverlayState extends State<CornerOverlay> {
                 ),
                 Positioned.fill(
                   child: CustomPaint(
-                    painter: _QuadPainter(displayCorners, context),
+                    painter: _QuadPainter(
+                      displayCorners,
+                      Theme.of(context).colorScheme.primary,
+                      Theme.of(context).colorScheme.outlineVariant,
+                      Rect.fromLTWH(
+                        offsetX,
+                        offsetY,
+                        displaySize.width,
+                        displaySize.height,
+                      ),
+                    ),
                   ),
                 ),
                 for (var i = 0; i < 4; i++)
@@ -260,6 +311,14 @@ class _CornerOverlayState extends State<CornerOverlay> {
               ],
             ),
           ),
+        );
+        if (onReset == null) return detector;
+        return Semantics(
+          container: true,
+          customSemanticsActions: {
+            const CustomSemanticsAction(label: 'Reset corners'): onReset,
+          },
+          child: detector,
         );
       },
     );
@@ -283,8 +342,13 @@ class _CornerOverlayState extends State<CornerOverlay> {
   void _moveCornerForAccessibility(int index, Offset delta) {
     final next = [..._liveCorners];
     next[index] = _clampToImage(next[index] + delta);
-    setState(() => _liveCorners = next);
-    widget.onChanged(next);
+    _commit(next);
+  }
+
+  void _commit(List<Offset> corners) {
+    final sorted = sortCornersIfConvex([...corners]);
+    setState(() => _liveCorners = sorted);
+    widget.onChanged([...sorted]);
   }
 
   Rect _handleTargetRect(Offset displayPos, Size containerSize) {
@@ -342,17 +406,11 @@ class _CornerOverlayState extends State<CornerOverlay> {
 
   Widget _combinedCornerSemantics(List<Rect> targets) {
     final rect = targets.reduce((a, b) => a.expandToInclude(b));
-    final values = [
-      for (var i = 0; i < _liveCorners.length; i++)
-        '${_cornerLabels[i]} ${_liveCorners[i].dx.round()}, '
-            '${_liveCorners[i].dy.round()} pixels',
-    ];
     return Positioned.fromRect(
       rect: rect,
       child: Semantics(
         label: 'Document corners',
-        value: values.join('; '),
-        hint: 'Use the named directional actions to adjust each corner',
+        hint: 'Use actions to move corners',
         customSemanticsActions: _semanticActions(const [
           0,
           1,
@@ -399,12 +457,10 @@ class _CornerOverlayState extends State<CornerOverlay> {
       ],
     );
     final child = exposeSemantics
+        // The name alone: pixel coordinates mean nothing when heard.
         ? Semantics(
             label: _cornerLabels[index],
-            value:
-                '${_liveCorners[index].dx.round()}, '
-                '${_liveCorners[index].dy.round()} pixels',
-            hint: 'Use the directional actions to adjust this corner',
+            hint: 'Use actions to move this corner',
             customSemanticsActions: _semanticActions([
               index,
             ], includeCornerName: false),
@@ -414,22 +470,49 @@ class _CornerOverlayState extends State<CornerOverlay> {
 
     return Positioned.fromRect(
       rect: targetRect,
-      child: KeyedSubtree(key: ValueKey('corner-handle-$index'), child: child),
+      // A drag that starts on a handle near the screen edge must move the
+      // handle, not trigger system Back.
+      child: GestureExclusionRegion(
+        child: KeyedSubtree(
+          key: ValueKey('corner-handle-$index'),
+          child: child,
+        ),
+      ),
     );
   }
 }
 
+/// Dims the image outside the crop and outlines it. The kept area is left
+/// untinted so the document stays readable, in light and dark themes alike.
 class _QuadPainter extends CustomPainter {
-  _QuadPainter(this.corners, this.context);
+  _QuadPainter(this.corners, this.primary, this.imageBorder, this.imageRect);
+
+  /// Dark in both themes: the scrim sits on the photo, not on the surface.
+  static const scrimColor = Color(0x8C000000);
 
   final List<Offset> corners;
-  final BuildContext context;
+  final Color primary;
+
+  /// A hairline around the photo, so a white page stays distinct from a
+  /// light background.
+  final Color imageBorder;
+  final Rect imageRect;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final primary = Theme.of(context).colorScheme.primary;
     final path = Path()..addPolygon(corners, true);
-    canvas.drawPath(path, Paint()..color = primary.withValues(alpha: 0.2));
+    final outside = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(imageRect)
+      ..addPolygon(corners, true);
+    canvas.drawPath(outside, Paint()..color = scrimColor);
+    canvas.drawRect(
+      imageRect.deflate(0.5),
+      Paint()
+        ..color = imageBorder
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
     canvas.drawPath(
       path,
       Paint()
@@ -440,5 +523,9 @@ class _QuadPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _QuadPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _QuadPainter oldDelegate) =>
+      oldDelegate.primary != primary ||
+      oldDelegate.imageBorder != imageBorder ||
+      oldDelegate.imageRect != imageRect ||
+      !listEquals(oldDelegate.corners, corners);
 }

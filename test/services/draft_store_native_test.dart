@@ -76,6 +76,29 @@ void main() {
     );
   });
 
+  test('keeps the source density of imported pages, optionally', () async {
+    final store = FileDraftStore(directory: directory);
+    final imported = page(2, PageFilter.original).withSourceDpi(212.5);
+    await store.save([page(1, PageFilter.original), imported]);
+    final manifestFile = File('${directory.path}/current/manifest.json');
+    final manifest =
+        jsonDecode(await manifestFile.readAsString()) as Map<String, Object?>;
+    final entries = (manifest['pages']! as List).cast<Map<String, Object?>>();
+    // Photos write no density, so the schema is unchanged for them.
+    expect(entries[0].containsKey('sourceDpi'), isFalse);
+    expect(entries[1]['sourceDpi'], 212.5);
+    expect(manifest['schemaVersion'], 1);
+
+    var restored = await store.load();
+    expect(restored.map((page) => page.sourceDpi), [null, 212.5]);
+
+    // An unusable value restores the page with the default density.
+    entries[1]['sourceDpi'] = 'wide';
+    await manifestFile.writeAsString(jsonEncode(manifest));
+    restored = await store.load();
+    expect(restored.map((page) => page.sourceDpi), [null, null]);
+  });
+
   test(
     'a corrupt or incomplete manifest fails without overwriting data',
     () async {

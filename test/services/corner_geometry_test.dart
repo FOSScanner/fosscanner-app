@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/services/corner_geometry.dart';
 
@@ -210,4 +212,226 @@ void main() {
     expect(height, greaterThanOrEqualTo(2));
     expect(width / height, closeTo(100, 1));
   });
+
+  group('sortCornersIfConvex', () {
+    test('re-sorts a bow-tie made by dragging a corner past another', () {
+      // Top-left dragged to the right of top-right: edges 1-2 and 3-0 cross.
+      const dragged = [
+        Offset(90, 30),
+        Offset(60, 10),
+        Offset(60, 90),
+        Offset(10, 90),
+      ];
+
+      expect(sortCornersIfConvex(dragged), const [
+        Offset(60, 10),
+        Offset(90, 30),
+        Offset(60, 90),
+        Offset(10, 90),
+      ]);
+      expect(
+        cropProblem(sortCornersIfConvex(dragged), imageSize: _image),
+        isNull,
+      );
+    });
+
+    test('re-sorts counter-clockwise corners to clockwise', () {
+      const ccw = [
+        Offset(10, 10),
+        Offset(10, 90),
+        Offset(90, 90),
+        Offset(90, 10),
+      ];
+
+      expect(sortCornersIfConvex(ccw), const [
+        Offset(10, 10),
+        Offset(90, 10),
+        Offset(90, 90),
+        Offset(10, 90),
+      ]);
+    });
+
+    test('keeps ordered, concave and collapsed corners unchanged', () {
+      const ordered = [
+        Offset(10, 10),
+        Offset(90, 10),
+        Offset(90, 90),
+        Offset(10, 90),
+      ];
+      const concave = [
+        Offset(10, 10),
+        Offset(90, 10),
+        Offset(30, 30),
+        Offset(10, 90),
+      ];
+      const collapsed = [
+        Offset(50, 50),
+        Offset(50, 50),
+        Offset(50, 50),
+        Offset(50, 50),
+      ];
+
+      expect(sortCornersIfConvex(ordered), ordered);
+      expect(sortCornersIfConvex(concave), concave);
+      expect(sortCornersIfConvex(collapsed), collapsed);
+    });
+  });
+
+  group('cropProblem', () {
+    CropProblem? problem(List<Offset> corners, {Size imageSize = _image}) =>
+        cropProblem(corners, imageSize: imageSize);
+
+    test('a valid crop has no problem', () {
+      expect(
+        problem(const [
+          Offset(10, 10),
+          Offset(90, 10),
+          Offset(90, 90),
+          Offset(10, 90),
+        ]),
+        isNull,
+      );
+    });
+
+    test('crossing edges are reported as crossing', () {
+      expect(
+        problem(const [
+          Offset(10, 10),
+          Offset(90, 90),
+          Offset(90, 10),
+          Offset(10, 90),
+        ]),
+        CropProblem.cornersCross,
+      );
+    });
+
+    test('a corner inside the others is reported as inside', () {
+      expect(
+        problem(const [
+          Offset(10, 10),
+          Offset(90, 10),
+          Offset(30, 30),
+          Offset(10, 90),
+        ]),
+        CropProblem.cornerInside,
+      );
+    });
+
+    test('a clump of corners is too small, whatever its shape (#158)', () {
+      const photo = Size(1080, 1440);
+      for (final corners in const [
+        // Four corners dragged into a ~30 px clump on a plain page: a valid
+        // quad the warp alone accepts.
+        [
+          Offset(500, 500),
+          Offset(530, 500),
+          Offset(530, 530),
+          Offset(500, 530),
+        ],
+        // The same clump with crossing edges or a corner inside.
+        [
+          Offset(500, 500),
+          Offset(530, 530),
+          Offset(530, 500),
+          Offset(500, 530),
+        ],
+        [
+          Offset(500, 500),
+          Offset(530, 500),
+          Offset(510, 510),
+          Offset(500, 530),
+        ],
+        // All four on one point.
+        [Offset(50, 50), Offset(50, 50), Offset(50, 50), Offset(50, 50)],
+      ]) {
+        expect(
+          problem(corners, imageSize: photo),
+          CropProblem.areaTooSmall,
+          reason: '$corners',
+        );
+      }
+    });
+
+    test('the size threshold is relative to the shorter image side', () {
+      const photo = Size(1000, 2000);
+      List<Offset> square(double side) => [
+        const Offset(100, 100),
+        Offset(100 + side, 100),
+        Offset(100 + side, 100 + side),
+        Offset(100, 100 + side),
+      ];
+      // 8% of the 1000 px side.
+      expect(problem(square(79), imageSize: photo), CropProblem.areaTooSmall);
+      expect(problem(square(81), imageSize: photo), isNull);
+      // A long narrow strip passes only if its narrow side does.
+      expect(
+        problem(const [
+          Offset(100, 100),
+          Offset(170, 100),
+          Offset(170, 1900),
+          Offset(100, 1900),
+        ], imageSize: photo),
+        CropProblem.areaTooSmall,
+      );
+      expect(
+        problem(const [
+          Offset(100, 100),
+          Offset(190, 100),
+          Offset(190, 1900),
+          Offset(100, 1900),
+        ], imageSize: photo),
+        isNull,
+      );
+    });
+
+    test('collinear and collapsed corners must be moved apart (#158)', () {
+      for (final corners in const [
+        // Three corners in a line along one side, enclosing a third of the
+        // image: large, but a triangle rather than a page.
+        [Offset(10, 10), Offset(50, 10), Offset(90, 10), Offset(10, 90)],
+        [Offset(0, 0), Offset(99, 0), Offset(99, 60), Offset(99, 99)],
+        // Nearly collinear: the warp accepts it, the crop is still a triangle.
+        [Offset(0, 0), Offset(98, 0), Offset(99, 50), Offset(98, 99)],
+        // Two corners on top of each other.
+        [Offset(10, 10), Offset(90, 10), Offset(90, 10), Offset(10, 90)],
+        // A sliver.
+        [Offset(10, 10), Offset(90, 10), Offset(90, 10.4), Offset(10, 10.4)],
+      ]) {
+        expect(problem(corners), CropProblem.cornersInLine, reason: '$corners');
+      }
+      expect(
+        () => calculateWarpSize(const [
+          Offset(0, 0),
+          Offset(98, 0),
+          Offset(99, 50),
+          Offset(98, 99),
+        ]),
+        returnsNormally,
+      );
+      // Three corners bunched at one end of a sliver (#168).
+      expect(
+        problem(const [
+          Offset(650, 670),
+          Offset(655, 740),
+          Offset(630, 705),
+          Offset(0, 740),
+        ], imageSize: const Size(1000, 1000)),
+        CropProblem.cornersInLine,
+      );
+    });
+
+    test('a perspective quad with one short edge is still valid', () {
+      expect(
+        problem(const [
+          Offset(40, 10),
+          Offset(60, 10),
+          Offset(95, 90),
+          Offset(5, 90),
+        ]),
+        isNull,
+      );
+    });
+  });
 }
+
+const _image = Size(100, 100);
