@@ -41,8 +41,15 @@ No account, no cloud processing, no tracking.
 Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
 **Move later**, or long-press and drag pages to reorder them. Deleting a page
 offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
-current photo; remaining images are still reviewed. Canceling an unsaved
-capture or single-image review adds no page.
+current photo; remaining images are still reviewed. The review title keeps the
+position (for example *Image 2 of 5*) visible through crop and appearance review.
+From crop review, **Stop importing** (or Back) ends the batch while keeping pages
+already added. Back from appearance first returns to crop review. Canceling an
+unsaved capture or single-image review adds no page.
+
+Appearance-preview updates and retry messages stay within the preview instead
+of moving the sliders or confirmation button. The last successful image remains
+visible while a new preview is being generated.
 
 ## Screenshots
 
@@ -207,6 +214,9 @@ memory beyond the estimate. Lower-memory device profiling is still needed.
 
 ## Contributing and security
 
+See the [issue closure audit and UI follow-up](docs/issue-audit.md) for the
+reviewed `dev` snapshot, evidence-backed closures, and remaining acceptance gaps.
+
 Issues and pull requests are welcome. Follow [CONTRIBUTING.md](CONTRIBUTING.md):
 branch from `dev`, target PRs to `dev`, and keep changes focused. New dependencies
 must be FOSS, and document processing must stay on-device.
@@ -218,4 +228,5 @@ containing sensitive details. Version history is in [CHANGELOG.md](CHANGELOG.md)
 
 FOSScanner is licensed under the [GNU General Public License v3.0](LICENSE).
 Bundled OCR data and native dependencies have their own notices; see
-[`assets/tessdata/`](assets/tessdata/) and the app's license information.
+[`assets/tessdata/`](assets/tessdata/). In the app, open **About FOSScanner →
+View licenses** to read bundled OCR notices and registered package licenses.

@@ -9,6 +9,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import 'package:fosscanner/main.dart' show registerBundledLicenses;
+import '../support/layout_stability.dart';
 
 class _Picker extends ImagePickerPlatform {
   Completer<List<XFile>>? selection;
@@ -26,6 +28,7 @@ class _Picker extends ImagePickerPlatform {
 }
 
 void main() {
+  setUpAll(registerBundledLicenses);
   late ImagePickerPlatform originalPicker;
   late _Picker picker;
   late Uint8List imageBytes;
@@ -149,6 +152,62 @@ void main() {
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
       isFalse,
     );
+  });
+
+  for (final size in [const Size(390, 844), const Size(320, 568)]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets(
+        'searchable switch and sheet remain fixed at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, textScale: scale);
+          await openOptions(tester);
+          await tester.ensureVisible(find.text('Searchable text'));
+          await tester.pumpAndSettle();
+          final anchors = [
+            find.byType(SwitchListTile),
+            find.byType(BottomSheet),
+            find.widgetWithText(FilledButton, 'Done'),
+          ];
+          for (var toggle = 0; toggle < 2; toggle++) {
+            await expectStableRects(tester, anchors, () async {
+              await tester.tap(find.text('Searchable text'));
+              await tester.pumpAndSettle();
+            });
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  testWidgets('About exposes registered OCR licenses at 200% text', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(320, 568));
+    await pumpHome(tester, pageCount: 0, textScale: 2);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About FOSScanner'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('View licenses'));
+    await tester.tap(find.text('View licenses'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    for (final label in [
+      'Tesseract language data',
+      'Tesseract4Android and native OCR dependencies',
+    ]) {
+      await tester.scrollUntilVisible(
+        find.text(label),
+        200,
+        scrollable: find.byType(Scrollable).last,
+        maxScrolls: 100,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('image-only platforms do not offer unavailable OCR settings', (

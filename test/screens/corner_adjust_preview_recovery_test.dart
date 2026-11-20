@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
+import '../support/layout_stability.dart';
 
 const _corners = [Offset(5, 5), Offset(95, 5), Offset(95, 95), Offset(5, 95)];
 const _oldResultMessage =
@@ -394,6 +395,64 @@ void main() {
     await pumpWork(tester);
     expect(tester.takeException(), isNull);
   });
+
+  for (final configuration in [
+    (size: const Size(390, 844), scale: 1.0),
+    (size: const Size(390, 844), scale: 1.3),
+    (size: const Size(320, 568), scale: 1.0),
+    (size: const Size(320, 568), scale: 1.3),
+    (size: const Size(640, 300), scale: 2.0),
+  ]) {
+    testWidgets(
+      'preview controls stay fixed across every status at $configuration',
+      (tester) async {
+        tester.view.physicalSize = configuration.size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await openPreview(tester, textScale: configuration.scale);
+        final anchors = [
+          find.byKey(const Key('adjusted_page_preview')),
+          find.byType(Slider).first,
+          find.byType(Slider).last,
+          find.widgetWithText(TextButton, 'Reset adjustments'),
+          find.widgetWithText(FilledButton, 'Save changes'),
+        ];
+        final slider = tester.widget<Slider>(find.byType(Slider).first);
+        await expectStableRects(tester, anchors, () async {
+          slider.onChanged!(35);
+          await pumpWork(tester);
+        });
+        await expectStableRects(tester, anchors, () async {
+          slider.onChangeEnd!(35);
+          await pumpWork(tester);
+        });
+        expect(previewBytes(tester), same(previous));
+        expect(tester.widget<Image>(previewImage()).gaplessPlayback, isTrue);
+        await expectStableRects(tester, anchors, () async {
+          operations.requests.last.result.completeError(
+            StateError('synthetic failure'),
+          );
+          await tester.pumpAndSettle();
+        });
+        expect(confirm(tester).onPressed, isNull);
+        final retry = tester.widget<TextButton>(
+          find.ancestor(
+            of: find.text('Retry preview'),
+            matching: find.byType(TextButton),
+          ),
+        );
+        await expectStableRects(tester, anchors, () async {
+          retry.onPressed!();
+          await pumpWork(tester);
+          operations.requests.last.result.complete(updated);
+          await tester.pumpAndSettle();
+        });
+        expect(confirm(tester).onPressed, isNotNull);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   for (final size in [const Size(320, 568), const Size(640, 300)]) {
     testWidgets('error recovery remains reachable at $size with 200% text', (
