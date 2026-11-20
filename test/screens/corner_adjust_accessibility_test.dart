@@ -183,9 +183,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('normal-height filter screen keeps the fixed layout', (
+  testWidgets('normal portrait filter screen keeps the fixed layout', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await openFilterStep(tester);
 
     expect(find.byKey(const Key('filter_step_scroll_view')), findsNothing);
