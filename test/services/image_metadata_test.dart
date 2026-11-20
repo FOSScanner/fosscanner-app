@@ -186,10 +186,32 @@ void main() {
     );
   });
 
-  test('rejects a compressed 20MP image near the processing budget', () {
+  test('any image within the source limits fits beside a full document', () {
+    expect(
+      maxImageProcessingWorkingSetBytes,
+      maxRetainedDocumentBytes + maxImageProcessingHeadroomBytes,
+    );
+    // The largest source: 20 MP, warp capped at 9 MP.
+    expect(
+      estimateDecodedOpenCvBytes(const Size(4000, 5000)),
+      lessThanOrEqualTo(maxImageProcessingHeadroomBytes),
+    );
+    // A picker-capped camera photo with a large encoding, beside a document
+    // at its limit.
     expect(
       canProcessSourceImage(
-        currentRetainedBytes: 255 * 1024 * 1024,
+        currentRetainedBytes: maxRetainedDocumentBytes - 12 * 1024 * 1024,
+        encodedBytes: 12 * 1024 * 1024,
+        size: const Size(4472, 3354),
+      ),
+      isTrue,
+    );
+  });
+
+  test('rejects a 20MP image when transient copies exceed the budget', () {
+    expect(
+      canProcessSourceImage(
+        currentRetainedBytes: 267 * 1024 * 1024,
         encodedBytes: 64 * 1024,
         size: const Size(4000, 5000),
       ),

@@ -70,7 +70,7 @@ void main() {
     tester,
   ) async {
     final platform = await pumpHome(tester, 1);
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as PDF'));
     await pumpUntil(tester, () => platform.output != null);
     expect(latin1.decode(platform.output!), contains('/DCTDecode'));
   });
@@ -79,7 +79,7 @@ void main() {
     tester,
   ) async {
     final platform = await pumpHome(tester, 2);
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Export 2 pages as PDF'));
     await tester.pump();
 
     // Conversion is handed to a worker, so the screen keeps rendering a
@@ -93,33 +93,33 @@ void main() {
     );
 
     await pumpUntil(tester, () => platform.output != null);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export 2 pages as PDF'), findsOneWidget);
   });
 
   testWidgets('cancelling an image-only export stops before sharing', (
     tester,
   ) async {
     final platform = await pumpHome(tester, 2);
-    await tester.tap(find.text('Export PDF (2 pages)'));
+    await tester.tap(find.text('Export 2 pages as PDF'));
     await tester.pump();
 
     // Cancelling mid-export: worker results only arrive once the real delays
     // inside pumpUntil let them through, so this lands before assembly.
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pump();
-    expect(find.text('Cancelling PDF...'), findsOneWidget);
+    expect(find.text('Canceling…'), findsOneWidget);
 
-    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    await pumpUntilFound(tester, find.text('Export canceled'));
     expect(platform.calls, 0);
     expect(find.text('Keep this draft?'), findsNothing);
-    expect(find.text('Export PDF (2 pages)'), findsOneWidget);
+    expect(find.text('Export 2 pages as PDF'), findsOneWidget);
   });
 
   testWidgets('cancelling while the document assembles never shares it', (
     tester,
   ) async {
     final platform = await pumpHome(tester, 1);
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as PDF'));
 
     // 100% means every page is converted and the pre-assembly check has
     // already passed, so the worker is assembling the document right now.
@@ -130,12 +130,12 @@ void main() {
     );
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pump();
-    expect(find.text('Cancelling PDF...'), findsOneWidget);
+    expect(find.text('Canceling…'), findsOneWidget);
 
-    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    await pumpUntilFound(tester, find.text('Export canceled'));
     expect(platform.calls, 0);
     expect(platform.output, isNull);
     expect(find.text('Keep this draft?'), findsNothing);
-    expect(find.text('Export PDF (1 page)'), findsOneWidget);
+    expect(find.text('Export 1 page as PDF'), findsOneWidget);
   });
 }

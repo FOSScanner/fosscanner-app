@@ -60,4 +60,36 @@ void main() {
     expect(find.text('New message'), findsOneWidget);
     expect(find.text('Stale message'), findsNothing);
   });
+
+  testWidgets('messages float so they never lift a floating action button', (
+    tester,
+  ) async {
+    late BuildContext pageContext;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          floatingActionButton: FloatingActionButton(
+            onPressed: () {},
+            child: const Icon(Icons.add),
+          ),
+          body: Builder(
+            builder: (context) {
+              pageContext = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    final fab = tester.getRect(find.byType(FloatingActionButton));
+
+    showTransientMessage(pageContext, 'Message');
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<SnackBar>(find.byType(SnackBar)).behavior,
+      SnackBarBehavior.floating,
+    );
+    expect(tester.getRect(find.byType(FloatingActionButton)), fab);
+  });
 }

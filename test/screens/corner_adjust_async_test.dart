@@ -291,7 +291,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.tap(find.text('Grayscale'));
-    await tester.tap(find.byTooltip('Close filters'));
+    await tester.tap(find.byTooltip('Close'));
     await tester.pump();
     await tester.pump();
     await tester.pump();

@@ -16,6 +16,7 @@ import 'package:fosscanner/screens/page_preview_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/image_metadata.dart';
 
+import 'support/home_menu.dart';
 import 'support/worker_isolates.dart';
 
 class _FakeImagePickerPlatform extends ImagePickerPlatform {
@@ -235,12 +236,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('FOSScanner'), findsOneWidget);
-    expect(find.text('Ready to Scan'), findsOneWidget);
-    expect(find.byIcon(Icons.camera_alt), findsWidgets);
+    expect(find.text('Ready to scan'), findsOneWidget);
+    expect(find.byIcon(Icons.camera_alt_outlined), findsWidgets);
 
     // No captured pages yet, so there's nothing to clear or export.
-    expect(find.byIcon(Icons.clear_all), findsNothing);
-    expect(find.textContaining('Export PDF'), findsNothing);
+    expect(await isClearAllPagesEnabled(tester), isFalse);
+    expect(find.byKey(const Key('pdf_export_bar')), findsNothing);
   });
 
   testWidgets(
@@ -253,8 +254,15 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Capture Image'), findsNothing);
-      expect(find.textContaining('Import from your gallery'), findsOneWidget);
+      expect(find.byTooltip('Scan a page'), findsNothing);
+      expect(
+        find.text('Import from your gallery to add your first page.'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(OutlinedButton, 'Import from gallery'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -387,7 +395,7 @@ void main() {
 
       await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Capture Image'));
+      await tester.tap(find.byTooltip('Scan a page'));
       await tester.pumpAndSettle();
       debugDefaultTargetPlatformOverride = null;
 
@@ -395,7 +403,7 @@ void main() {
       expect(find.text('Import images'), findsOneWidget);
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Capture Image'), findsNothing);
+      expect(find.byTooltip('Scan a page'), findsNothing);
       expect(find.textContaining('Import from your gallery'), findsOneWidget);
     },
   );
@@ -417,7 +425,7 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
     await tester.pump();
-    await tester.tap(find.byTooltip('Capture Image'));
+    await tester.tap(find.byTooltip('Scan a page'));
     for (var i = 0; i < 20 && file.existsSync(); i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
@@ -479,7 +487,10 @@ void main() {
     expect(
       tester
           .widget<FloatingActionButton>(
-            find.widgetWithIcon(FloatingActionButton, Icons.camera_alt),
+            find.widgetWithIcon(
+              FloatingActionButton,
+              Icons.camera_alt_outlined,
+            ),
           )
           .onPressed,
       isNull,
@@ -563,7 +574,7 @@ void main() {
           .onPressed,
       isNull,
     );
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 10));
     await tester.pumpAndSettle();
     expect(find.text('Image intake help'), findsNothing);
     expect(
@@ -671,15 +682,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('file is too large'), findsOneWidget);
+    expect(find.textContaining('image is too large'), findsOneWidget);
     expect(find.textContaining('Choose a file under'), findsOneWidget);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
-  testWidgets('gallery reports a distinct transient processing-budget error', (
+  testWidgets('a document near its limit still reviews a new image', (
     tester,
   ) async {
     final icon = File('assets/icon/icon.png').readAsBytesSync();
+    // 250 MiB of the 256 MiB document limit: processing headroom no longer
+    // shrinks as the document grows, so the image is reviewed.
     final retainedBytes = _imageWithRetainedStorage(icon, 50 * 5 * 1024 * 1024);
     final page = ScannedPage(
       originalBytes: retainedBytes,
@@ -699,16 +712,20 @@ void main() {
           find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
         )
         .onPressed!();
-    await tester.pumpAndSettle();
+    // The editor keeps animating while it previews; never settle here.
+    for (
+      var i = 0;
+      i < 20 && find.byType(CornerAdjustScreen).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
-    expect(
-      find.text(
-        'This image needs too much temporary memory to process safely. '
-        'Remove pages or choose a smaller image.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.byType(CornerAdjustScreen), findsNothing);
+    expect(find.byType(CornerAdjustScreen), findsOneWidget);
+    expect(find.textContaining('Not enough memory'), findsNothing);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
@@ -801,12 +818,14 @@ void main() {
   });
 
   testWidgets(
-    'initial 20MP-metadata page near the cap can preview but cannot edit',
+    'a 20MP page of a document over the cap can preview but cannot edit',
     (tester) async {
       final icon = File('assets/icon/icon.png').readAsBytesSync();
       final sharedRetainedBytes = _imageWithRetainedStorage(
         icon,
-        52 * 2 * 1024 * 1024,
+        // Initial pages bypass admission; 272 MiB leaves less than a 20 MP
+        // edit needs even beyond the document limit.
+        272 * 1024 * 1024,
       );
       final page = ScannedPage(
         originalBytes: sharedRetainedBytes,
@@ -842,11 +861,12 @@ void main() {
       expect(identical(inspectedBytes, sharedRetainedBytes), isTrue);
       expect(
         find.text(
-          'This image needs too much temporary memory to process safely. '
-          'Remove pages or choose a smaller image.',
+          'This page can\'t be edited while the document is this large. '
+          'Remove some pages and try again.',
         ),
         findsOneWidget,
       );
+      expect(find.textContaining('choose a smaller image'), findsNothing);
       expect(find.byType(CornerAdjustScreen), findsNothing);
     },
   );
@@ -1022,7 +1042,7 @@ void main() {
         .onPressed!();
     await tester.pumpAndSettle();
 
-    expect(find.text('Could not read this photo.'), findsOneWidget);
+    expect(find.text('Could not read this image.'), findsOneWidget);
     expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
@@ -1070,8 +1090,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('PDF export options'), findsNothing);
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as PDF'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
 
     final params = sharePlatform.lastParams;
@@ -1079,7 +1098,7 @@ void main() {
     expect(params!.fileNameOverrides, hasLength(1));
     expect(
       params.fileNameOverrides!.single,
-      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+      matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
     );
   });
 
@@ -1119,13 +1138,10 @@ void main() {
         tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isFalse,
       );
-      expect(
-        find.text('Image-only PDF without text recognition.'),
-        findsOneWidget,
-      );
+      expect(find.text('Search and copy text in the PDF.'), findsOneWidget);
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Export PDF (1 page)'));
+      await tester.tap(find.text('Export 1 page as PDF'));
       await tester.pump();
       expect(find.byTooltip('PDF export options'), findsNothing);
       await pumpUntil(tester, () => sharePlatform.lastParams != null);
@@ -1133,10 +1149,10 @@ void main() {
       expect(find.text('Searchable export failed'), findsNothing);
       expect(
         sharePlatform.lastParams!.fileNameOverrides!.single,
-        matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+        matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
       );
       expect(find.text('Keep this draft?'), findsNothing);
-      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(find.text('Export 1 page as PDF'), findsOneWidget);
       await tester.tap(find.byTooltip('PDF export options'));
       await tester.pumpAndSettle();
       expect(
@@ -1212,7 +1228,7 @@ void main() {
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       final expectedAnchor = tester.getRect(find.byType(FilledButton));
-      await tester.tap(find.text('Export PDF (1 page)'));
+      await tester.tap(find.text('Export 1 page as searchable PDF'));
       await pumpUntil(tester, () => started.isCompleted, settle: false);
       expect(find.byType(SwitchListTile), findsNothing);
       expect(find.byTooltip('PDF export options'), findsNothing);
@@ -1231,7 +1247,7 @@ void main() {
       );
       staleDelete();
       await tester.pump();
-      expect(find.text('Generating PDF 0%'), findsOneWidget);
+      expect(find.text('Recognizing text 0%'), findsOneWidget);
 
       finish.complete();
       await pumpUntil(tester, () => sharePlatform.shared.isCompleted);
@@ -1241,9 +1257,11 @@ void main() {
       expect(params!.sharePositionOrigin, expectedAnchor);
       expect(
         params.fileNameOverrides!.single,
-        matches(RegExp(r'^FOSScanner_searchable_\d+\.pdf$')),
+        matches(
+          RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2} \(searchable\)\.pdf$'),
+        ),
       );
-      expect(params.text, 'Searchable document scanned with FOSScanner');
+      expect(params.text, isNull);
       await tester.tap(find.byTooltip('PDF export options'));
       await tester.pumpAndSettle();
       expect(
@@ -1282,31 +1300,36 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export PDF (1 page)'));
+    await tester.tap(find.text('Export 1 page as searchable PDF'));
     await pumpUntilFound(
       tester,
       find.text('Searchable export failed'),
       settle: false,
     );
     expect(find.text('Searchable export failed'), findsOneWidget);
-    expect(find.text('Share image-only PDF'), findsOneWidget);
+    expect(find.text('Export image-only PDF'), findsOneWidget);
     // The OCR job has ended; the fallback cannot cancel a native OCR job.
+    // Cancel keeps its slot (so the status never changes width) but is off.
     expect(
-      find.descendant(
-        of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
-        matching: find.byType(TextButton, skipOffstage: false),
-      ),
-      findsNothing,
+      tester
+          .widget<TextButton>(
+            find.descendant(
+              of: find.byKey(const Key('pdf_export_bar'), skipOffstage: false),
+              matching: find.byType(TextButton, skipOffstage: false),
+            ),
+          )
+          .onPressed,
+      isNull,
     );
 
-    await tester.tap(find.text('Share image-only PDF'));
+    await tester.tap(find.text('Export image-only PDF'));
     await pumpUntil(tester, () => sharePlatform.lastParams != null);
     debugDefaultTargetPlatformOverride = null;
 
     expect(sharePlatform.lastParams, isNotNull);
     expect(
       sharePlatform.lastParams!.fileNameOverrides!.single,
-      matches(RegExp(r'^FOSScanner_\d+\.pdf$')),
+      matches(RegExp(r'^Scan \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.pdf$')),
     );
   });
 }

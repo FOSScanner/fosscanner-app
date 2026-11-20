@@ -62,7 +62,7 @@ void main() {
       await tester.pump();
 
       expect(
-        find.byTooltip('Scan QR/barcode'),
+        find.byTooltip('Scan QR code or barcode'),
         platform == TargetPlatform.android || platform == TargetPlatform.iOS
             ? findsOneWidget
             : findsNothing,
