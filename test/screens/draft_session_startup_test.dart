@@ -33,6 +33,47 @@ class _SessionDraftStore implements DraftStore, DraftSessionStore {
 }
 
 void main() {
+  testWidgets(
+    'startup and failure respect cutouts and recovery stays reachable',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(600, 220);
+      tester.view.padding = const FakeViewPadding(
+        left: 38,
+        right: 24,
+        bottom: 20,
+      );
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetPadding);
+      final store = _SessionDraftStore();
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: FOSScannerApp(draftStore: store),
+        ),
+      );
+      // The app creates its own MediaQuery; set the system text scale as well.
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pump();
+      final progress = tester.getRect(find.byType(CircularProgressIndicator));
+      expect(progress.left, greaterThanOrEqualTo(38));
+      expect(progress.right, lessThanOrEqualTo(576));
+      store.attempts.single.completeError(StateError('private storage path'));
+      await tester.pumpAndSettle();
+      final retry = find.widgetWithText(FilledButton, 'Retry');
+      await tester.ensureVisible(retry);
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(retry);
+      expect(rect.left, greaterThanOrEqualTo(38));
+      expect(rect.right, lessThanOrEqualTo(576));
+      expect(rect.bottom, lessThanOrEqualTo(200));
+      expect(retry.hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('acquires the draft session before mounting the scanner', (
     tester,
   ) async {

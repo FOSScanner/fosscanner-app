@@ -43,7 +43,7 @@ non-shrinking counter layout and additional regression coverage.
   and permission minimization (#127) are important independent follow-ups, not
   resolved by this UI work.
 
-## Follow-up validation
+## Follow-up validation (initial branch, before integration)
 
 Flutter 3.44.0 / Dart 3.12: `flutter analyze --no-pub` clean;
 `flutter test --no-pub` **365 passed**. The focused review/layout/recovery plus
@@ -54,6 +54,14 @@ PR #200 and #201 quality, Android, signing, and iOS checks are green; #201's
 initial Kotlin artifact-resolution failure passed on one failed-job rerun
 without code/toolchain changes. None of these checks establishes native-device
 or physical accessibility acceptance.
+
+## Integration note
+
+For merging, this branch incorporates merged #200 and the updated #201 head,
+so the final review validates safe areas, responsive layouts, and stable preview
+feedback together. The original disposition table below remains a historical
+snapshot, not a live report of PR status. Integration check results are recorded
+on PR #202.
 
 ## Disposition of every issue in the original snapshot
 

@@ -21,6 +21,7 @@ quality.
 | `ui-intake-page-limit.png` | Discoverable intake help at the page-count limit |
 | `ui-intake-limit-guidance.png` | Page-count limit and recovery guidance |
 | `ui-draft-restore-failure.png` | Restoration failure pauses intake and offers retry |
+| `ui-crop-error-short-insets.png` | Crop recovery scrolled into view at 600×220, 200% text, and simulated side/bottom cutouts |
 | `ui-draft-discard-confirmation.png` | Explicit confirmation before discarding cached generations |
 
 ## Reproduce
