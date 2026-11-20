@@ -1266,7 +1266,7 @@ void main() {
       );
       staleDelete();
       await tester.pump();
-      expect(find.text('Recognizing text…'), findsOneWidget);
+      expect(find.text('Recognizing text · page 1 of 1'), findsOneWidget);
 
       finish.complete();
       await pumpUntil(tester, () => sharePlatform.shared.isCompleted);

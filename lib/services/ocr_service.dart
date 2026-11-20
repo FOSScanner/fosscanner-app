@@ -151,6 +151,9 @@ Future<void> createSearchablePdf(
               1,
               images.length,
             );
+      // Report the step right away: the first page can take seconds to
+      // resample, and the bar must not sit on a generic status meanwhile.
+      if (!keepsOriginal) onPreparing?.call(0, images.length);
       // Every worker settles before the job directory can be removed; the
       // first failure stops the others and is rethrown.
       await Future.wait([
@@ -166,6 +169,9 @@ Future<void> createSearchablePdf(
       final outputPathNoExtension = '${jobDirectory.path}/document';
       final pdfFile = File('$outputPathNoExtension.pdf');
       final String? pdfPath;
+      // Recognizing the first page takes seconds too; show it as started
+      // instead of an unnumbered status.
+      onProgress?.call(0, images.length);
       _nativeRendering = true;
       try {
         pdfPath = await _channel.invokeMethod<String>('createSearchablePdf', {
@@ -242,6 +248,7 @@ Future<int> copyRecognizedText(
         imagePaths.add(file.path);
       }
       final int? copied;
+      onProgress?.call(0, images.length);
       _nativeRendering = true;
       try {
         copied = await _channel.invokeMethod<int>('copyRecognizedText', {

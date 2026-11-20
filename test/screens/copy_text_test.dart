@@ -96,7 +96,7 @@ void main() {
       // Lets the sheet close; the spinner keeps animating until progress.
       await tester.pump(const Duration(seconds: 1));
       expect(pagePaths, hasLength(2));
-      expect(find.text('Recognizing text…'), findsOneWidget);
+      expect(find.text('Recognizing text · page 1 of 2'), findsOneWidget);
       // The document is locked like during a PDF export.
       expect(find.byTooltip('PDF export options'), findsNothing);
       expect(

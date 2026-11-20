@@ -216,7 +216,7 @@ void main() {
         );
       }
       // Recognition starts only once every page is prepared.
-      expect(find.text('Recognizing text…'), findsOneWidget);
+      expect(find.text('Recognizing text · page 1 of 12'), findsOneWidget);
       expectRects(tester, frame, idle, 'recognizing');
       ocr.gate!.complete();
       await pumpUntil(tester, () => share.calls == 1);
@@ -248,7 +248,7 @@ void main() {
       ocr.gate = await newGate(tester);
       await startExport();
       await pumpUntil(tester, () => ocr.jobs == 1, settle: false);
-      expect(find.text('Recognizing text…'), findsOneWidget);
+      expect(find.text('Recognizing text · page 1 of 1'), findsOneWidget);
       double? ring() => tester
           .widget<CircularProgressIndicator>(
             find.descendant(
@@ -324,7 +324,7 @@ void main() {
       await pumpUntil(tester, () => ocr.jobs == 4, settle: false);
       // Lets the sheet close; the spinner keeps animating until progress.
       await tester.pump(const Duration(seconds: 1));
-      expect(find.text('Recognizing text…'), findsOneWidget);
+      expect(find.text('Recognizing text · page 1 of 1'), findsOneWidget);
       expectFrame('recognizing text');
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await tester.pump();
@@ -411,7 +411,7 @@ void main() {
       await pumpUntil(tester, () => ocr.jobs == 1, settle: false);
       await pressBack();
       expect(exits, isEmpty);
-      expect(find.text('Recognizing text…'), findsOneWidget);
+      expect(find.text('Recognizing text · page 1 of 1'), findsOneWidget);
 
       ocr.gate!.complete();
       await pumpUntilFound(tester, find.byIcon(Icons.share_outlined));

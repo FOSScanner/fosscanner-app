@@ -386,7 +386,7 @@ void main() {
         onPreparing: (completed, total) => events.add('$completed/$total'),
       );
       await readOutput();
-      expect(events, ['1/5', '2/5', '3/5', '4/5', '5/5', 'render']);
+      expect(events, ['0/5', '1/5', '2/5', '3/5', '4/5', '5/5', 'render']);
       expect(rendered, shapes);
     },
   );
@@ -454,7 +454,7 @@ void main() {
       ], onProgress: (completed, total) => progress.add((completed, total)));
 
       expect(copied, 42);
-      expect(progress, [(1, 2)]);
+      expect(progress, [(0, 2), (1, 2)]);
       expect(calls.first.method, 'ensureTessdata');
       expect(await temporary.list().toList(), isEmpty);
     });
