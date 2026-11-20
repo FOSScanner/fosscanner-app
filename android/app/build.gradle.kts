@@ -47,6 +47,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // AGP 9 disables resValue() by default; the app_name label below needs it.
+    buildFeatures {
+        resValues = true
+    }
+
     defaultConfig {
         applicationId = "com.fosscanner.app"
         // You can update the following values to match your application needs.
@@ -56,6 +61,10 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Launcher label (AndroidManifest.xml uses @string/app_name). Set here
+        // rather than in res/values so build types can override it without a
+        // duplicate resource.
+        resValue("string", "app_name", "FOSScanner")
     }
 
     signingConfigs {
@@ -70,6 +79,15 @@ android {
     }
 
     buildTypes {
+        // A distinct application ID lets a debug APK (CI artifact or local
+        // build) install next to the release one instead of replacing it and
+        // wiping its in-progress draft. The namespace, and so the Kotlin
+        // package and MainActivity, stay com.fosscanner.app.
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "FOSScanner Debug")
+        }
         release {
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")

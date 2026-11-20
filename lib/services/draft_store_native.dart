@@ -36,6 +36,7 @@ class _DraftPageFiles {
     required this.rotation,
     required this.brightness,
     required this.contrast,
+    required this.sourceDpi,
   });
 
   final File original;
@@ -45,6 +46,7 @@ class _DraftPageFiles {
   final int rotation;
   final double brightness;
   final double contrast;
+  final double? sourceDpi;
 }
 
 DraftStore createDraftStore() => FileDraftStore();
@@ -217,6 +219,9 @@ class FileDraftStore implements DraftStore, DraftSessionStore {
           rotation: rotation,
           brightness: brightness,
           contrast: contrast,
+          // Optional: drafts written before it existed, or with a value out
+          // of range, export at the default "Original" density.
+          sourceDpi: validSourceDpi(entry['sourceDpi']),
         ),
       );
     }
@@ -238,6 +243,7 @@ class FileDraftStore implements DraftStore, DraftSessionStore {
           rotationQuarterTurns: files.rotation,
           brightness: files.brightness,
           contrast: files.contrast,
+          sourceDpi: files.sourceDpi,
         ),
       );
     }
@@ -364,6 +370,8 @@ class FileDraftStore implements DraftStore, DraftSessionStore {
           'rotationQuarterTurns': page.rotationQuarterTurns,
           'brightness': page.brightness,
           'contrast': page.contrast,
+          // Optional, so older app versions still read this schema version.
+          'sourceDpi': ?page.sourceDpi,
         });
       }
       await File(
