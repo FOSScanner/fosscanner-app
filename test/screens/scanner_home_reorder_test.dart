@@ -9,6 +9,8 @@ import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/services/draft_store.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
+import '../support/home_menu.dart';
+
 class _Store implements DraftStore {
   final saves = <List<ScannedPage>>[];
   Completer<void>? clearing;
@@ -178,9 +180,10 @@ void main() {
     expect(store.saves.last, orderedEquals(pages));
   });
 
-  testWidgets('single-page drafts need no reorder menu', (tester) async {
+  testWidgets('a single page keeps a disabled reorder menu', (tester) async {
     await pumpHome(tester, initial: [pages.first]);
-    expect(find.byTooltip('Reorder page 1'), findsNothing);
+    // The slot stays so every card footer has the same layout.
+    expect(menu(tester, 1).enabled, isFalse);
     expect(find.byTooltip('Delete page 1'), findsOneWidget);
   });
 
@@ -211,8 +214,7 @@ void main() {
     await pumpHome(tester);
     final staleMove = menu(tester, 2).onSelected!;
     store.clearing = Completer<void>();
-    await tester.tap(find.byTooltip('Clear all'));
-    await tester.pumpAndSettle();
+    await tapClearAllPages(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Clear all'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -225,7 +227,7 @@ void main() {
     staleMove(-1);
     await tester.pumpAndSettle();
     expect(store.saves, isEmpty);
-    expect(find.text('Ready to Scan'), findsOneWidget);
+    expect(find.text('Ready to scan'), findsOneWidget);
   });
 
   testWidgets('stale selections cannot move the wrong page after a reorder', (

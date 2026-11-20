@@ -1,9 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fosscanner/services/image_pdf_service.dart';
+import 'package:fosscanner/services/pdf_export_options.dart';
 import 'package:image/image.dart' as im;
+import 'package:pdf/pdf.dart';
 
 List<Uint8List> embeddedJpegs(Uint8List pdf) {
   final images = <Uint8List>[];
@@ -20,7 +24,74 @@ List<Uint8List> embeddedJpegs(Uint8List pdf) {
   return images;
 }
 
+late Directory _outputs;
+
+String _outputPath() => '${_outputs.path}/document.pdf';
+
+/// Writes the PDF to a file and reads it back for inspection.
+Future<Uint8List> createImageOnlyPdf(
+  List<Uint8List> pages, {
+  PdfPageSize pageSize = PdfPageSize.original,
+  PdfQuality quality = PdfQuality.high,
+  void Function(int completed, int total)? onProgress,
+  bool Function()? isCancelled,
+}) async {
+  await writeImageOnlyPdf(
+    pages,
+    _outputPath(),
+    pageSize: pageSize,
+    quality: quality,
+    onProgress: onProgress,
+    isCancelled: isCancelled,
+  );
+  final file = File(_outputPath());
+  final bytes = await file.readAsBytes();
+  await file.delete();
+  return bytes;
+}
+
+List<List<double>> mediaBoxes(Uint8List pdf) =>
+    RegExp(r'/MediaBox\s*\[([^\]]+)\]')
+        .allMatches(latin1.decode(pdf))
+        .map(
+          (match) =>
+              match[1]!.trim().split(RegExp(r'\s+')).map(double.parse).toList(),
+        )
+        .toList();
+
+Uint8List noisyJpeg(int width, int height) {
+  final random = math.Random(width * height);
+  final image = im.Image(width: width, height: height, numChannels: 3);
+  for (final pixel in image) {
+    final v = 128 + random.nextInt(64);
+    pixel
+      ..r = v
+      ..g = v
+      ..b = v;
+  }
+  return im.encodeJpg(image, quality: 95);
+}
+
 void main() {
+  setUp(() async {
+    _outputs = await Directory.systemTemp.createTemp('image_pdf_test_');
+  });
+
+  tearDown(() async {
+    // Every test leaves the directory empty: success paths delete what they
+    // read back, and failures must not leave a partial PDF behind.
+    expect(_outputs.listSync(), isEmpty);
+    await _outputs.delete();
+  });
+
+  test('writes the finished document to the requested path', () async {
+    final page = im.encodeJpg(im.Image(width: 20, height: 10));
+    await writeImageOnlyPdf([page], _outputPath());
+    final written = File(_outputPath());
+    expect(latin1.decode(await written.readAsBytes()), startsWith('%PDF-'));
+    await written.delete();
+  });
+
   test('retains original JPEG bytes without another lossy encoding', () async {
     final source = im.Image(width: 200, height: 100, numChannels: 3);
     im.fill(source, color: im.ColorRgb8(30, 100, 180));
@@ -123,10 +194,9 @@ void main() {
     const pollsBeforeAssemblyEnds = 2;
     var polls = 0;
     await expectLater(
-      createImageOnlyPdf(
-        [page],
-        isCancelled: () => polls++ >= pollsBeforeAssemblyEnds,
-      ),
+      createImageOnlyPdf([
+        page,
+      ], isCancelled: () => polls++ >= pollsBeforeAssemblyEnds),
       throwsA(isA<ImagePdfCancelledException>()),
     );
     expect(polls, pollsBeforeAssemblyEnds + 1);
@@ -140,5 +210,87 @@ void main() {
       ], isCancelled: () => true),
       throwsA(isA<ImagePdfCancelledException>()),
     );
+  });
+
+  test('A4 and Letter exports use exact page boxes for every page', () async {
+    final portrait = noisyJpeg(1240, 1754);
+    final landscape = noisyJpeg(1754, 1240);
+    final a4 = await createImageOnlyPdf([
+      portrait,
+      landscape,
+    ], pageSize: PdfPageSize.a4);
+    final boxes = mediaBoxes(a4);
+    expect(boxes, hasLength(2));
+    expect(boxes[0][2], closeTo(PdfPageFormat.a4.width, 0.1));
+    expect(boxes[0][3], closeTo(PdfPageFormat.a4.height, 0.1));
+    expect(boxes[1][2], closeTo(PdfPageFormat.a4.height, 0.1));
+    expect(boxes[1][3], closeTo(PdfPageFormat.a4.width, 0.1));
+    // High keeps the JPEG untouched even on a fixed page size.
+    expect(embeddedJpegs(a4).first, orderedEquals(portrait));
+
+    final letter = await createImageOnlyPdf([
+      portrait,
+    ], pageSize: PdfPageSize.letter);
+    expect(mediaBoxes(letter).single.sublist(2), [612, 792]);
+  });
+
+  test('presets measurably shrink a representative 10-page document', () async {
+    final pages = [for (var i = 0; i < 10; i++) noisyJpeg(620 + i, 877)];
+    final high = await createImageOnlyPdf(pages, pageSize: PdfPageSize.a4);
+    final balanced = await createImageOnlyPdf(
+      pages,
+      pageSize: PdfPageSize.a4,
+      quality: PdfQuality.balanced,
+    );
+    final small = await createImageOnlyPdf(
+      pages,
+      pageSize: PdfPageSize.a4,
+      quality: PdfQuality.small,
+    );
+    expect(balanced.length, lessThan(high.length * 0.75));
+    expect(small.length, lessThan(balanced.length));
+    expect(small.length, lessThan(high.length / 2));
+    expect(mediaBoxes(small), hasLength(10));
+  });
+
+  test('page boxes equal what the searchable renderer produces', () async {
+    // Tesseract sizes each page as image pixels * 72 / DPI, using the padded
+    // canvas and density from the same plan; the image-only PDF must match.
+    final sources = [(1240, 1754), (1754, 1240), (804, 2181), (1653, 2339)];
+    for (final size in PdfPageSize.values) {
+      for (final quality in PdfQuality.values) {
+        final pdf = await createImageOnlyPdf(
+          [for (final (w, h) in sources) noisyJpeg(w, h)],
+          pageSize: size,
+          quality: quality,
+        );
+        final boxes = mediaBoxes(pdf);
+        expect(boxes, hasLength(sources.length));
+        for (var i = 0; i < sources.length; i++) {
+          final (w, h) = sources[i];
+          final plan = planPdfPage(
+            sourceWidth: w,
+            sourceHeight: h,
+            pageSize: size,
+            quality: quality,
+          );
+          final dpi = plan.nativeDpi;
+          final rendererWidth =
+              (plan.canvasWidth ?? plan.pixelWidth) * 72 / dpi;
+          final rendererHeight =
+              (plan.canvasHeight ?? plan.pixelHeight) * 72 / dpi;
+          final reason = '${size.label}/${quality.label} $w x $h';
+          expect(boxes[i][2], closeTo(rendererWidth, 0.001), reason: reason);
+          expect(boxes[i][3], closeTo(rendererHeight, 0.001), reason: reason);
+        }
+      }
+    }
+  });
+
+  test('image-only PDFs carry no information dictionary', () async {
+    final pdf = latin1.decode(await createImageOnlyPdf([noisyJpeg(40, 60)]));
+    expect(pdf, isNot(contains('/Info')));
+    expect(pdf, isNot(contains('/Producer')));
+    expect(pdf, isNot(contains('/CreationDate')));
   });
 }

@@ -107,9 +107,9 @@ void main() {
     // inside pumpUntil let them through, so this lands before assembly.
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pump();
-    expect(find.text('Cancelling PDF...'), findsOneWidget);
+    expect(find.text('Canceling…'), findsOneWidget);
 
-    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    await pumpUntilFound(tester, find.text('Export canceled'));
     expect(platform.calls, 0);
     expect(find.text('Keep this draft?'), findsNothing);
     expect(find.text('Export PDF (2 pages)'), findsOneWidget);
@@ -130,9 +130,9 @@ void main() {
     );
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pump();
-    expect(find.text('Cancelling PDF...'), findsOneWidget);
+    expect(find.text('Canceling…'), findsOneWidget);
 
-    await pumpUntilFound(tester, find.text('PDF generation cancelled.'));
+    await pumpUntilFound(tester, find.text('Export canceled'));
     expect(platform.calls, 0);
     expect(platform.output, isNull);
     expect(find.text('Keep this draft?'), findsNothing);
