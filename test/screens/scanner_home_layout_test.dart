@@ -118,6 +118,47 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final size in [
+    const Size(240, 640),
+    const Size(320, 568),
+    const Size(390, 844),
+    const Size(640, 300),
+  ]) {
+    for (final scale in [1.0, 1.3, 2.0]) {
+      testWidgets(
+        'export and OCR options stay on the same row at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, pageCount: maxDocumentPages, textScale: scale);
+          final export = find.widgetWithText(
+            FilledButton,
+            'Export PDF ($maxDocumentPages pages)',
+          );
+          final options = find.ancestor(
+            of: find.byTooltip('PDF export options'),
+            matching: find.byType(IconButton),
+          );
+          final exportRect = tester.getRect(export);
+          final optionsRect = tester.getRect(options);
+          final bar = tester.getRect(find.byKey(const Key('pdf_export_bar')));
+          expect(optionsRect.center.dy, closeTo(exportRect.center.dy, 0.5));
+          expect(optionsRect.left, greaterThanOrEqualTo(exportRect.right + 8));
+          expect(optionsRect.right, lessThanOrEqualTo(bar.right));
+          expect(optionsRect.bottom, lessThanOrEqualTo(bar.bottom));
+          expect(optionsRect.width, greaterThanOrEqualTo(48));
+          expect(optionsRect.height, greaterThanOrEqualTo(48));
+          expect(export.hitTestable(), findsOneWidget);
+          expect(options.hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.tap(options);
+          await tester.pumpAndSettle();
+          expect(find.byType(SwitchListTile), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets('export options explain OCR and retain the selection on reopen', (
     tester,
   ) async {
@@ -270,20 +311,15 @@ void main() {
     ) async {
       setViewport(tester, size);
       await pumpHome(tester, pageCount: maxDocumentPages, textScale: 2);
-      final status = find.text('Image intake help');
-      await tester.ensureVisible(status);
-      await tester.pumpAndSettle();
-      await tester.tap(status);
-      await tester.pumpAndSettle();
+      expect(find.text('Image intake help'), findsNothing);
       expect(
-        find.textContaining('$maxDocumentPages-page limit'),
-        findsOneWidget,
+        tester
+            .widget<Semantics>(find.byKey(const Key('image_intake')))
+            .properties
+            .hint,
+        contains('$maxDocumentPages-page limit'),
       );
       expect(tester.takeException(), isNull);
-      await tester.ensureVisible(find.text('Close'));
-      await tester.tap(find.text('Close'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
       expect(tester.takeException(), isNull);
     });
   }
@@ -295,7 +331,7 @@ void main() {
       const Size(1024, 768),
     ]) {
       testWidgets(
-        'reorder controls and menu fit $size at 200% text in $brightness',
+        'top-right delete controls fit $size at 200% text in $brightness',
         (tester) async {
           setViewport(tester, size);
           tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
@@ -306,9 +342,9 @@ void main() {
             textScale: 2,
             brightness: brightness,
           );
-          final reorder = find.byTooltip('Reorder page 8');
+          final delete = find.byTooltip('Delete page 8');
           await tester.scrollUntilVisible(
-            reorder,
+            delete,
             200,
             maxScrolls: 50,
             scrollable: find.descendant(
@@ -318,23 +354,58 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
-          final preview = find.descendant(
-            of: find.byKey(const ValueKey('page_semantics_7')),
-            matching: find.byType(Image),
+          final cardRect = tester.getRect(
+            find.byKey(const ValueKey('page_preview_7')),
           );
+          final deleteButton = find.ancestor(
+            of: delete,
+            matching: find.byType(IconButton),
+          );
+          final deleteRect = tester.getRect(deleteButton);
+          expect(deleteRect.right, closeTo(cardRect.right, 1));
+          expect(deleteRect.top, closeTo(cardRect.top, 1));
+          expect(deleteRect.width, greaterThanOrEqualTo(48));
+          expect(deleteRect.height, greaterThanOrEqualTo(48));
+          expect(delete.hitTestable(), findsOneWidget);
           expect(
-            tester.getRect(preview).overlaps(tester.getRect(reorder)),
+            deleteRect.overlaps(
+              tester.getRect(find.byTooltip('Capture Image')),
+            ),
             isFalse,
           );
-          await tester.tap(reorder);
+          expect(find.byIcon(Icons.swap_vert), findsNothing);
+          await tester.tap(delete);
           await tester.pumpAndSettle();
-          await tester.ensureVisible(find.text('Move earlier'));
-          await tester.pumpAndSettle();
-          expect(find.text('Move earlier').hitTestable(), findsOneWidget);
+          expect(find.text('Export PDF (7 pages)'), findsOneWidget);
+          expect(find.text('Page deleted.'), findsOneWidget);
           expect(tester.takeException(), isNull);
-          await tester.binding.handlePopRoute();
-          await tester.pumpAndSettle();
-          expect(find.text('Move earlier'), findsNothing);
+        },
+      );
+    }
+  }
+
+  for (final size in [const Size(320, 568), const Size(390, 844)]) {
+    for (final scale in [1.0, 1.3]) {
+      testWidgets(
+        'portrait keeps compact two-column previews at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, pageCount: 8, textScale: scale);
+          final grid = tester.widget<GridView>(find.byType(GridView));
+          final delegate =
+              grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+          expect(delegate.crossAxisCount, 2);
+          expect(
+            delegate.mainAxisExtent,
+            lessThan(size.width < 350 ? 240 : 300),
+          );
+          expect(find.text('Image intake help'), findsNothing);
+          expect(
+            find.text('Drafts are temporary. Export a PDF to keep a copy.'),
+            findsNothing,
+          );
+          expect(find.byIcon(Icons.swap_vert), findsNothing);
+          expect(tester.takeException(), isNull);
         },
       );
     }
@@ -351,23 +422,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('page labels and delete controls do not cover document content', (
-    tester,
-  ) async {
-    await pumpHome(tester);
-    final preview = find.descendant(
-      of: find.byType(Card).first,
-      matching: find.byType(Image),
-    );
-    final image = tester.widget<Image>(preview);
-    final bounds = tester.getRect(preview);
-    expect(image.fit, BoxFit.contain);
-    expect(bounds.overlaps(tester.getRect(find.text('Page 1'))), isFalse);
-    expect(
-      bounds.overlaps(tester.getRect(find.byTooltip('Delete page 1'))),
-      isFalse,
-    );
-  });
+  testWidgets(
+    'page label stays outside the image with deletion at the preview corner',
+    (tester) async {
+      await pumpHome(tester);
+      final preview = find.descendant(
+        of: find.byType(Card).first,
+        matching: find.byType(Image),
+      );
+      final image = tester.widget<Image>(preview);
+      final bounds = tester.getRect(preview);
+      expect(image.fit, BoxFit.contain);
+      expect(bounds.overlaps(tester.getRect(find.text('Page 1'))), isFalse);
+      final tile = tester.getRect(find.byKey(const ValueKey('page_preview_0')));
+      final delete = tester.getRect(
+        find.ancestor(
+          of: find.byTooltip('Delete page 1'),
+          matching: find.byType(IconButton),
+        ),
+      );
+      expect(delete.top, closeTo(tile.top, 1));
+      expect(delete.right, closeTo(tile.right, 1));
+    },
+  );
 
   testWidgets('About content remains usable on a narrow large-text screen', (
     tester,

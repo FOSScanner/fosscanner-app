@@ -343,28 +343,29 @@ void main() {
     },
   );
 
-  testWidgets('failed detection explains the fallback and offers recovery', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: CornerAdjustScreen(
-          originalBytes: imageBytes,
-          operations: _Operations(imageBytes),
+  testWidgets(
+    'failed detection selects the full image without persistent text',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CornerAdjustScreen(
+            originalBytes: imageBytes,
+            operations: _Operations(imageBytes),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.text('No page edges detected. Full image selected.'),
-      findsOneWidget,
-    );
-    expect(find.text('Reset crop'), findsNothing);
-    expect(find.text('Use full image'), findsNothing);
-    await tester.tap(find.text('Preview page'));
-    await tester.pumpAndSettle();
-    expect(find.text('Add page'), findsOneWidget);
-  });
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('No page edges detected. Full image selected.'),
+        findsNothing,
+      );
+      expect(find.text('Reset crop'), findsNothing);
+      expect(find.text('Use full image'), findsNothing);
+      await tester.tap(find.text('Preview page'));
+      await tester.pumpAndSettle();
+      expect(find.text('Add page'), findsOneWidget);
+    },
+  );
 
   testWidgets('filters open on demand and retain selection after dismissal', (
     tester,

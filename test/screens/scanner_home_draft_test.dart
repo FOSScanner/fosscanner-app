@@ -554,7 +554,7 @@ void main() {
       expect(find.text('Export PDF (1 page)'), findsOneWidget);
       expect(
         find.text('Drafts are temporary. Export a PDF to keep a copy.'),
-        findsOneWidget,
+        findsNothing,
       );
       expect(store.clearCalls, 0);
       // Exporting again also leaves the draft intact without an extra decision.

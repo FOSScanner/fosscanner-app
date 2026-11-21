@@ -199,14 +199,12 @@ void main() {
       final reorder = tester
           .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
           .onAcceptWithDetails!;
-      final reorderMenu = tester.widget<PopupMenuButton<int>>(
-        find.byWidgetPredicate(
-          (widget) =>
-              widget is PopupMenuButton<int> &&
-              widget.tooltip == 'Reorder page 1',
-        ),
-      );
-      final moveLater = reorderMenu.onSelected!;
+      final moveLater = tester
+          .widget<Semantics>(find.byKey(const ValueKey('page_semantics_0')))
+          .properties
+          .customSemanticsActions!
+          .values
+          .single;
       final openPage = tester
           .widget<InkWell>(
             find
@@ -220,12 +218,14 @@ void main() {
 
       await tester.tap(find.text('Export PDF (2 pages)'));
       await tester.pump();
-      await tester.tap(find.text('Image intake help'));
-      await tester.pump();
-      expect(find.textContaining('Export is in progress'), findsOneWidget);
-      expect(find.textContaining('page limit'), findsNothing);
-      await tester.tap(find.text('Close'));
-      await tester.pump();
+      expect(find.text('Image intake help'), findsNothing);
+      expect(
+        tester
+            .widget<Semantics>(find.byKey(const Key('image_intake')))
+            .properties
+            .hint,
+        contains('Export is in progress'),
+      );
       for (final tooltip in [
         'Import from gallery',
         'Delete page 1',
@@ -250,17 +250,12 @@ void main() {
       );
       expect(
         tester
-            .widget<PopupMenuButton<int>>(
-              find.byWidgetPredicate(
-                (widget) =>
-                    widget is PopupMenuButton<int> &&
-                    widget.tooltip == 'Reorder page 1',
-              ),
-            )
-            .enabled,
-        isFalse,
+            .widget<Semantics>(find.byKey(const ValueKey('page_semantics_0')))
+            .properties
+            .customSemanticsActions,
+        isEmpty,
       );
-      moveLater(1);
+      moveLater();
       gallery();
       camera();
       barcode();
@@ -314,11 +309,14 @@ void main() {
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pump();
     expect(picker.calls, 1);
-    await tester.tap(find.text('Image intake help'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('selection or page review'), findsOneWidget);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
+    expect(find.text('Image intake help'), findsNothing);
+    expect(
+      tester
+          .widget<Semantics>(find.byKey(const Key('image_intake')))
+          .properties
+          .hint,
+      contains('selection or page review'),
+    );
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,

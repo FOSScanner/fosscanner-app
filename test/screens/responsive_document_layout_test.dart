@@ -68,8 +68,11 @@ void main() {
       scroll.position.jumpTo(scroll.position.maxScrollExtent);
       await tester.pumpAndSettle();
       final delete = find.byTooltip('Delete page 12');
+      // Delete is now at the top of the card, not in its bottom footer.
+      await tester.ensureVisible(delete);
+      await tester.pumpAndSettle();
       expect(delete.hitTestable(), findsOneWidget);
-      final camera = tester.getRect(find.byType(FloatingActionButton));
+      final camera = tester.getRect(find.byTooltip('Capture Image'));
       expect(tester.getRect(delete).overlaps(camera), isFalse);
       final image = find.descendant(
         of: find.byType(Card).last,
