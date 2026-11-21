@@ -1341,7 +1341,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           constraints: const BoxConstraints(minHeight: 56),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final stacked =
+              final stackProgress =
                   constraints.maxWidth < 300 ||
                   MediaQuery.textScalerOf(context).scale(14) > 21;
               final progress = Row(
@@ -1369,7 +1369,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     )
                   : null;
               if (busy) {
-                return stacked
+                return stackProgress
                     ? Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [progress, ?cancel],
@@ -1403,26 +1403,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                           ? 'Searchable text enabled'
                           : 'Image-only PDF',
                       child: IconButton.filledTonal(
+                        constraints: const BoxConstraints(
+                          minWidth: 48,
+                          minHeight: 48,
+                        ),
                         onPressed: _canExport ? _showExportOptions : null,
                         tooltip: 'PDF export options',
                         icon: const Icon(Icons.tune),
                       ),
                     )
                   : null;
-              if (stacked) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    exportButton,
-                    if (options != null)
-                      Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: options,
-                      ),
-                  ],
-                );
-              }
+              // Keep options beside export even at large text sizes. The label
+              // wraps inside its available width instead of creating a new row.
               return Row(
                 children: [
                   Expanded(child: exportButton),

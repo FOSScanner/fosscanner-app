@@ -362,6 +362,16 @@ void main() {
     await tester.ensureVisible(find.text('Go back'));
     await tester.pumpAndSettle();
     await save('ui-crop-error-short-insets');
+    await tester.pumpWidget(const SizedBox());
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.padding = const FakeViewPadding();
+    await show(home(3));
+    final exportRect = tester.getRect(
+      find.widgetWithText(FilledButton, 'Export PDF (3 pages)'),
+    );
+    final optionsRect = tester.getRect(find.byTooltip('PDF export options'));
+    expect(optionsRect.center.dy, closeTo(exportRect.center.dy, 0.5));
+    await save('ui-export-row-large-text');
     debugDisableShadows = previousShadows;
   });
 }

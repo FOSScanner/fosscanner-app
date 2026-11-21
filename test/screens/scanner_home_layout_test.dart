@@ -118,6 +118,47 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final size in [
+    const Size(240, 640),
+    const Size(320, 568),
+    const Size(390, 844),
+    const Size(640, 300),
+  ]) {
+    for (final scale in [1.0, 1.3, 2.0]) {
+      testWidgets(
+        'export and OCR options stay on the same row at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, pageCount: maxDocumentPages, textScale: scale);
+          final export = find.widgetWithText(
+            FilledButton,
+            'Export PDF ($maxDocumentPages pages)',
+          );
+          final options = find.ancestor(
+            of: find.byTooltip('PDF export options'),
+            matching: find.byType(IconButton),
+          );
+          final exportRect = tester.getRect(export);
+          final optionsRect = tester.getRect(options);
+          final bar = tester.getRect(find.byKey(const Key('pdf_export_bar')));
+          expect(optionsRect.center.dy, closeTo(exportRect.center.dy, 0.5));
+          expect(optionsRect.left, greaterThanOrEqualTo(exportRect.right + 8));
+          expect(optionsRect.right, lessThanOrEqualTo(bar.right));
+          expect(optionsRect.bottom, lessThanOrEqualTo(bar.bottom));
+          expect(optionsRect.width, greaterThanOrEqualTo(48));
+          expect(optionsRect.height, greaterThanOrEqualTo(48));
+          expect(export.hitTestable(), findsOneWidget);
+          expect(options.hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.tap(options);
+          await tester.pumpAndSettle();
+          expect(find.byType(SwitchListTile), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets('export options explain OCR and retain the selection on reopen', (
     tester,
   ) async {
