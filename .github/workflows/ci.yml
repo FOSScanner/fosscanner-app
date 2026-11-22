@@ -21,6 +21,7 @@ jobs:
 
       - run: flutter pub get
       - run: flutter analyze
+      - run: python3 -m unittest discover -s test/tool -p '*_test.py'
       - run: flutter test
 
       - name: Upload screenshot regression diffs
@@ -51,6 +52,13 @@ jobs:
         with:
           flutter-version: '3.44.0'
       - run: flutter build apk --debug --target-platform android-arm64
+      # Debug intentionally has Flutter's INTERNET permission. Audit the actual
+      # release merge before publishing the artifact, not only our source XML.
+      - name: Enforce release permission allowlist
+        run: |
+          (cd android && ./gradlew :app:processReleaseManifest)
+          python3 tool/check_android_permissions.py \
+            build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-debug-arm64

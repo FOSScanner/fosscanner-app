@@ -126,6 +126,12 @@ FOSScanner has no login, telemetry, analytics, or scan-upload service. Imported
 gallery originals are not modified or deleted. App-owned camera temporary files
 are cleaned up after the attempt to read them, including failed reads.
 
+Android's release permission policy allows only camera access and the app's
+signature-level AndroidX receiver permission. Unused microphone, shared-storage,
+and network-state permissions from dependencies are removed during manifest
+merging. CI checks the processed **release** manifest against an allowlist;
+debug builds separately retain Flutter's development `INTERNET` permission.
+
 ### Drafts are temporary, not a backup
 
 Unfinished documents are saved in the app's private, **OS-managed cache** so they
@@ -169,6 +175,30 @@ flutter run
 flutter analyze
 flutter test
 ```
+
+### Android permission verification
+
+The verifier uses only Python's standard library:
+
+```bash
+python3 -m unittest discover -s test/tool -p '*_test.py'
+```
+
+With Flutter's Android SDK configuration (`android/local.properties`) and Gradle
+wrapper already initialized, inspect the release manifest without building an
+APK or configuring a signing key:
+
+```bash
+(cd android && ./gradlew :app:processReleaseManifest)
+python3 tool/check_android_permissions.py \
+  build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
+```
+
+This verifies declarations, not device behavior. Camera capture, barcode reading,
+gallery import, and sharing still need API 28 and current-API device coverage.
+The separate [temporary-document cache review](docs/temporary-document-cache-review.md)
+records the unresolved plugin-copy lifetime/ownership work; permission minimization
+does not clean up those files.
 
 ### Build from source
 
