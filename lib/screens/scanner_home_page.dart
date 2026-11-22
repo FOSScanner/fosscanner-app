@@ -346,25 +346,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return null;
   }
 
-  void _showImageIntakeStatus() {
-    final status = _imageIntakeStatus;
-    if (status == null) return;
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Adding images'),
-        scrollable: true,
-        content: Text(status),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showDocumentLimit() => _showMessage(_documentLimitMessage);
 
   void _showUnsupportedImageDimensions() {
@@ -1025,38 +1006,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  Widget _pageReorderMenu(int index, ScannedPage page) => PopupMenuButton<int>(
-    tooltip: 'Reorder page ${index + 1}',
-    icon: const Icon(Icons.swap_vert),
-    enabled: !_isDocumentInteractionLocked,
-    onSelected: (direction) {
-      // A menu callback must not move a different page if the document changed
-      // while it was open. _reorderPage also rechecks the operation lock.
-      if (index >= _pages.length || !identical(_pages[index], page)) return;
-      _reorderPage(index, index + direction);
-    },
-    itemBuilder: (_) => [
-      PopupMenuItem(
-        value: -1,
-        enabled: index > 0,
-        child: const ListTile(
-          leading: Icon(Icons.arrow_upward),
-          title: Text('Move earlier'),
-          contentPadding: EdgeInsets.zero,
-        ),
-      ),
-      PopupMenuItem(
-        value: 1,
-        enabled: index < _pages.length - 1,
-        child: const ListTile(
-          leading: Icon(Icons.arrow_downward),
-          title: Text('Move later'),
-          contentPadding: EdgeInsets.zero,
-        ),
-      ),
-    ],
-  );
-
   void _reorderPage(int fromIndex, int toIndex) {
     if (_isDocumentInteractionLocked ||
         fromIndex < 0 ||
@@ -1392,7 +1341,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           constraints: const BoxConstraints(minHeight: 56),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final stacked =
+              final stackProgress =
                   constraints.maxWidth < 300 ||
                   MediaQuery.textScalerOf(context).scale(14) > 21;
               final progress = Row(
@@ -1420,7 +1369,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                     )
                   : null;
               if (busy) {
-                return stacked
+                return stackProgress
                     ? Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [progress, ?cancel],
@@ -1454,26 +1403,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                           ? 'Searchable text enabled'
                           : 'Image-only PDF',
                       child: IconButton.filledTonal(
+                        constraints: const BoxConstraints(
+                          minWidth: 48,
+                          minHeight: 48,
+                        ),
                         onPressed: _canExport ? _showExportOptions : null,
                         tooltip: 'PDF export options',
                         icon: const Icon(Icons.tune),
                       ),
                     )
                   : null;
-              if (stacked) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    exportButton,
-                    if (options != null)
-                      Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: options,
-                      ),
-                  ],
-                );
-              }
+              // Keep options beside export even at large text sizes. The label
+              // wraps inside its available width instead of creating a new row.
               return Row(
                 children: [
                   Expanded(child: exportButton),
@@ -1489,22 +1430,27 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   SliverGridDelegate _pageGridDelegate(BuildContext context, double width) {
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    // Keep ordinary phone cards compact, but give large text a full-width
-    // card instead of squeezing its label and two 48px actions into a footer.
-    final minCardWidth = 168 + 52 * (textScale - 1).clamp(0.0, 1.0);
+    // Preserve two compact columns on small phones at ordinary text sizes,
+    // while allowing a wider card for large accessibility text.
+    final minCardWidth =
+        (width < 400 ? 128 : 168) + 52 * (textScale - 1).clamp(0.0, 1.0);
     final columns = ((width - 8) / (minCardWidth + 8)).floor().clamp(1, 6);
     final cardWidth = (width - 16 - 8 * (columns - 1)) / columns;
     return SliverGridDelegateWithFixedCrossAxisCount(
       crossAxisCount: columns,
       crossAxisSpacing: 8,
       mainAxisSpacing: 8,
-      mainAxisExtent: cardWidth * 1.3 + 48 + 36 * textScale,
+      mainAxisExtent: cardWidth * 1.3 + 28 * textScale,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     if (_draftRestoreFailed) return _buildDraftRestoreFailure();
+    final toolbarCamera = MediaQuery.sizeOf(context).height < 400;
+    final capture = _isPickingImages || _isClearingDraft || !_canStartImagePick
+        ? null
+        : _captureImage;
     final compactActions =
         MediaQuery.sizeOf(context).width -
                 MediaQuery.paddingOf(context).horizontal <
@@ -1514,6 +1460,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       appBar: AppBar(
         title: const Text('FOSScanner'),
         actions: [
+          if (_cameraSupported && toolbarCamera)
+            IconButton(
+              icon: const Icon(Icons.camera_alt),
+              tooltip: 'Capture Image',
+              onPressed: capture,
+            ),
           if (!compactActions &&
               supportsBarcodeCamera(
                 platform: defaultTargetPlatform,
@@ -1526,13 +1478,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   : _openBarcodeScanner,
               tooltip: 'Scan QR/barcode',
             ),
-          IconButton(
-            icon: const Icon(Icons.photo_library_outlined),
-            onPressed:
-                _isPickingImages || _isClearingDraft || !_canStartImagePick
-                ? null
-                : _importFromGallery,
-            tooltip: 'Import from gallery',
+          Semantics(
+            key: const Key('image_intake'),
+            hint: _imageIntakeStatus,
+            child: IconButton(
+              icon: const Icon(Icons.photo_library_outlined),
+              onPressed:
+                  _isPickingImages || _isClearingDraft || !_canStartImagePick
+                  ? null
+                  : _importFromGallery,
+              tooltip: 'Import from gallery',
+            ),
           ),
           if (!compactActions && _pages.isNotEmpty)
             IconButton(
@@ -1589,37 +1545,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         child: LayoutBuilder(
           builder: (context, constraints) => Column(
             children: [
-              if (_imageIntakeStatus != null || _pages.isNotEmpty)
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: constraints.maxHeight * 0.4,
-                  ),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_imageIntakeStatus != null)
-                          TextButton.icon(
-                            onPressed: _showImageIntakeStatus,
-                            icon: const Icon(Icons.info_outline),
-                            label: const Text('Image intake help'),
-                          ),
-                        if (_pages.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 4,
-                            ),
-                            child: Text(
-                              'Drafts are temporary. Export a PDF to keep a copy.',
-                              style: Theme.of(context).textTheme.bodySmall,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
               if (_draftSaveFailed)
                 ConstrainedBox(
                   constraints: BoxConstraints(
@@ -1700,7 +1625,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                           8,
                           8,
                           8,
-                          _cameraSupported ? 96 : 8,
+                          _cameraSupported && !toolbarCamera ? 96 : 8,
                         ),
                         gridDelegate: _pageGridDelegate(
                           context,
@@ -1715,70 +1640,66 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                               onTap: _isDocumentInteractionLocked
                                   ? null
                                   : () => _openPage(index),
-                              child: Column(
+                              child: Stack(
+                                key: ValueKey('page_preview_$index'),
+                                fit: StackFit.expand,
                                 children: [
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        8,
-                                        8,
-                                        8,
-                                        0,
-                                      ),
-                                      child: Image(
-                                        image: ResizeImage(
-                                          MemoryImage(page.processedBytes),
-                                          width: _thumbnailCacheWidth,
-                                          height: _thumbnailCacheWidth,
-                                          policy: ResizeImagePolicy.fit,
-                                        ),
-                                        fit: BoxFit.contain,
-                                      ),
-                                    ),
-                                  ),
                                   Padding(
-                                    padding: const EdgeInsets.only(
-                                      left: 12,
-                                      right: 4,
-                                    ),
-                                    child: Wrap(
-                                      alignment: WrapAlignment.spaceBetween,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
+                                    padding: const EdgeInsets.all(8),
+                                    child: Column(
                                       children: [
+                                        Expanded(
+                                          child: Image(
+                                            image: ResizeImage(
+                                              MemoryImage(page.processedBytes),
+                                              width: _thumbnailCacheWidth,
+                                              height: _thumbnailCacheWidth,
+                                              policy: ResizeImagePolicy.fit,
+                                            ),
+                                            fit: BoxFit.contain,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
                                         ExcludeSemantics(
                                           child: Text(
                                             'Page ${index + 1}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: Theme.of(
                                               context,
                                             ).textTheme.labelLarge,
                                           ),
                                         ),
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (_pages.length > 1)
-                                              _pageReorderMenu(index, page),
-                                            IconButton(
-                                              icon: const Icon(
-                                                Icons.delete_outline,
-                                              ),
-                                              tooltip:
-                                                  'Delete page ${index + 1}',
-                                              onPressed:
-                                                  _isDocumentInteractionLocked
-                                                  ? null
-                                                  : () => _removePage(index),
-                                            ),
-                                          ],
-                                        ),
                                       ],
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    child: IconButton.filledTonal(
+                                      constraints: const BoxConstraints(
+                                        minWidth: 48,
+                                        minHeight: 48,
+                                      ),
+                                      icon: const Icon(Icons.delete_outline),
+                                      tooltip: 'Delete page ${index + 1}',
+                                      onPressed: _isDocumentInteractionLocked
+                                          ? null
+                                          : () => _removePage(index),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
                           );
+
+                          void movePage(int direction) {
+                            if (index >= _pages.length ||
+                                !identical(_pages[index], page)) {
+                              return;
+                            }
+                            _reorderPage(index, index + direction);
+                          }
 
                           // Drag-to-reorder remains available alongside equivalent
                           // semantic actions for switch and screen-reader users.
@@ -1788,13 +1709,13 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                                   const CustomSemanticsAction(
                                     label: 'Move earlier',
                                   ): () =>
-                                      _reorderPage(index, index - 1),
+                                      movePage(-1),
                                 if (!_isDocumentInteractionLocked &&
                                     index < _pages.length - 1)
                                   const CustomSemanticsAction(
                                     label: 'Move later',
                                   ): () =>
-                                      _reorderPage(index, index + 1),
+                                      movePage(1),
                               };
                           return Semantics(
                             key: ValueKey('page_semantics_$index'),
@@ -1856,12 +1777,9 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           ),
         ),
       ),
-      floatingActionButton: _cameraSupported
+      floatingActionButton: _cameraSupported && !toolbarCamera
           ? FloatingActionButton(
-              onPressed:
-                  _isPickingImages || _isClearingDraft || !_canStartImagePick
-                  ? null
-                  : _captureImage,
+              onPressed: capture,
               tooltip: 'Capture Image',
               child: const Icon(Icons.camera_alt),
             )

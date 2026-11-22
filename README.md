@@ -38,8 +38,9 @@ No account, no cloud processing, no tracking.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
    On Android, **PDF export options** lets you turn searchable text on or off.
 
-Use each page's **Reorder page** (up/down arrows) menu to **Move earlier** or
-**Move later**, or long-press and drag pages to reorder them. Deleting a page
+Long-press and drag page previews to reorder them; screen readers also expose
+**Move earlier** and **Move later** actions. Each compact preview has a delete
+button in its top-right corner. Deleting a page
 offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
 current photo; remaining images are still reviewed. The review title keeps the
 position (for example *Image 2 of 5*) visible through crop and appearance review.

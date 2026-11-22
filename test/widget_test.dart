@@ -503,15 +503,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Image intake help'));
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining('$maxDocumentPages-page limit'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('not enough document memory'), findsNothing);
-      await tester.tap(find.text('Close'));
-      await tester.pumpAndSettle();
+      final hint = tester
+          .widget<Semantics>(find.byKey(const Key('image_intake')))
+          .properties
+          .hint;
+      expect(hint, contains('$maxDocumentPages-page limit'));
+      expect(hint, isNot(contains('not enough document memory')));
+      expect(find.text('Image intake help'), findsNothing);
       await tester.ensureVisible(find.byTooltip('Delete page 1'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Delete page 1'));
@@ -546,13 +544,14 @@ void main() {
           .onPressed,
       isNull,
     );
-    await tester.tap(find.text('Image intake help'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('not enough document memory'), findsOneWidget);
-    expect(find.textContaining('pending draft save'), findsOneWidget);
-    expect(find.textContaining('page limit'), findsNothing);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
+    final hint = tester
+        .widget<Semantics>(find.byKey(const Key('image_intake')))
+        .properties
+        .hint;
+    expect(hint, contains('not enough document memory'));
+    expect(hint, contains('pending draft save'));
+    expect(hint, isNot(contains('page limit')));
+    expect(find.text('Image intake help'), findsNothing);
     await tester.ensureVisible(find.byTooltip('Delete page 1'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Delete page 1'));
@@ -582,11 +581,14 @@ void main() {
     );
     await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Image intake help'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Use Import from gallery'), findsOneWidget);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Semantics>(find.byKey(const Key('image_intake')))
+          .properties
+          .hint,
+      contains('Use Import from gallery'),
+    );
+    expect(find.text('Image intake help'), findsNothing);
     expect(
       tester
           .widget<IconButton>(
