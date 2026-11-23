@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0](https://github.com/FOSScanner/fosscanner-app/compare/v1.5.2...v1.6.0) (2026-11-23)
+
+
+### Features
+
+* **ux:** preserve accessible page reordering actions in the compact document layout ([dcadcb3](https://github.com/FOSScanner/fosscanner-app/commit/dcadcb3c1a99d5cd54f44cd1856bc0b0ff849078))
+
+
+### Bug Fixes
+
+* **android:** restrict merged release permissions ([9b0e247](https://github.com/FOSScanner/fosscanner-app/commit/9b0e2476b10d246e276863f275ae35df17278793))
+* **build:** align release candidate lockfile with pinned Flutter SDK ([cf03f2b](https://github.com/FOSScanner/fosscanner-app/commit/cf03f2b3780b5995934ef49e5349a0c45dbf9fe5))
+* preserve batch review context and control positions ([51c8273](https://github.com/FOSScanner/fosscanner-app/commit/51c8273c0014faf79eb6ecda5e282cff377b31d0))
+* protect cached drafts after restoration failures ([2e2d06d](https://github.com/FOSScanner/fosscanner-app/commit/2e2d06d5afbd3a844f90d24e2820375bffd98591))
+* **ui:** adapt document layouts and add visual regressions ([e6ba16e](https://github.com/FOSScanner/fosscanner-app/commit/e6ba16eafe1ebbddc2319ba1a6385ef240bd685f))
+* **ui:** keep OCR options beside PDF export ([01c4b7e](https://github.com/FOSScanner/fosscanner-app/commit/01c4b7eac0a0b920f53a0cae1472740566e73716))
+* **ui:** protect screen bodies from cutouts and scroll crop errors ([ea1b911](https://github.com/FOSScanner/fosscanner-app/commit/ea1b9117a0597e57c88ddb76e7ccede16e1a064c))
+* **ui:** restore compact previews and remove persistent hints ([8e3e932](https://github.com/FOSScanner/fosscanner-app/commit/8e3e932504861f77f9cb9ab124c77c63b07cbb7b))
+* **ux:** explain image intake availability and limits ([1cc5cda](https://github.com/FOSScanner/fosscanner-app/commit/1cc5cdaad6585d88de053c83f01bfedaff9d022d))
+* **ux:** make document camera failures actionable ([10e244b](https://github.com/FOSScanner/fosscanner-app/commit/10e244be6fa7c194258a80494999347bc6afa399))
+* **ux:** protect draft recovery and clarify scanner actions ([dd79468](https://github.com/FOSScanner/fosscanner-app/commit/dd794681eeb2364f00943ca08f5d5206fc843d5e))
+
+### Known limitations
+
+* Temporary import/share document copies can remain in the app cache after Clear all. Cleanup issue [#157](https://github.com/FOSScanner/fosscanner-app/issues/157) remains open; this release does not claim complete temporary-copy deletion.
+
 ## [1.5.2](https://github.com/FOSScanner/fosscanner-app/compare/v1.5.1...v1.5.2) (2026-11-18)
 
 
