@@ -166,3 +166,58 @@ source SHA, settings, result, and notes. Failures and untested cases stay explic
 F-Droid inclusion is a separate workstream tracked in #213 (#208–#212). A GitHub
 release does not establish F-Droid build compliance or availability. This document
 does not authorize a push, promotion, tag, workflow dispatch, or publication.
+
+## Authorized ARM64 preview — 2026-11-23 UTC
+
+After the operator approved a side-by-side ARM64 preview, a debug APK was built
+from archive commit `28c27ccfd839a37e02140fc3c1d986ad193ebfa3`. Its application
+source remains the selected baseline `88e808f`; preparation commits only add
+release documentation.
+
+- Local artifact:
+  `docker-output/next-rc.1-88e808f/FOSScanner-next-rc.1-88e808f-arm64-preview-debug.apk`.
+- SHA-256: `aa062101f55096bd01ef2acf960d1cc0ac9c01fdde41118bbd8a34622f922407`.
+- Size: 161375189 bytes (approximately 154 MiB).
+- Package `com.fosscanner.app.preview`, label `FOSScanner Preview`.
+- Debug version `1.5.2-next-rc.1`, packaged version code 2010, ARM64 only,
+  minimum API 24 / target API 36. This does not assign the next stable version.
+- Signature verification passed; Android Debug certificate SHA-256:
+  `79327361802c6c556ff7d1d7ee0ca538ee045ff2d90d8b8cc63f02b36bb143a0`.
+- Preview-only package suffix and label were applied to the isolated archive,
+  not the preparation branch or the operator's existing working tree.
+- Toolchain: Flutter 3.44.0 / Dart 3.12.0 in existing local container image
+  `sha256:5336f69b9b160a7f8e35a8a7122f0b70b3537a90fc29f1d813b77458d6f9621c`.
+  Its OpenJDK is 21.0.9 rather than CI's 17; bit-for-bit CI reproduction is not
+  asserted. Two CPUs; initial 4 GiB RAM increased to 6 GiB after memory pressure.
+- `apksigner`, `aapt`, ZIP native-asset inspection, and SHA-256 checks passed.
+  OpenCV/DartCV, ZXing, Tesseract/Leptonica ARM64 libraries and Latin OCR data
+  are bundled. The debug manifest requests CAMERA, debug-tooling INTERNET and
+  its signature-level receiver permission, not microphone/storage/network-state.
+  Debug verification does not replace release permission or performance checks.
+- Build log, metadata, signature, source-overlay patch, lockfiles, checksum, and
+  install/test instructions accompany the ignored artifact (`BUILD-INFO.md`).
+
+### Newly discovered dependency lock gate
+
+The committed lockfile does not satisfy Flutter 3.44.0's SDK pins. An initial
+`flutter pub get --enforce-lockfile` failed without building. The preview instead
+uses the exact `pubspec-lock` artifact downloaded from successful candidate CI
+run `45150600921`; enforced resolution then passed and the final lock matched
+that artifact byte-for-byte. CI's ordinary `flutter pub get` had re-resolved the
+committed lock rather than enforcing it.
+
+Changes relative to the committed lock: clock 1.1.3 to 1.1.2, matcher 0.12.20 to
+0.12.19, meta 1.19.0 to 1.18.0, stack_trace 1.12.2 to 1.12.1, test_api 0.7.14 to
+0.7.11, vector_math 2.4.4 to 2.2.0, and removal of listen 1.0.1.
+
+- [ ] Reconcile the committed lockfile with the pinned SDK and review/enforce
+      dependency resolution before stable publication. This preview does not
+      silently fix or claim unchanged source-lock reproducibility.
+
+No installation, fresh local Flutter test suite, device acceptance, production
+upgrade, production signing or release-mode performance check was performed.
+All device table rows above remain unperformed. No push, tag, workflow dispatch,
+main promotion or publication accompanied the build. Production drafts are not
+available inside the separate preview package; prior previews may have different
+debug signing identities, so do not uninstall/clear them without first exporting
+important documents. Issue #157 remains unresolved; use synthetic test data.
