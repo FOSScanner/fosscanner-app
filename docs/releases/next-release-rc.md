@@ -221,3 +221,39 @@ main promotion or publication accompanied the build. Production drafts are not
 available inside the separate preview package; prior previews may have different
 debug signing identities, so do not uninstall/clear them without first exporting
 important documents. Issue #157 remains unresolved; use synthetic test data.
+
+## Maintainer acceptance and release authorization — 2026-11-23 UTC
+
+The maintainer reported: "i tested on device evrything is ok go ahead" after
+receiving the preview above and its disclosed limitations. This authorizes
+proceeding through the normal PR/promotion/Release Please flow; it supersedes
+the earlier preparation-only boundary for that workflow. It does not authorize
+bypassing failed checks or required protected-environment approval.
+
+- Preview device acceptance is **maintainer-reported**, not independently
+  observed by the agent. Device model, Android version, individual scenario
+  results, and accessibility settings were not supplied. The earlier table
+  records the preparation baseline; no detailed per-scenario pass is inferred.
+- #157 remains open and unfixed. Proceeding follows the maintainer's go-ahead
+  after disclosure of cache retention; this is not evidence of cleanup, issue
+  closure, or permission to make stronger privacy claims.
+- The debug preview does not establish release performance, production signing,
+  in-place upgrade, iOS hardware acceptance, or F-Droid readiness. Keep those
+  unverified until evidence for the actual final artifacts is available.
+- The preparation branch now reconciles pubspec.lock to the exact successful
+  source-CI and preview-resolved lockfile recorded above. No app source or
+  dependency versions beyond that already-tested resolution are changed.
+- Release Please still owns generated version/build number and changelog.
+  Review its proposal before merging; do not create a manual tag to bypass it.
+
+### Remaining publication checks
+
+- [ ] Updated preparation PR CI passes and the source/lock delta is reviewed.
+- [ ] Normal dev-to-main promotion and its CI complete successfully.
+- [ ] Generated Release Please version/build number/changelog are reviewed.
+- [ ] Signed final APKs are delivered by the normal protected release workflow.
+- [ ] Verify final artifact hashes, signature, metadata, and previous production
+      certificate continuity. Record exact final tag and commit.
+- [ ] Maintainer tests actual production APK installation/upgrade and records
+      any remaining native/accessibility/permission coverage; do not infer this
+      from the isolated debug preview.
