@@ -74,9 +74,12 @@ changelog or evidence of device acceptance.
 
 ## Automated evidence
 
-At preparation time, the final merged-source run linked above was still running.
-Analysis and Python permission-tool tests had passed; Flutter tests were in
-progress. Do not infer final merged-source acceptance from preceding PR runs.
+The final merged-source run linked above completed successfully for
+`88e808fcba868c83e33b9c07ad3820337d0a058c`, verified on 2026-11-23 UTC.
+All four jobs passed: quality (Flutter analysis/tests and Python permission-tool
+tests), Android (including the release-manifest permission allowlist), Android
+release-signing verification, and the iOS no-codesign build. This establishes
+CI acceptance of the selected application source, not production-device acceptance.
 
 Before merging, #204, #205, and #206 each passed quality, Android, release-signing
 verification, and iOS build jobs. #204 required the exact verified setup-java tag
@@ -86,8 +89,8 @@ SHA to be added to the test allowlist; a rerun before that correction reproduced
 passed. These are historical CI results, not a newly built candidate APK or
 hardware acceptance.
 
-- [ ] Record successful conclusion of final merged-source CI, exact SHA, and URL.
-- [ ] Confirm Flutter analysis, Flutter tests, Python permission-tool tests,
+- [x] Record successful conclusion of final merged-source CI, exact SHA, and URL.
+- [x] Confirm Flutter analysis, Flutter tests, Python permission-tool tests,
       Android build/manifest allowlist, release-signing check, and iOS build pass.
 - [ ] Review the final source delta and generated release metadata for regressions.
 - [ ] If application code changes, select a new baseline and rerun relevant checks.
