@@ -2,7 +2,7 @@ name: fosscanner
 description: A privacy-first, FOSS document scanner.
 publish_to: 'none'
 
-version: 1.5.2+10
+version: 1.6.0+11
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
