@@ -38,10 +38,19 @@ No account, no cloud processing, no tracking.
 5. **Export PDF** to the system share sheet and choose where to send or save it.
    On Android, **PDF export options** lets you turn searchable text on or off.
 
-Long-press and drag pages to reorder them. Deleting a page offers **Undo** for
-four seconds. In a multi-image gallery import, **Skip image** skips only the
-current photo; remaining images are still reviewed. Canceling an unsaved
-capture or single-image review adds no page.
+Long-press and drag page previews to reorder them; screen readers also expose
+**Move earlier** and **Move later** actions. Each compact preview has a delete
+button in its top-right corner. Deleting a page
+offers **Undo** for four seconds. In a multi-image gallery import, **Skip image** skips only the
+current photo; remaining images are still reviewed. The review title keeps the
+position (for example *Image 2 of 5*) visible through crop and appearance review.
+From crop review, **Stop importing** (or Back) ends the batch while keeping pages
+already added. Back from appearance first returns to crop review. Canceling an
+unsaved capture or single-image review adds no page.
+
+Appearance-preview updates and retry messages stay within the preview instead
+of moving the sliders or confirmation button. The last successful image remains
+visible while a new preview is being generated.
 
 ## Screenshots
 
@@ -118,6 +127,12 @@ FOSScanner has no login, telemetry, analytics, or scan-upload service. Imported
 gallery originals are not modified or deleted. App-owned camera temporary files
 are cleaned up after the attempt to read them, including failed reads.
 
+Android's release permission policy allows only camera access and the app's
+signature-level AndroidX receiver permission. Unused microphone, shared-storage,
+and network-state permissions from dependencies are removed during manifest
+merging. CI checks the processed **release** manifest against an allowlist;
+debug builds separately retain Flutter's development `INTERNET` permission.
+
 ### Drafts are temporary, not a backup
 
 Unfinished documents are saved in the app's private, **OS-managed cache** so they
@@ -129,6 +144,11 @@ pressure. **Export a PDF and save it somewhere durable before relying on it.**
 - Sharing keeps the draft by default. Use the **Clear all** toolbar action and
   confirm when you want to start over. Clearing app storage or uninstalling also
   removes draft data; Android OS backups do not include it.
+- If restoration fails, adding images and draft saves are paused so they cannot
+  silently replace the cached draft. Use **Retry restoration** after checking
+  storage access. **Discard saved draft** requires confirmation and deletes both
+  cached generations, including potentially recoverable pages; exported PDFs
+  are not removed. A valid backup is recovered automatically when possible.
 - If saving fails, a persistent warning offers **Retry saving draft**. Keep the
   app open and retry; the retry saves your current pages, not an old snapshot.
 - Unrelated notifications wait while deletion Undo is available. A new deletion
@@ -156,6 +176,30 @@ flutter run
 flutter analyze
 flutter test
 ```
+
+### Android permission verification
+
+The verifier uses only Python's standard library:
+
+```bash
+python3 -m unittest discover -s test/tool -p '*_test.py'
+```
+
+With Flutter's Android SDK configuration (`android/local.properties`) and Gradle
+wrapper already initialized, inspect the release manifest without building an
+APK or configuring a signing key:
+
+```bash
+(cd android && ./gradlew :app:processReleaseManifest)
+python3 tool/check_android_permissions.py \
+  build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
+```
+
+This verifies declarations, not device behavior. Camera capture, barcode reading,
+gallery import, and sharing still need API 28 and current-API device coverage.
+The separate [temporary-document cache review](docs/temporary-document-cache-review.md)
+records the unresolved plugin-copy lifetime/ownership work; permission minimization
+does not clean up those files.
 
 ### Build from source
 
@@ -201,6 +245,9 @@ memory beyond the estimate. Lower-memory device profiling is still needed.
 
 ## Contributing and security
 
+See the [issue closure audit and UI follow-up](docs/issue-audit.md) for the
+reviewed `dev` snapshot, evidence-backed closures, and remaining acceptance gaps.
+
 Issues and pull requests are welcome. Follow [CONTRIBUTING.md](CONTRIBUTING.md):
 branch from `dev`, target PRs to `dev`, and keep changes focused. New dependencies
 must be FOSS, and document processing must stay on-device.
@@ -212,4 +259,5 @@ containing sensitive details. Version history is in [CHANGELOG.md](CHANGELOG.md)
 
 FOSScanner is licensed under the [GNU General Public License v3.0](LICENSE).
 Bundled OCR data and native dependencies have their own notices; see
-[`assets/tessdata/`](assets/tessdata/) and the app's license information.
+[`assets/tessdata/`](assets/tessdata/). In the app, open **About FOSScanner →
+View licenses** to read bundled OCR notices and registered package licenses.

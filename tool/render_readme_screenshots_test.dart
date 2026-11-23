@@ -7,8 +7,12 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
+import 'package:fosscanner/main.dart' show registerBundledLicenses;
+import 'package:fosscanner/services/draft_store.dart';
+import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/corner_adjust_screen.dart';
 import 'package:fosscanner/screens/scanner_home_page.dart';
 
@@ -18,6 +22,11 @@ class _Picker extends ImagePickerPlatform {
 
   @override
   Future<LostDataResponse> getLostData() async => LostDataResponse.empty();
+}
+
+class _UnreadableDraftStore extends NoOpDraftStore {
+  @override
+  Future<List<ScannedPage>> load() async => throw const DraftRestoreException();
 }
 
 // These renders document UI, not native edge detection or filter quality.
@@ -54,6 +63,26 @@ class _PreviewFixture implements CornerAdjustOperations {
     required double brightness,
     required double contrast,
   }) async => bytes;
+}
+
+class _FailedPreviewFixture extends _PreviewFixture {
+  _FailedPreviewFixture(super.bytes);
+
+  @override
+  Future<Uint8List> buildFinalPreview(
+    Uint8List bytes, {
+    required int rotationQuarterTurns,
+    required double brightness,
+    required double contrast,
+  }) async => throw StateError('Synthetic preview failure');
+}
+
+class _UnreadablePhotoFixture extends _PreviewFixture {
+  _UnreadablePhotoFixture(super.bytes);
+
+  @override
+  Future<Size> decodeSize(Uint8List bytes) async =>
+      throw const FormatException('Synthetic unreadable photo');
 }
 
 Future<Uint8List> _sampleDocument() async {
@@ -236,7 +265,7 @@ void main() {
     );
     expect(
       find.text('No page edges detected. Full image selected.'),
-      findsOneWidget,
+      findsNothing,
     );
     await save('crop-full-image-fallback');
     await tester.tap(find.text('Preview page'));
@@ -261,6 +290,88 @@ void main() {
     }
     await tester.pumpAndSettle();
     await save('ui-filters-panel');
+    await tester.pumpWidget(const SizedBox());
+    await show(home(maxDocumentPages));
+    await save('ui-intake-page-limit');
+    await tester.pumpWidget(const SizedBox());
+    await show(ScannerHomePage(draftStore: _UnreadableDraftStore()));
+    await save('ui-draft-restore-failure');
+    await tester.tap(find.text('Discard saved draft'));
+    await tester.pumpAndSettle();
+    await save('ui-draft-discard-confirmation');
+    await tester.pumpWidget(const SizedBox());
+    await show(
+      CornerAdjustScreen(
+        originalBytes: bytes,
+        source: PageReviewSource.gallery,
+        isBatchImport: true,
+        batchPosition: 2,
+        batchCount: 5,
+        onStopImport: () {},
+        operations: _PreviewFixture(bytes),
+      ),
+    );
+    await save('ui-batch-review-position');
+    await tester.pumpWidget(const SizedBox());
+    await show(
+      CornerAdjustScreen(
+        originalBytes: bytes,
+        initialCorners: corners,
+        startWithAdjustments: true,
+        operations: _FailedPreviewFixture(bytes),
+      ),
+    );
+    await save('ui-adjustment-preview-failure');
+    await tester.pumpWidget(const SizedBox());
+    registerBundledLicenses();
+    // This flutter_test documentation harness lives outside test/.
+    // ignore: invalid_use_of_visible_for_testing_member
+    PackageInfo.setMockInitialValues(
+      appName: 'FOSScanner',
+      packageName: 'com.fosscanner.app',
+      version: '1.5.2',
+      buildNumber: '10',
+      buildSignature: '',
+    );
+    await show(home(0));
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About FOSScanner'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('View licenses'));
+    await tester.tap(find.text('View licenses'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    await save('ui-open-source-licenses');
+    await tester.pumpWidget(const SizedBox());
+    tester.view.physicalSize = const Size(600, 220);
+    tester.view.padding = const FakeViewPadding(
+      left: 38,
+      right: 24,
+      bottom: 20,
+    );
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await show(
+      CornerAdjustScreen(
+        originalBytes: bytes,
+        operations: _UnreadablePhotoFixture(bytes),
+      ),
+    );
+    await tester.ensureVisible(find.text('Go back'));
+    await tester.pumpAndSettle();
+    await save('ui-crop-error-short-insets');
+    await tester.pumpWidget(const SizedBox());
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.padding = const FakeViewPadding();
+    await show(home(3));
+    final exportRect = tester.getRect(
+      find.widgetWithText(FilledButton, 'Export PDF (3 pages)'),
+    );
+    final optionsRect = tester.getRect(find.byTooltip('PDF export options'));
+    expect(optionsRect.center.dy, closeTo(exportRect.center.dy, 0.5));
+    await save('ui-export-row-large-text');
     debugDisableShadows = previousShadows;
   });
 }

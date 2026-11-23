@@ -15,18 +15,27 @@ class _DelayedDraftStore implements DraftStore {
   final loaded = Completer<List<ScannedPage>>();
   final saves = <List<ScannedPage>>[];
   var loadCalls = 0;
+  var clearCalls = 0;
+  Object? clearError;
+  List<ScannedPage> retryPages = [];
+  Future<List<ScannedPage>>? retryResult;
 
   @override
   Future<List<ScannedPage>> load() {
     loadCalls++;
-    return loaded.future;
+    return loadCalls == 1
+        ? loaded.future
+        : retryResult ?? Future.value(retryPages);
   }
 
   @override
   Future<void> save(List<ScannedPage> pages) async => saves.add(List.of(pages));
 
   @override
-  Future<void> clear() async {}
+  Future<void> clear() async {
+    clearCalls++;
+    if (clearError case final error?) throw error;
+  }
 }
 
 class _Picker extends ImagePickerPlatform {
@@ -123,8 +132,15 @@ void main() {
     WidgetTester tester,
     _DelayedDraftStore store, {
     List<ScannedPage> initialPages = const [],
+    double textScale = 1,
   }) => tester.pumpWidget(
     MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
       home: ScannerHomePage(
         draftStore: store,
         initialPages: initialPages,
@@ -208,24 +224,192 @@ void main() {
   );
 
   testWidgets(
-    'a failed restoration releases image intake with a recovery message',
+    'failed restoration blocks intake and retry restores without clearing',
     (tester) async {
       final store = _DelayedDraftStore();
       final picker = _Picker();
       ImagePickerPlatform.instance = picker;
       await pumpHome(tester, store);
-      expect(find.text('Restoring draft...'), findsOneWidget);
-
-      store.loaded.completeError(StateError('synthetic load failure'));
+      store.loaded.completeError(StateError('PRIVATE path and details'));
       await tester.pumpAndSettle();
-      expect(find.text('Could not restore the saved draft.'), findsOneWidget);
-      expect(find.text('Restoring draft...'), findsNothing);
+      expect(find.text('Could not restore the saved draft'), findsOneWidget);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      expect(find.byTooltip('Import from gallery'), findsNothing);
+      expect(find.byTooltip('Capture Image'), findsNothing);
+      expect(store.saves, isEmpty);
+      expect(
+        picker.galleryCalls + picker.cameraCalls + picker.lostDataCalls,
+        0,
+      );
+      final semantics = tester.ensureSemantics();
+      expect(
+        tester
+            .getSemantics(find.text('Could not restore the saved draft'))
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+
+      semantics.dispose();
+
+      store.retryPages = [savedPage()];
+      await tester.tap(find.text('Retry restoration'));
+      await tester.pumpAndSettle();
+      expect(store.loadCalls, 2);
+      expect(store.clearCalls, 0);
+      expect(find.text('Export PDF (1 page)'), findsOneWidget);
       await tester.tap(find.byTooltip('Import from gallery'));
       await tester.pumpAndSettle();
       expect(picker.galleryCalls, 1);
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
   );
+
+  testWidgets(
+    'pending and failed retries cannot reopen intake or overlap loads',
+    (tester) async {
+      final store = _DelayedDraftStore();
+      ImagePickerPlatform.instance = _Picker();
+      await pumpHome(tester, store);
+      store.loaded.completeError(const DraftRestoreException());
+      await tester.pumpAndSettle();
+      final pending = Completer<List<ScannedPage>>();
+      store.retryResult = pending.future;
+      final retry = tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Retry restoration'),
+          )
+          .onPressed!;
+      retry();
+      retry();
+      await tester.pump();
+      expect(store.loadCalls, 2);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Retry restoration'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(find.byTooltip('Import from gallery'), findsNothing);
+      pending.completeError(StateError('PRIVATE retry error'));
+      await tester.pumpAndSettle();
+      expect(find.text('Could not restore the saved draft'), findsOneWidget);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      expect(store.saves, isEmpty);
+      expect(store.clearCalls, 0);
+    },
+  );
+
+  testWidgets(
+    'discard requires confirmation and failed clear remains blocked',
+    (tester) async {
+      final store = _DelayedDraftStore();
+      ImagePickerPlatform.instance = _Picker();
+      await pumpHome(tester, store);
+      store.loaded.completeError(const DraftRestoreException());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard saved draft'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('might still be recoverable'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(store.clearCalls, 0);
+      expect(find.text('Retry restoration'), findsOneWidget);
+
+      store.clearError = StateError('PRIVATE filesystem details');
+      await tester.tap(find.text('Discard saved draft'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard draft'));
+      await tester.pumpAndSettle();
+      expect(store.clearCalls, 1);
+      expect(find.text('Could not clear the saved draft.'), findsOneWidget);
+      expect(find.byTooltip('Import from gallery'), findsNothing);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      expect(store.saves, isEmpty);
+
+      store.clearError = null;
+      await tester.tap(find.text('Discard saved draft'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard draft'));
+      await tester.pumpAndSettle();
+      expect(store.clearCalls, 2);
+      expect(find.text('Ready to Scan'), findsOneWidget);
+      expect(find.byTooltip('Import from gallery'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Android lost image remains available until successful restore retry',
+    (tester) async {
+      final store = _DelayedDraftStore();
+      final directory = Directory.systemTemp.createTempSync('draft-retry-');
+      final recovered = File('${directory.path}/recovered.png')
+        ..writeAsBytesSync(imageBytes);
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final picker = _Picker(recoveredFiles: [XFile(recovered.path)]);
+      ImagePickerPlatform.instance = picker;
+      await pumpHome(tester, store);
+      store.loaded.completeError(const DraftRestoreException());
+      await tester.pumpAndSettle();
+      expect(picker.lostDataCalls, 0);
+      expect(recovered.existsSync(), isTrue);
+      expect(store.saves, isEmpty);
+
+      store.retryPages = [savedPage()];
+      await tester.tap(find.text('Retry restoration'));
+      for (
+        var i = 0;
+        i < 50 && find.byType(CornerAdjustScreen).evaluate().isEmpty;
+        i++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.pumpAndSettle();
+      expect(picker.lostDataCalls, 1);
+      expect(find.byType(CornerAdjustScreen), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Export PDF (1 page)'), findsOneWidget);
+      expect(store.saves, isEmpty);
+      expect(recovered.existsSync(), isFalse);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  for (final size in [const Size(320, 568), const Size(640, 300)]) {
+    testWidgets(
+      'restore failure and discard confirmation fit 200% text on $size',
+      (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        ImagePickerPlatform.instance = _Picker();
+        final store = _DelayedDraftStore();
+        await pumpHome(tester, store, textScale: 2);
+        store.loaded.completeError(const DraftRestoreException());
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Discard saved draft'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Discard saved draft'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.ensureVisible(find.text('Cancel'));
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets(
     'explicit initial pages enable intake without loading a saved draft',

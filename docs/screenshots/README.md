@@ -10,10 +10,18 @@ quality.
 | `ui-home-empty.png` | Initial document screen |
 | `ui-home-pages.png` | Three-page document and compact export bar |
 | `ui-home-pages-dark.png` | The same document in the dark theme |
+| `ui-batch-review-position.png` | Batch position and explicit Stop importing action |
+| `ui-adjustment-preview-failure.png` | Preview error/retry painted inside the preview without moving controls |
+| `ui-open-source-licenses.png` | Registered bundled OCR and package licenses, opened from About |
+| `ui-export-row-large-text.png` | Export and OCR options aligned in one row at 320×568 and 200% text |
 | `ui-export-options.png` | Android searchable-text export options |
 | `crop-full-image-fallback.png` | Full-image selection after detection fallback |
 | `ui-adjust-appearance.png` | Numeric adjustments, Filters icon, and Add page |
 | `ui-filters-panel.png` | Filter choices opened explicitly from the Filters icon |
+| `ui-intake-page-limit.png` | Compact previews with intake disabled at the page-count limit |
+| `ui-draft-restore-failure.png` | Restoration failure pauses intake and offers retry |
+| `ui-crop-error-short-insets.png` | Crop recovery scrolled into view at 600×220, 200% text, and simulated side/bottom cutouts |
+| `ui-draft-discard-confirmation.png` | Explicit confirmation before discarding cached generations |
 
 ## Reproduce
 
@@ -32,7 +40,8 @@ or screenshots are downloaded by the renderer. Theme colors follow the app's
 deep-purple Material 3 configuration.
 
 The camera-picker capability is a test fixture. Draft persistence is disabled,
-so no real scans are loaded or saved. The editor uses fixture operations that
+with a synthetic restoration failure for the recovery-screen renders, so no real
+scans are loaded or saved. The editor uses fixture operations that
 return the sample unchanged: its thumbnails are not filter comparisons, and
 its fallback is injected rather than produced by native edge detection. No
 camera session, OCR operation, share sheet, browser launch, APK build, or device

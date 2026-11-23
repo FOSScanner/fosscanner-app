@@ -7,7 +7,10 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:fosscanner/models/scanned_page.dart';
+import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
+import 'package:fosscanner/main.dart' show registerBundledLicenses;
+import '../support/layout_stability.dart';
 
 class _Picker extends ImagePickerPlatform {
   Completer<List<XFile>>? selection;
@@ -25,6 +28,7 @@ class _Picker extends ImagePickerPlatform {
 }
 
 void main() {
+  setUpAll(registerBundledLicenses);
   late ImagePickerPlatform originalPicker;
   late _Picker picker;
   late Uint8List imageBytes;
@@ -114,6 +118,47 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final size in [
+    const Size(240, 640),
+    const Size(320, 568),
+    const Size(390, 844),
+    const Size(640, 300),
+  ]) {
+    for (final scale in [1.0, 1.3, 2.0]) {
+      testWidgets(
+        'export and OCR options stay on the same row at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, pageCount: maxDocumentPages, textScale: scale);
+          final export = find.widgetWithText(
+            FilledButton,
+            'Export PDF ($maxDocumentPages pages)',
+          );
+          final options = find.ancestor(
+            of: find.byTooltip('PDF export options'),
+            matching: find.byType(IconButton),
+          );
+          final exportRect = tester.getRect(export);
+          final optionsRect = tester.getRect(options);
+          final bar = tester.getRect(find.byKey(const Key('pdf_export_bar')));
+          expect(optionsRect.center.dy, closeTo(exportRect.center.dy, 0.5));
+          expect(optionsRect.left, greaterThanOrEqualTo(exportRect.right + 8));
+          expect(optionsRect.right, lessThanOrEqualTo(bar.right));
+          expect(optionsRect.bottom, lessThanOrEqualTo(bar.bottom));
+          expect(optionsRect.width, greaterThanOrEqualTo(48));
+          expect(optionsRect.height, greaterThanOrEqualTo(48));
+          expect(export.hitTestable(), findsOneWidget);
+          expect(options.hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.tap(options);
+          await tester.pumpAndSettle();
+          expect(find.byType(SwitchListTile), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets('export options explain OCR and retain the selection on reopen', (
     tester,
   ) async {
@@ -148,6 +193,62 @@ void main() {
       tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
       isFalse,
     );
+  });
+
+  for (final size in [const Size(390, 844), const Size(320, 568)]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets(
+        'searchable switch and sheet remain fixed at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, textScale: scale);
+          await openOptions(tester);
+          await tester.ensureVisible(find.text('Searchable text'));
+          await tester.pumpAndSettle();
+          final anchors = [
+            find.byType(SwitchListTile),
+            find.byType(BottomSheet),
+            find.widgetWithText(FilledButton, 'Done'),
+          ];
+          for (var toggle = 0; toggle < 2; toggle++) {
+            await expectStableRects(tester, anchors, () async {
+              await tester.tap(find.text('Searchable text'));
+              await tester.pumpAndSettle();
+            });
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  testWidgets('About exposes registered OCR licenses at 200% text', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(320, 568));
+    await pumpHome(tester, pageCount: 0, textScale: 2);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About FOSScanner'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('View licenses'));
+    await tester.tap(find.text('View licenses'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    for (final label in [
+      'Tesseract language data',
+      'Tesseract4Android and native OCR dependencies',
+    ]) {
+      await tester.scrollUntilVisible(
+        find.text(label),
+        200,
+        scrollable: find.byType(Scrollable).last,
+        maxScrolls: 100,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('image-only platforms do not offer unavailable OCR settings', (
@@ -204,6 +305,112 @@ void main() {
     }
   }
 
+  for (final size in [const Size(320, 568), const Size(640, 300)]) {
+    testWidgets('intake-limit status and guidance fit large text on $size', (
+      tester,
+    ) async {
+      setViewport(tester, size);
+      await pumpHome(tester, pageCount: maxDocumentPages, textScale: 2);
+      expect(find.text('Image intake help'), findsNothing);
+      expect(
+        tester
+            .widget<Semantics>(find.byKey(const Key('image_intake')))
+            .properties
+            .hint,
+        contains('$maxDocumentPages-page limit'),
+      );
+      expect(tester.takeException(), isNull);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final brightness in Brightness.values) {
+    for (final size in [
+      const Size(320, 568),
+      const Size(640, 300),
+      const Size(1024, 768),
+    ]) {
+      testWidgets(
+        'top-right delete controls fit $size at 200% text in $brightness',
+        (tester) async {
+          setViewport(tester, size);
+          tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+          addTearDown(tester.view.resetPadding);
+          await pumpHome(
+            tester,
+            pageCount: 8,
+            textScale: 2,
+            brightness: brightness,
+          );
+          final delete = find.byTooltip('Delete page 8');
+          await tester.scrollUntilVisible(
+            delete,
+            200,
+            maxScrolls: 50,
+            scrollable: find.descendant(
+              of: find.byType(GridView),
+              matching: find.byType(Scrollable),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          final cardRect = tester.getRect(
+            find.byKey(const ValueKey('page_preview_7')),
+          );
+          final deleteButton = find.ancestor(
+            of: delete,
+            matching: find.byType(IconButton),
+          );
+          final deleteRect = tester.getRect(deleteButton);
+          expect(deleteRect.right, closeTo(cardRect.right, 1));
+          expect(deleteRect.top, closeTo(cardRect.top, 1));
+          expect(deleteRect.width, greaterThanOrEqualTo(48));
+          expect(deleteRect.height, greaterThanOrEqualTo(48));
+          expect(delete.hitTestable(), findsOneWidget);
+          expect(
+            deleteRect.overlaps(
+              tester.getRect(find.byTooltip('Capture Image')),
+            ),
+            isFalse,
+          );
+          expect(find.byIcon(Icons.swap_vert), findsNothing);
+          await tester.tap(delete);
+          await tester.pumpAndSettle();
+          expect(find.text('Export PDF (7 pages)'), findsOneWidget);
+          expect(find.text('Page deleted.'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  for (final size in [const Size(320, 568), const Size(390, 844)]) {
+    for (final scale in [1.0, 1.3]) {
+      testWidgets(
+        'portrait keeps compact two-column previews at $size / $scale',
+        (tester) async {
+          setViewport(tester, size);
+          await pumpHome(tester, pageCount: 8, textScale: scale);
+          final grid = tester.widget<GridView>(find.byType(GridView));
+          final delegate =
+              grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+          expect(delegate.crossAxisCount, 2);
+          expect(
+            delegate.mainAxisExtent,
+            lessThan(size.width < 350 ? 240 : 300),
+          );
+          expect(find.text('Image intake help'), findsNothing);
+          expect(
+            find.text('Drafts are temporary. Export a PDF to keep a copy.'),
+            findsNothing,
+          );
+          expect(find.byIcon(Icons.swap_vert), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets('short empty home scrolls without large-text overflow', (
     tester,
   ) async {
@@ -215,23 +422,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('page labels and delete controls do not cover document content', (
-    tester,
-  ) async {
-    await pumpHome(tester);
-    final preview = find.descendant(
-      of: find.byType(Card).first,
-      matching: find.byType(Image),
-    );
-    final image = tester.widget<Image>(preview);
-    final bounds = tester.getRect(preview);
-    expect(image.fit, BoxFit.contain);
-    expect(bounds.overlaps(tester.getRect(find.text('Page 1'))), isFalse);
-    expect(
-      bounds.overlaps(tester.getRect(find.byTooltip('Delete page 1'))),
-      isFalse,
-    );
-  });
+  testWidgets(
+    'page label stays outside the image with deletion at the preview corner',
+    (tester) async {
+      await pumpHome(tester);
+      final preview = find.descendant(
+        of: find.byType(Card).first,
+        matching: find.byType(Image),
+      );
+      final image = tester.widget<Image>(preview);
+      final bounds = tester.getRect(preview);
+      expect(image.fit, BoxFit.contain);
+      expect(bounds.overlaps(tester.getRect(find.text('Page 1'))), isFalse);
+      final tile = tester.getRect(find.byKey(const ValueKey('page_preview_0')));
+      final delete = tester.getRect(
+        find.ancestor(
+          of: find.byTooltip('Delete page 1'),
+          matching: find.byType(IconButton),
+        ),
+      );
+      expect(delete.top, closeTo(tile.top, 1));
+      expect(delete.right, closeTo(tile.right, 1));
+    },
+  );
 
   testWidgets('About content remains usable on a narrow large-text screen', (
     tester,
@@ -256,7 +469,12 @@ void main() {
   ) async {
     setViewport(tester, const Size(390, 600));
     await pumpHome(tester, pageCount: 8);
-    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    final scroll = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byType(GridView),
+        matching: find.byType(Scrollable),
+      ),
+    );
     scroll.position.jumpTo(scroll.position.maxScrollExtent);
     await tester.pumpAndSettle();
 

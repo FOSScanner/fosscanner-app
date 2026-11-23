@@ -391,7 +391,10 @@ void main() {
       await tester.pumpAndSettle();
       debugDefaultTargetPlatformOverride = null;
 
-      expect(find.text('Could not open the camera.'), findsOneWidget);
+      expect(find.textContaining('No camera is available'), findsOneWidget);
+      expect(find.text('Import images'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
       expect(find.byTooltip('Capture Image'), findsNothing);
       expect(find.textContaining('Import from your gallery'), findsOneWidget);
     },
@@ -483,6 +486,119 @@ void main() {
     );
   });
 
+  testWidgets(
+    'page-limit guidance is accessible and deletion restores intake',
+    (tester) async {
+      final icon = File('assets/icon/icon.png').readAsBytesSync();
+      final page = ScannedPage(
+        originalBytes: icon,
+        corners: const [],
+        processedBytes: icon,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScannerHomePage(
+            initialPages: List.filled(maxDocumentPages, page),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final hint = tester
+          .widget<Semantics>(find.byKey(const Key('image_intake')))
+          .properties
+          .hint;
+      expect(hint, contains('$maxDocumentPages-page limit'));
+      expect(hint, isNot(contains('not enough document memory')));
+      expect(find.text('Image intake help'), findsNothing);
+      await tester.ensureVisible(find.byTooltip('Delete page 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Delete page 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Image intake help'), findsNothing);
+      expect(
+        tester
+            .widget<FloatingActionButton>(find.byType(FloatingActionButton))
+            .onPressed,
+        isNotNull,
+      );
+    },
+  );
+
+  testWidgets('byte-limit guidance includes Undo and expiry restores intake', (
+    tester,
+  ) async {
+    final icon = File('assets/icon/icon.png').readAsBytesSync();
+    final retained = _imageWithRetainedStorage(icon, maxRetainedDocumentBytes);
+    final page = ScannedPage(
+      originalBytes: retained,
+      corners: const [],
+      processedBytes: retained,
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: ScannerHomePage(initialPages: [page])),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FloatingActionButton>(find.byType(FloatingActionButton))
+          .onPressed,
+      isNull,
+    );
+    final hint = tester
+        .widget<Semantics>(find.byKey(const Key('image_intake')))
+        .properties
+        .hint;
+    expect(hint, contains('not enough document memory'));
+    expect(hint, contains('pending draft save'));
+    expect(hint, isNot(contains('page limit')));
+    expect(find.text('Image intake help'), findsNothing);
+    await tester.ensureVisible(find.byTooltip('Delete page 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Delete page 1'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FloatingActionButton>(find.byType(FloatingActionButton))
+          .onPressed,
+      isNull,
+    );
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.text('Image intake help'), findsNothing);
+    expect(
+      tester
+          .widget<FloatingActionButton>(find.byType(FloatingActionButton))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('unsupported camera status directs users to available gallery', (
+    tester,
+  ) async {
+    ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+      cameraSupported: false,
+    );
+    await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Semantics>(find.byKey(const Key('image_intake')))
+          .properties
+          .hint,
+      contains('Use Import from gallery'),
+    );
+    expect(find.text('Image intake help'), findsNothing);
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.photo_library_outlined),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
   testWidgets('gallery selection is capped to the remaining page slots', (
     tester,
   ) async {
@@ -542,10 +658,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(selections.fold(0, (sum, file) => sum + file.lengthCalls), 1);
-    expect(
-      find.textContaining('Document memory limit reached'),
-      findsOneWidget,
+    expect(find.textContaining('not enough document memory'), findsOneWidget);
+  });
+
+  testWidgets('oversized files suggest smaller files, not document capacity', (
+    tester,
+  ) async {
+    ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+      images: [
+        _SizedXFile('oversized.png', Uint8List(maxEncodedImageBytes + 1)),
+      ],
     );
+    await tester.pumpWidget(const MaterialApp(home: ScannerHomePage()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Import from gallery'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('file is too large'), findsOneWidget);
+    expect(find.textContaining('Choose a file under'), findsOneWidget);
+    expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
   testWidgets('gallery reports a distinct transient processing-budget error', (
@@ -581,7 +711,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(CornerAdjustScreen), findsNothing);
-    expect(find.textContaining('Document memory limit reached'), findsNothing);
+    expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
   testWidgets('page taps preview the saved result and retain edits', (
@@ -863,10 +993,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('Document memory limit reached'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('not enough document memory'), findsOneWidget);
   });
 
   testWidgets('backend stream errors are not reported as capacity failures', (
@@ -898,7 +1025,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Could not read this photo.'), findsOneWidget);
-    expect(find.textContaining('Document memory limit reached'), findsNothing);
+    expect(find.textContaining('not enough document memory'), findsNothing);
   });
 
   testWidgets('page thumbnails request a bounded decode size', (tester) async {
@@ -995,7 +1122,7 @@ void main() {
         isFalse,
       );
       expect(
-        find.text('Image-only PDF without text recognition.'),
+        find.text('Recognize text so you can search and select it in the PDF.'),
         findsOneWidget,
       );
       await tester.tap(find.text('Done'));

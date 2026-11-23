@@ -21,7 +21,17 @@ jobs:
 
       - run: flutter pub get
       - run: flutter analyze
+      - run: python3 -m unittest discover -s test/tool -p '*_test.py'
       - run: flutter test
+
+      - name: Upload screenshot regression diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: golden-failures
+          path: test/**/failures/**
+          if-no-files-found: ignore
+          retention-days: 14
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -34,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '17'
@@ -42,6 +52,13 @@ jobs:
         with:
           flutter-version: '3.44.0'
       - run: flutter build apk --debug --target-platform android-arm64
+      # Debug intentionally has Flutter's INTERNET permission. Audit the actual
+      # release merge before publishing the artifact, not only our source XML.
+      - name: Enforce release permission allowlist
+        run: |
+          (cd android && ./gradlew :app:processReleaseManifest)
+          python3 tool/check_android_permissions.py \
+            build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-debug-arm64
@@ -62,7 +79,7 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: '  safe\:pass:word=1  '
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '17'

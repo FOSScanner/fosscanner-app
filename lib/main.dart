@@ -6,7 +6,8 @@ import 'screens/scanner_home_page.dart';
 import 'services/draft_store.dart';
 import 'widgets/draft_session_gate.dart';
 
-void main() {
+/// Register bundled OCR notices alongside Flutter's package licenses.
+void registerBundledLicenses() {
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([
       'Tesseract language data',
@@ -15,6 +16,10 @@ void main() {
       'Tesseract4Android and native OCR dependencies',
     ], await rootBundle.loadString('assets/tessdata/THIRD_PARTY_NOTICES.txt'));
   });
+}
+
+void main() {
+  registerBundledLicenses();
   runApp(FOSScannerApp(draftStore: createDraftStore()));
 }
 

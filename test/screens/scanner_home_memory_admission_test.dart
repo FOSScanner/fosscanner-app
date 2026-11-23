@@ -199,6 +199,12 @@ void main() {
       final reorder = tester
           .widget<DragTarget<int>>(find.byType(DragTarget<int>).last)
           .onAcceptWithDetails!;
+      final moveLater = tester
+          .widget<Semantics>(find.byKey(const ValueKey('page_semantics_0')))
+          .properties
+          .customSemanticsActions!
+          .values
+          .single;
       final openPage = tester
           .widget<InkWell>(
             find
@@ -212,6 +218,14 @@ void main() {
 
       await tester.tap(find.text('Export PDF (2 pages)'));
       await tester.pump();
+      expect(find.text('Image intake help'), findsNothing);
+      expect(
+        tester
+            .widget<Semantics>(find.byKey(const Key('image_intake')))
+            .properties
+            .hint,
+        contains('Export is in progress'),
+      );
       for (final tooltip in [
         'Import from gallery',
         'Delete page 1',
@@ -234,6 +248,14 @@ void main() {
             .maxSimultaneousDrags,
         0,
       );
+      expect(
+        tester
+            .widget<Semantics>(find.byKey(const ValueKey('page_semantics_0')))
+            .properties
+            .customSemanticsActions,
+        isEmpty,
+      );
+      moveLater();
       gallery();
       camera();
       barcode();
@@ -287,6 +309,14 @@ void main() {
     await tester.tap(find.byTooltip('Import from gallery'));
     await tester.pump();
     expect(picker.calls, 1);
+    expect(find.text('Image intake help'), findsNothing);
+    expect(
+      tester
+          .widget<Semantics>(find.byKey(const Key('image_intake')))
+          .properties
+          .hint,
+      contains('selection or page review'),
+    );
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
@@ -298,6 +328,7 @@ void main() {
     picker.result.complete([]);
     await tester.pump();
     await tester.pumpAndSettle();
+    expect(find.text('Image intake help'), findsNothing);
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
@@ -374,6 +405,17 @@ void main() {
     allocation.setRange(0, imageBytes.length, imageBytes);
     return Uint8List.sublistView(allocation, 0, imageBytes.length);
   }
+
+  testWidgets('unsupported dimensions give concise resize guidance', (
+    tester,
+  ) async {
+    await pumpHome(tester, sourceSize: const Size(1, 1));
+    await editFirstPage(tester);
+    expect(find.textContaining('unsupported dimensions'), findsOneWidget);
+    expect(find.textContaining('resize a large image'), findsOneWidget);
+    expect(find.textContaining('pixels'), findsNothing);
+    expect(operations.previewCalls, 0);
+  });
 
   testWidgets('Undo-held images remain in the processing budget', (
     tester,

@@ -286,6 +286,7 @@ void main() {
           'v4': 'cf277c60eb25467037889841efdb72551f06f6c3',
           'v6.1.0': 'b843ebf9b913146b38da2eaa7aeddf76074ae1ad',
           'v6.2.0': '77dd5b2ce225ea11469928ac317850245a74ae78',
+          'v6.3.0': 'd1374f8ac74474200d16ef8ecee22c7ae7a51880',
         },
         'softprops/action-gh-release': {
           'v2': '3bb12739c298aeb8a4eeaf626c5b8d85266b0e65',
