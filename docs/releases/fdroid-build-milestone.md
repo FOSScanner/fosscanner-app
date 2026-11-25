@@ -78,3 +78,11 @@ This is **not** proof of an empty-cache one-shot build or reproducibility.
 The earlier [preflight history](fdroid-preflight.md) records individual probes
 and failed attempts; the artifact identified here is the successful CI-image
 result. Publication and a F-Droid availability badge remain out of scope.
+
+## Follow-up attribution finding
+
+The subsequent [barcode attribution inspection](fdroid-native-attribution-review.md)
+found bundled Zint code without its native attribution in the inspected APK's
+notice assets. This is an unresolved distribution gate, not a scanner failure
+or evidence of a non-free dependency. Keep the upstream PR in draft pending
+remediation and the remaining acceptance checks.
