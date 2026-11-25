@@ -130,7 +130,7 @@ are cleaned up after the attempt to read them, including failed reads.
 Android's release permission policy allows only camera access and the app's
 signature-level AndroidX receiver permission. Unused microphone, shared-storage,
 and network-state permissions from dependencies are removed during manifest
-merging. CI checks the processed **release** manifest against an allowlist;
+merging. CI checks the manifest inside the ARM64 **release APK** against an allowlist;
 debug builds separately retain Flutter's development `INTERNET` permission.
 
 ### Drafts are temporary, not a backup
@@ -214,6 +214,24 @@ flutter build ios --no-codesign
 For Android signing, copy and configure
 [`android/key.properties.example`](android/key.properties.example). Keep the
 real properties file and keystore out of git; never share signing credentials.
+
+For F-Droid packaging tests only, use a clean checkout **without**
+`android/key.properties` or private signing material:
+
+```bash
+flutter pub get --enforce-lockfile
+ORG_GRADLE_PROJECT_fdroidUnsigned=true flutter build apk --no-pub --release \
+  --split-per-abi --target-platform android-arm64
+```
+
+This produces an unsigned packaging input, not an installable release. If the app
+is accepted, F-Droid will sign its own build. GitHub releases keep their existing
+signing key; that key is never provided to F-Droid. Android cannot update an
+installation in place with an APK signed by a different certificate. Stay on
+the same channel for updates. Before switching, export important documents and
+verify the copies outside the app: uninstalling removes local drafts. See the
+[native dependency preflight](docs/releases/fdroid-preflight.md) for the
+remaining packaging gates.
 
 For a containerized **debug** Android build:
 

@@ -23,6 +23,12 @@ quality.
 | `ui-crop-error-short-insets.png` | Crop recovery scrolled into view at 600×220, 200% text, and simulated side/bottom cutouts |
 | `ui-draft-discard-confirmation.png` | Explicit confirmation before discarding cached generations |
 
+The Fastlane `en-US/images/phoneScreenshots/` files are copies of the same
+synthetic renders: `1.png` is `ui-home-pages.png`, `2.png` is
+`ui-adjust-appearance.png`, and `3.png` is `ui-export-options.png`. When
+updating store images, check the proposed release UI first; do not present
+these renders as device-test results.
+
 ## Reproduce
 
 From the repository root, using Flutter **3.44.0 / Dart 3.12**:

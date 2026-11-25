@@ -1,0 +1,1 @@
+Improved page review and PDF export on small screens and at larger text sizes. Draft recovery now protects cached pages if restoration fails. Android requests fewer permissions. Sharing keeps your draft; use Clear all to remove it.

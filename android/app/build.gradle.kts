@@ -13,8 +13,12 @@ plugins {
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 val hasReleaseKeystore = keystorePropertiesFile.exists()
+val fdroidUnsigned = providers.gradleProperty("fdroidUnsigned").orNull == "true"
+if (fdroidUnsigned && hasReleaseKeystore) {
+    throw GradleException("F-Droid unsigned builds require a checkout without android/key.properties.")
+}
 if (hasReleaseKeystore) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
     // CI passes the password directly: .properties parsing would otherwise
     // interpret backslashes and strip leading whitespace from the secret.
     System.getenv("ANDROID_KEYSTORE_PASSWORD")?.let { password ->
@@ -29,7 +33,7 @@ gradle.taskGraph.whenReady {
     val requestsReleaseArtifact = allTasks.any { task ->
         releaseArtifactTask.matches(task.name)
     }
-    if (requestsReleaseArtifact && !hasReleaseKeystore) {
+    if (requestsReleaseArtifact && !hasReleaseKeystore && !fdroidUnsigned) {
         throw GradleException(
             "Release signing is required: copy android/key.properties.example " +
                 "to android/key.properties and configure a release keystore.",
@@ -71,7 +75,9 @@ android {
 
     buildTypes {
         release {
-            if (hasReleaseKeystore) {
+            if (fdroidUnsigned) {
+                signingConfig = null
+            } else if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

@@ -1,28 +1,7 @@
-FOSScanner is a privacy-first, free and open-source document scanner.
+Turn a photo into a PDF without uploading the document. Capture a page with the camera or import images from your gallery. FOSScanner detects page edges on-device; adjust the corners, straighten the page, and preview filters before adding it to your document.
 
-Scan documents with your camera, and FOSScanner automatically detects the
-page's edges, lets you fine-tune the corners with a draggable overlay, and
-corrects the perspective (dewarping) into a flat, upright page — all
-on-device, using real OpenCV image processing.
+Arrange the pages and export an image-only PDF, or turn on searchable text for Latin-script documents. Recognition runs on-device with a bundled OCR model. Export opens the system share sheet so you can choose where the PDF goes.
 
-Features:
+Your draft stays in the app after sharing. Use Clear all and confirm to remove it. Drafts are stored in the app's private cache, which Android can evict; save a PDF outside the app if you need a lasting copy. Clearing a draft does not delete gallery originals, exported PDFs, or copies held by receiving apps. Temporary import and share copies may remain in cache.
 
-* Automatic edge detection with manual corner adjustment
-* Scan filters: Original, Auto-Enhance, Grayscale, and Black &amp; White,
-  with live previews before you confirm
-* Re-edit a page's corners or filter after the fact without re-scanning
-* Capture multiple pages and combine them into a single PDF
-* Share the PDF via the OS share sheet
-* Material 3 UI that follows your system's light/dark theme
-* No accounts, no cloud storage, no tracking
-
-Privacy:
-
-* All image processing and PDF generation happens on-device
-* Imported gallery originals are never modified or deleted. App-owned camera temp files
-  are removed after the app attempts to copy them into memory, including failed reads
-* An unfinished draft is saved automatically in the app's private, OS-managed cache so it
-  can be restored after an app restart. Clearing the document removes it; after sharing, you
-  choose whether to clear or keep the draft. The OS may evict cached data, and sharing may
-  create a separate cached PDF copy
-* The app makes no network requests of its own
+The app has no accounts, tracking, or cloud OCR.
