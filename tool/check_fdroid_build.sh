@@ -21,6 +21,9 @@ grep -Fx "native-code: 'arm64-v8a'" "$log"
 # Check the manifest shipped in this exact split, not a Gradle intermediate.
 "$sdk/cmdline-tools/latest/bin/apkanalyzer" manifest print "$apk" >"$log"
 python3 tool/check_android_permissions.py "$log"
+flutter_root=$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")
+python3 tool/check_native_notices.py "$apk" \
+  --engine-license "$flutter_root/bin/cache/pkg/sky_engine/LICENSE"
 if "$build_tools/apksigner" verify "$apk" >"$log" 2>&1; then
   echo 'Expected an unsigned F-Droid input APK, found a valid signature' >&2
   exit 1

@@ -6,9 +6,19 @@ import 'screens/scanner_home_page.dart';
 import 'services/draft_store.dart';
 import 'widgets/draft_session_gate.dart';
 
-/// Register bundled OCR notices alongside Flutter's package licenses.
+/// Register native notices not collected from Dart package LICENSE files.
 void registerBundledLicenses() {
   LicenseRegistry.addLicense(() async* {
+    for (final (name, asset) in [
+      ('ZXing and Zint native barcode libraries', 'BARCODE_NOTICES.txt'),
+      ('OpenCV and native image dependencies', 'OPENCV_NOTICES.txt'),
+      ('KleidiCV', 'KLEIDICV_NOTICES.txt'),
+      ('AndroidX CameraX and libyuv', 'CAMERAX_NOTICES.txt'),
+    ]) {
+      yield LicenseEntryWithLineBreaks([
+        name,
+      ], await rootBundle.loadString('assets/licenses/$asset'));
+    }
     yield LicenseEntryWithLineBreaks([
       'Tesseract language data',
     ], await rootBundle.loadString('assets/tessdata/LICENSE'));
