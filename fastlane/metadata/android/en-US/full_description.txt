@@ -2,6 +2,6 @@ Turn a photo into a PDF without uploading the document. Capture a page with the 
 
 Arrange the pages and export an image-only PDF, or turn on searchable text for Latin-script documents. Recognition runs on-device with a bundled OCR model. Export opens the system share sheet so you can choose where the PDF goes.
 
-Your draft stays in the app after sharing. Use Clear all and confirm to remove it. Drafts are stored in the app's private cache, which Android can evict; save a PDF outside the app if you need a lasting copy. Clearing a draft does not delete gallery originals, exported PDFs, or copies held by receiving apps. Temporary import and share copies may remain in cache.
+Your unfinished draft is saved automatically in the app's private, OS-managed cache and stays in the app after sharing. Use Clear all and confirm to remove it. Android can evict cached drafts; save a PDF outside the app if you need a lasting copy. Clearing a draft does not delete gallery originals, exported PDFs, or copies held by receiving apps. The app attempts to delete app-owned camera temp files after reading them. Temporary import and share copies may remain in cache.
 
 The app has no accounts, tracking, or cloud OCR.
