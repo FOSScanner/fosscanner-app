@@ -1,31 +1,8 @@
 diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
-index afe6df1..38448ce 100644
+index 10a4cb3..38448ce 100644
 --- a/android/app/build.gradle.kts
 +++ b/android/app/build.gradle.kts
-@@ -13,8 +13,12 @@ plugins {
- val keystorePropertiesFile = rootProject.file("key.properties")
- val keystoreProperties = Properties()
- val hasReleaseKeystore = keystorePropertiesFile.exists()
-+val fdroidUnsigned = providers.gradleProperty("fdroidUnsigned").orNull == "true"
-+if (fdroidUnsigned && hasReleaseKeystore) {
-+    throw GradleException("F-Droid unsigned builds require a checkout without android/key.properties.")
-+}
- if (hasReleaseKeystore) {
--    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-+    FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
-     // CI passes the password directly: .properties parsing would otherwise
-     // interpret backslashes and strip leading whitespace from the secret.
-     System.getenv("ANDROID_KEYSTORE_PASSWORD")?.let { password ->
-@@ -29,7 +33,7 @@ gradle.taskGraph.whenReady {
-     val requestsReleaseArtifact = allTasks.any { task ->
-         releaseArtifactTask.matches(task.name)
-     }
--    if (requestsReleaseArtifact && !hasReleaseKeystore) {
-+    if (requestsReleaseArtifact && !hasReleaseKeystore && !fdroidUnsigned) {
-         throw GradleException(
-             "Release signing is required: copy android/key.properties.example " +
-                 "to android/key.properties and configure a release keystore.",
-@@ -48,6 +52,7 @@ android {
+@@ -52,6 +52,7 @@ android {
      }
  
      defaultConfig {
@@ -33,18 +10,7 @@ index afe6df1..38448ce 100644
          applicationId = "com.fosscanner.app"
          // You can update the following values to match your application needs.
          // For more information, see: https://flutter.dev/to/review-gradle-config.
-@@ -71,7 +76,9 @@ android {
- 
-     buildTypes {
-         release {
--            if (hasReleaseKeystore) {
-+            if (fdroidUnsigned) {
-+                signingConfig = null
-+            } else if (hasReleaseKeystore) {
-                 signingConfig = signingConfigs.getByName("release")
-             }
-         }
-@@ -89,7 +96,7 @@ dependencies {
+@@ -95,7 +96,7 @@ dependencies {
      // TessPdfRenderer) backing lib/services/ocr_service.dart's MethodChannel
      // bridge (MainActivity.kt). No off-the-shelf Flutter OCR/PDF plugin is
      // used — see MainActivity.kt for why.

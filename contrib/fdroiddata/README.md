@@ -16,10 +16,16 @@ requires a configured F-Droid build server; retain its source scan and build
 logs. Run `fdroid scanner --exit-code /path/to/output.apk` on its output. No
 upstream keystore or debug signing should be used.
 
-**Why the patch:** the public v1.6.0 tag predates the unsigned build option.
-The recipe patch backports that option only in the build checkout, removes the
-JitPack repository/dependency, and selects the `standard` (non-OpenMP) OCR
-library from source. OpenCV and KleidiCV are supplied as extracted sources,
+**Source selection:** the recipe pins public packaging-candidate commit
+`d6b11d09611ed5ee94ad7932a5c588e018e67778` on
+`build/fdroid-v1.6.0-candidate`. It is based on immutable v1.6.0 and includes the
+unsigned-build option, corrected store metadata and native attribution fix.
+It is not a new release tag or an assertion of device acceptance. The normal
+upstream preparation PR still targets `dev` without importing release-only
+version commits.
+
+**Why the patch:** the recipe patch removes the JitPack repository/dependency
+and selects the `standard` (non-OpenMP) OCR library from source. OpenCV and KleidiCV are supplied as extracted sources,
 not as prebuilt libraries or a network download by the Flutter native hook.
 The ARM64 split adds 2000 to the pubspec build number. Automatic recipe updates
 are disabled because new Flutter and native versions need their own input audit.
@@ -33,9 +39,12 @@ recipe removes those example scripts and fixtures, not either package’s `lib/`
 code. Recheck the paths when changing versions. There are no `scanignore` or
 `scandelete` rules.
 
-See [preflight evidence](../../docs/releases/fdroid-preflight.md) for what was
-actually exercised locally. A build-server run, final artifact checks, F-Droid
-signing and device acceptance are separate gates.
+See the [candidate validation](../../docs/releases/fdroid-attribution-fix.md)
+and [preflight history](../../docs/releases/fdroid-preflight.md) for what was
+actually exercised locally. The complete local CI-image F-Droid build and
+artifact checks passed for the pinned candidate. A hosted fdroiddata pipeline,
+inclusion review, F-Droid signing and signed-device acceptance remain separate
+gates.
 
 For a first inclusion, use the upstream [contribution guide](https://gitlab.com/fdroid/fdroiddata/-/blob/master/CONTRIBUTING.md)
 and [new-app MR checklist](https://gitlab.com/fdroid/fdroiddata/-/blob/master/.gitlab/merge_request_templates/Default.md).

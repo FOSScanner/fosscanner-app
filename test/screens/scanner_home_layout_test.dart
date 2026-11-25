@@ -266,6 +266,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(label), findsOneWidget);
     }
+    await tester.tap(find.text('ZXing and Zint native barcode libraries'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await pumpUntilFound(
+      tester,
+      find.textContaining('ZXing 3.1.1 and bundled Zint'),
+    );
+    expect(
+      find.textContaining('notice set conservatively includes'),
+      findsWidgets,
+    );
     expect(tester.takeException(), isNull);
   });
 

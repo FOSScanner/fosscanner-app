@@ -63,13 +63,49 @@ CI's unsigned-build check now runs the packaged-native-notice verifier, includin
 engine bodies. A passing historical CI run is not proof for these new changes;
 verify the latest PR head separately.
 
+## Complete F-Droid candidate validation
+
+The source-selection gap is now also addressed: the recipe pins public commit
+`d6b11d09611ed5ee94ad7932a5c588e018e67778` on
+`build/fdroid-v1.6.0-candidate`. This branch is based on immutable v1.6.0 plus
+the preparation/attribution fixes; it preserves version `1.6.0` (`2011`).
+`dev` is not manually version-bumped. The recipe patch now only substitutes
+source-built native dependencies, since unsigned mode is already in the source.
+
+A subsequent **complete** local CI-image run succeeded:
+
+```text
+fdroid build --verbose --test --on-server --refresh-scanner --scan-binary --no-tarball com.fosscanner.app:2011
+```
+
+- Exit 0, `1 build succeeded`, source scan and APK scans passed.
+- APK SHA-256: `c4f52ebac3f3cff8969aa36648f5e12dc5ce4c70fabd99774db8e68ab59b289b`.
+- Package/version/ABI: `com.fosscanner.app`, `1.6.0`, `2011`, ARM64 only.
+- All four native notice assets matched reviewed source bytes. All 1,594
+  Flutter engine license bodies were present. OCR model/notices also matched.
+- Permissions, expected unsigned status, ZIP 16 KiB alignment, and all eleven
+  native ELF load-segment alignment checks passed.
+- Four OCR JNI build IDs matched the freshly built source-module AAR. DartCV's
+  packaged build ID `48333604698814913e16f9e061442d25efb0ddcd` matched its CMake
+  installation output.
+- SUSS database SHA-256:
+  `88da8b3c55b3bb84e0099ac1ea617c90aac64678f5c2237f7f1abf262c80b63a`.
+- Exact candidate source passed analysis, 435 Flutter tests and 24 Python tests
+  in a separate local container. The upstream test also exercises opening the
+  barcode notice detail page at 200% text.
+
+This used the same pinned CI image/server as the earlier milestone, two CPUs,
+6 GiB memory and retained provisioning/download caches. It is neither a cold
+one-shot/reproducible-build result nor a hosted GitLab pipeline. No F-Droid key
+or upstream release key was used. The packaging-candidate branch is a pinned
+review input, not a published release or an authorization to submit it.
+
 ## Gates that remain outside this fix
 
-1. **Final public source revision:** the draft F-Droid recipe still selects
-   immutable v1.6.0 and does not include these later fixes. After upstream review,
-   choose an appropriate public source revision/version, update the recipe and
-   rerun the complete F-Droid build and scanners. Do not submit the old recipe
-   as though this development verification APK came from it.
+1. **Upstream and inclusion review:** review/merge the preparation PR and approve
+   the pinned packaging source (or choose a later reviewed release and rebuild).
+   No source tag or release has been created or changed. The source-selection
+   and notice defects themselves no longer require an unreleased local file.
 2. **Device acceptance:** no Android device was exposed to the build
    environment (`adb devices -l` was empty); no configured AVD/system image was
    found there. Host USB descriptors exposed only its camera, fingerprint

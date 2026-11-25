@@ -318,3 +318,16 @@ The subsequent local run of `fdroid build --test --on-server --scan-binary`
 succeeded. See the [milestone record](fdroid-build-milestone.md) for the exact
 APK, independent verification, signing-guard tests and remaining gates. Earlier
 probe hashes and failure states in this history are not the final artifact.
+
+## Native notices fixed and public candidate rebuilt
+
+The [attribution fix record](fdroid-attribution-fix.md) supersedes the missing
+barcode notice finding and source-revision gap. The recipe now pins public
+packaging-candidate commit `d6b11d09611ed5ee94ad7932a5c588e018e67778`, retaining
+v1.6.0's version while including native notices and corrected store metadata.
+A complete local F-Droid build, source/APK scans and artifact checks passed;
+its APK SHA-256 is
+`c4f52ebac3f3cff8969aa36648f5e12dc5ce4c70fabd99774db8e68ab59b289b`.
+This is not the earlier development overlay APK or the original tag-only
+milestone artifact. No F-Droid submission/publication or signed-device
+acceptance has occurred.
