@@ -1,0 +1,67 @@
+Categories:
+  - OCR
+License: GPL-3.0-only
+AuthorName: FOSScanner
+SourceCode: https://github.com/FOSScanner/fosscanner-app
+IssueTracker: https://github.com/FOSScanner/fosscanner-app/issues
+Changelog: https://github.com/FOSScanner/fosscanner-app/releases
+
+AutoName: FOSScanner
+
+RepoType: git
+Repo: https://github.com/FOSScanner/fosscanner-app.git
+
+Builds:
+  - versionName: 1.6.0
+    versionCode: 2011
+    commit: d6b11d09611ed5ee94ad7932a5c588e018e67778
+    patch:
+      - native-source.patch
+    output: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+    srclibs:
+      - flutter@559ffa3f75e7402d65a8def9c28389a9b2e6fe42
+      - opencv@fe38fc608f6acb8b68953438a62305d8318f4fcd
+      - KleidiCV@1e8fe7008c2292657b9689d70ea5d30db0e57767
+      - Tesseract4Android@15c534717b1cb58261b58d4e4c1200c7f81f668c
+    prebuild:
+      - mkdir -p native-inputs/{cv,kleidicv,ocr}
+      - tar -C $$opencv$$ --exclude-vcs --exclude='./apps/pattern-tools/DICT_*.json.gz'
+        --exclude='./modules/js/perf/package.json' --exclude='./modules/js/test/package.json'
+        --exclude='./doc/js_tutorials/js_assets/webnn-electron/package.json' --exclude='./modules/java/test/pure_test/lib/junit-4.11.jar'
+        --exclude='./samples/java/sbt/sbt/sbt-launch.jar' -cf - . | tar -C native-inputs/cv
+        -xf -
+      - tar -C $$KleidiCV$$ --exclude-vcs -cf - . | tar -C native-inputs/kleidicv
+        -xf -
+      - tar -C $$Tesseract4Android$$ --exclude-vcs --exclude='*/leptonica/src/prog/fuzzing/*.zip'
+        -cf - LICENSE tesseract4android | tar -C native-inputs/ocr -xf -
+      - sed -i -e 's/27.2.12479018/28.2.13676358/' -e "s@//abiFilters .*@abiFilters
+        'arm64-v8a'@" native-inputs/ocr/tesseract4android/build.gradle
+      - export PUB_CACHE="$PWD/.pub-cache"
+      - $$flutter$$/bin/flutter pub get --enforce-lockfile
+      - rm -f "$PUB_CACHE"/hosted/pub.dev/analyzer-10.1.0/example/ddd06.exe "$PUB_CACHE"/hosted/pub.dev/archive-3.6.1/web/res/readme.zip
+      - rm -rf "$PUB_CACHE"/hosted/pub.dev/archive-3.6.1/test/tests/res
+      - rm -f "$PUB_CACHE"/hosted/pub.dev/{camera-0.12.2,camera_android_camerax-0.7.6+1,flutter_plugin_android_lifecycle-2.0.35,image_picker-1.2.4,image_picker_android-0.8.13+19,path_provider-2.1.6,path_provider_android-2.3.1,url_launcher-6.3.3,url_launcher_android-6.3.32}/example/android/build.gradle.kts
+      - sed -i '/^if(DARTCV_BUILD_OPENCV_FROM_SOURCE)$/a\  set(FETCHCONTENT_SOURCE_DIR_OPENCV
+        "${CMAKE_CURRENT_LIST_DIR}/../../../../../native-inputs/cv" CACHE PATH ""
+        FORCE)\n  set(KLEIDICV_SOURCE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../../../../native-inputs/kleidicv")\n  set(FETCHCONTENT_FULLY_DISCONNECTED
+        ON CACHE BOOL "" FORCE)' "$PUB_CACHE/hosted/pub.dev/dartcv4-2.2.2/src/CMakeLists.txt"
+    build:
+      - export PUB_CACHE="$PWD/.pub-cache"
+      - ORG_GRADLE_PROJECT_fdroidUnsigned=true $$flutter$$/bin/flutter build apk --no-pub
+        --release --split-per-abi --target-platform android-arm64
+    ndk: r28c
+
+MaintainerNotes: |
+  Pinned packaging-candidate commit based on v1.6.0, with unsigned mode,
+  native attribution and corrected store metadata. No release tag was changed.
+  Pinned srclibs and the patch build the standard OCR library without its JitPack AAR.
+  New Flutter/native revisions need review before enabling recipe updates.
+  Upstream chose F-Droid signing, not upstream-signed reproducible builds.
+
+AutoUpdateMode: None
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+VercodeOperation:
+  - '%c + 2000'
+UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
+CurrentVersion: 1.6.0
+CurrentVersionCode: 2011

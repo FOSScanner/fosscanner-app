@@ -778,12 +778,16 @@ void main() {
     expect(
       fastlane,
       matches(
-        RegExp(
-          r'after\s+sharing[^.]*choose[^.]*clear[^.]*keep[^.]*draft',
-          caseSensitive: false,
-        ),
+        RegExp(r'draft[^.]*stays[^.]*after\s+sharing', caseSensitive: false),
       ),
-      reason: 'Fastlane must disclose the post-share retention choice',
+      reason: 'Fastlane must disclose that sharing retains the draft',
+    );
+    expect(
+      fastlane,
+      matches(
+        RegExp(r'Clear all[^.]*confirm[^.]*remove', caseSensitive: false),
+      ),
+      reason: 'Fastlane must explain the explicit draft removal action',
     );
     expect(
       fastlane,
