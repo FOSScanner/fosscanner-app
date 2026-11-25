@@ -2,10 +2,12 @@
 
 ## Disposition
 
-**Keep #209 and publication acceptance open.** The source/binary scanner result
-is not sufficient evidence of complete attribution. Inspection of the successful
-local CI-image APK found a concrete gap in bundled barcode-library notices.
-No non-free dependency is established by this finding.
+The historical barcode notice defect described below is now **remediated in
+source and a rebuilt development APK**; see the [fix record](fdroid-attribution-fix.md).
+Keep final publication acceptance open for source-revision selection, inclusion
+review and signed-device checks. The source/binary scanner result alone was not
+sufficient evidence of complete attribution. No non-free dependency was
+established by this finding; the original APK remains unchanged.
 
 ## Inputs inspected
 

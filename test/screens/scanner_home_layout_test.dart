@@ -11,6 +11,7 @@ import 'package:fosscanner/services/image_metadata.dart' show maxDocumentPages;
 import 'package:fosscanner/screens/scanner_home_page.dart';
 import 'package:fosscanner/main.dart' show registerBundledLicenses;
 import '../support/layout_stability.dart';
+import '../support/worker_isolates.dart';
 
 class _Picker extends ImagePickerPlatform {
   Completer<List<XFile>>? selection;
@@ -222,7 +223,7 @@ void main() {
     }
   }
 
-  testWidgets('About exposes registered OCR licenses at 200% text', (
+  testWidgets('About exposes registered native licenses at 200% text', (
     tester,
   ) async {
     setViewport(tester, const Size(320, 568));
@@ -233,12 +234,29 @@ void main() {
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('View licenses'));
     await tester.tap(find.text('View licenses'));
-    await tester.pumpAndSettle();
+    // License decoding uses real compute isolates for the larger notice texts.
+    await pumpUntilFound(
+      tester,
+      find.descendant(
+        of: find.byType(LicensePage),
+        matching: find.byType(ListView),
+      ),
+    );
     expect(find.byType(LicensePage), findsOneWidget);
     for (final label in [
+      'AndroidX CameraX and libyuv',
+      'KleidiCV',
+      'OpenCV and native image dependencies',
       'Tesseract language data',
       'Tesseract4Android and native OCR dependencies',
+      'ZXing and Zint native barcode libraries',
     ]) {
+      // Flutter pins the first registered package ahead of alphabetical order.
+      tester
+          .state<ScrollableState>(find.byType(Scrollable).last)
+          .position
+          .jumpTo(0);
+      await tester.pump();
       await tester.scrollUntilVisible(
         find.text(label),
         200,

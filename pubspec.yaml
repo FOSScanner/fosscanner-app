@@ -39,6 +39,10 @@ hooks:
 flutter:
   uses-material-design: true
   assets:
+    - assets/licenses/BARCODE_NOTICES.txt
+    - assets/licenses/OPENCV_NOTICES.txt
+    - assets/licenses/KLEIDICV_NOTICES.txt
+    - assets/licenses/CAMERAX_NOTICES.txt
     - assets/icon/
     - assets/tessdata/Latin.traineddata
     - assets/tessdata/LICENSE
